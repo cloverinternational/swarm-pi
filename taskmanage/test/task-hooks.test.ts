@@ -39,6 +39,8 @@ describe("TaskManage hooks coordinator", () => {
     const restored = new TaskHooksCoordinator(m, p, { nudgeInterval: 2, nudgeToolThreshold: 1 });
     restored.on(event("session_start"), { sessionManager: { getEntries: () => entries } });
     expect(restored.auditSnapshot()).toEqual(h.auditSnapshot());
+    restored.on(event("turn_start"));
+    expect(restored.on(event("turn_end"))).toBeUndefined();
   });
 
   it("deduplicates Pi terminal events and rejects failed or partial batches", () => {
@@ -60,6 +62,25 @@ describe("TaskManage hooks coordinator", () => {
       subject: "token=jkl", headers: { Authorization: "Bearer mno" }
     }, result: {} }));
     expect(h.auditSnapshot()[0].summary).not.toMatch(/abc|def|ghi|jkl|mno/);
+  });
+
+  it("redacts camel-case and embedded access key/token command forms", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
+    m.execute({ operations: [{ key: "f", op: "create", subject: "work", status: "in_progress" }] });
+    h.on(event("tool_result", { toolName: "bash", input: {
+      command: `node -e "const accessToken='camel-secret'; const access_key=\"snake-secret\"; run --access-key kebab-secret --accessToken flag-secret"`,
+    }, result: {} }));
+    expect(h.auditSnapshot()[0].summary).not.toMatch(/camel-secret|snake-secret|kebab-secret|flag-secret/);
+  });
+
+  it("audits failed and partial TaskManage batches as failures from Pi-shaped results", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
+    const input = { operations: [{ key: "a", op: "list" as const }] };
+    for (const [toolCallId, status] of [["failed-1", "failed"], ["partial-1", "partial"]] as const) {
+      h.on(event("tool_result", { toolCallId, toolName: "TaskManage", input,
+        content: [{ type: "text", text: JSON.stringify({ status, results: [{ key: "a", status: status === "partial" ? "succeeded" : "failed" }] }) }] }));
+    }
+    expect(h.auditSnapshot().map(a => a.outcome)).toEqual(["failure", "failure"]);
   });
 
   it("exempts classifier aliases and resets maintenance when focus changes", () => {

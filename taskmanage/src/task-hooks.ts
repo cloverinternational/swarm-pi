@@ -17,7 +17,7 @@ export interface HookPi {
 interface HookState {
   turns: number; toolCalls: number; lastNudgeTurn: number; maintenanceAt: number;
   hadError: boolean; skillCalls: number; lastSkillReview: number; audit: AuditRecord[];
-  focusTaskId?: string; completedCalls: string[];
+  focusTaskId?: string; completedCalls: string[]; nudgeBudget: number;
 }
 export interface AuditRecord { tool: string; outcome: "success" | "failure"; summary: string; at: string }
 
@@ -28,7 +28,9 @@ const READ_TOOLS = new Set(["read", "readfile", "grep", "glob", "find", "ls", "l
 const INTERACTION_TOOLS = new Set(["askuserquestion", "question", "userquestion", "pushagentupdate", "annoyed"]);
 const RESEARCH_TOOLS = new Set(["websearch", "search", "webfetch", "web", "browser", "xsearch", "xaiwebsearch", "fetch"]);
 const IGNORED_AUDIT = new Set([...TASK_TOOLS, ...PLAN_TOOLS, ...SKILL_TOOLS, ...INTERACTION_TOOLS]);
-const secret = /token|password|secret|credential|api[_-]?key|private[_-]?key|access[_-]?key|authorization|cookie|passwd/i;
+// One vocabulary covers object keys and values embedded in commands.
+const secretName = String.raw`(?:token|password|passwd|secret|credential|authorization|cookie|api(?:[_-]?key)|private(?:[_-]?key)|access(?:[_-]?(?:key|token)))`;
+const secret = new RegExp(secretName, "i");
 const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 const toolName = (e: HookEvent) => e.toolName ?? e.tool_name ?? "";
 const input = (e: HookEvent) => e.input ?? e.params ?? {};
@@ -54,8 +56,9 @@ function stateFrom(entries: readonly unknown[]): HookState {
     maintenanceAt: d.maintenanceAt ?? 0, hadError: !!d.hadError, skillCalls: d.skillCalls ?? 0,
     lastSkillReview: d.lastSkillReview ?? 0, audit: Array.isArray(d.audit) ? d.audit.slice(-200) : [],
     focusTaskId: typeof d.focusTaskId === "string" ? d.focusTaskId : undefined,
-    completedCalls: Array.isArray(d.completedCalls) ? d.completedCalls.slice(-500) : [] } :
-    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [] };
+    completedCalls: Array.isArray(d.completedCalls) ? d.completedCalls.slice(-500) : [],
+    nudgeBudget: typeof d.nudgeBudget === "number" ? Math.max(0, d.nudgeBudget) : 1 } :
+    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [], nudgeBudget: 1 };
 }
 function summary(name: string, args: any): string {
   if (!args || typeof args !== "object") return name;
@@ -67,10 +70,11 @@ function summary(name: string, args: any): string {
   return `${name}${parts.length ? `: ${parts.join(" ")}` : ""}`.slice(0, 160);
 }
 function sanitize(value: string): string {
-  return value.replace(/(Bearer\s+|(?:token|password|secret|credential|private[_-]?key|api[_-]?key|authorization|cookie|passwd)\s*[=:]\s*)[^\s,'"]+/ig, "$1[REDACTED]")
-    .replace(/(--?(?:token|password|secret|credential|private[_-]?key|api[_-]?key|authorization|cookie|passwd)(?:[=\s]+))[^\s,'"]+/ig, "$1[REDACTED]")
-    .replace(/([?&](?:token|password|secret|credential|api[_-]?key|private[_-]?key|authorization|access_token)=)[^&#\s]+/ig, "$1[REDACTED]")
-    .replace(/(["']?(?:token|password|secret|credential|private[_-]?key|api[_-]?key|authorization|cookie|passwd)["']?\s*:\s*["']?)[^"',}\s]+/ig, "$1[REDACTED]")
+  const secretValue = `(?:"[^"]*"|'[^']*'|[^\\s,'"]+)`;
+  return value.replace(new RegExp(`(Bearer\\s+|${secretName}\\s*[=:]\\s*)${secretValue}`, "ig"), "$1[REDACTED]")
+    .replace(new RegExp(`(--?${secretName}(?:[=\\s]+))${secretValue}`, "ig"), "$1[REDACTED]")
+    .replace(new RegExp(`([?&]${secretName}=)[^&#\\s]+`, "ig"), "$1[REDACTED]")
+    .replace(new RegExp(`([\"']?${secretName}[\"']?\\s*:\\s*[\"']?)[^\"',}\\s]+`, "ig"), "$1[REDACTED]")
     .replace(/((?:https?:\/\/|file:\/\/)[^?\s]*\/)([^\/\s]*(?:token|secret|credential|private|password)[^\/\s]*)/ig, "$1[REDACTED]")
     .replace(/\r?\n/g, " ").slice(0, 80);
 }
@@ -92,7 +96,7 @@ export class TaskHooksCoordinator {
       nudgeToolThreshold: config.nudgeToolThreshold ?? 2, maintenanceToolThreshold: config.maintenanceToolThreshold ?? 8 };
     this.isSubagent = config.isSubagent;
     const owner = pi as object;
-    this.shared = sharedByPi.get(owner) ?? { lastNudgeTurn: 0, budget: 1 };
+    this.shared = sharedByPi.get(owner) ?? { lastNudgeTurn: 0, budget: this.state.nudgeBudget };
     sharedByPi.set(owner, this.shared);
   }
   private persist() { this.pi.appendEntry("pi-swarm-task-hooks", this.state); }
@@ -105,7 +109,7 @@ export class TaskHooksCoordinator {
   }
   private resultSucceeded(e: HookEvent) {
     const batch = this.batchResult(e);
-    return !!batch && batch.status === "succeeded";
+    return !failed(e) && !!batch && batch.status === "succeeded";
   }
   private batchResult(e: HookEvent): any {
     const candidates = [e.result, e.toolResult, e.tool_output, e.content, e.details];
@@ -124,17 +128,21 @@ export class TaskHooksCoordinator {
       }
       return undefined;
     };
-    return failed(e) ? undefined : candidates.map(find).find(Boolean);
+    return candidates.map(find).find(Boolean);
   }
   on(event: HookEvent, ctx: HookContext = {}): any {
     if (event.type === "session_start") {
       this.state = stateFrom(ctx.sessionManager?.getEntries?.() ?? []);
       if (ctx.sessionManager && typeof ctx.sessionManager === "object") {
         this.sessionOwner = ctx.sessionManager;
-        this.shared = sharedBySession.get(this.sessionOwner) ?? { lastNudgeTurn: this.state.lastNudgeTurn, budget: 1 };
+        const existing = sharedBySession.get(this.sessionOwner);
+        this.shared = existing ?? { lastNudgeTurn: this.state.lastNudgeTurn, budget: this.state.nudgeBudget };
+        // A journal read by a fresh coordinator is authoritative for consumed
+        // budget; never let an in-memory default restore an exhausted session.
+        this.shared.budget = Math.min(this.shared.budget, this.state.nudgeBudget);
         sharedBySession.set(this.sessionOwner, this.shared);
       } else {
-        this.shared = { lastNudgeTurn: this.state.lastNudgeTurn, budget: 1 };
+        this.shared = { lastNudgeTurn: this.state.lastNudgeTurn, budget: this.state.nudgeBudget };
       }
       this.prompt = ""; // never carry prompt/context across sessions
       return;
@@ -170,13 +178,16 @@ export class TaskHooksCoordinator {
   }
   private outcome(e: HookEvent, ctx: HookContext) {
     const name = toolName(e), n = normalize(name);
-    const isFailure = failed(e);
+    const batch = n === "taskmanage" ? this.batchResult(e) : undefined;
+    const isFailure = failed(e) || (!!batch && batch.status !== "succeeded");
     // Task/plan bookkeeping is not productive tool use for maintenance
     // cadence. Completion de-duplication is done before reaching this method.
     if (!TASK_TOOLS.has(n) && !PLAN_TOOLS.has(n)) this.state.toolCalls++;
     if (isFailure) this.state.hadError = true;
     if (n === "skill" || n === "skillmanage") { this.state.skillCalls++; this.state.lastSkillReview = this.state.toolCalls; }
-    if (!IGNORED_AUDIT.has(n)) {
+    // Keep routine bookkeeping out of the audit, but retain anomalous
+    // TaskManage terminal results so partial/failed Pi payloads are visible.
+    if (!IGNORED_AUDIT.has(n) || (n === "taskmanage" && isFailure)) {
       this.state.audit.push({ tool: name, outcome: isFailure ? "failure" : "success", summary: summary(name, input(e)), at: new Date().toISOString() });
       this.state.audit = this.state.audit.slice(-200);
     }
@@ -223,6 +234,7 @@ export class TaskHooksCoordinator {
       this.state.turns - this.shared.lastNudgeTurn >= this.config.nudgeInterval && this.shared.budget > 0 &&
       !/^(continue|keep going|go ahead|proceed|resume|run |just run |show |cat |ls |check |build |test )/i.test(this.prompt.trim())) {
       this.state.lastNudgeTurn = this.state.turns; this.shared.lastNudgeTurn = this.state.turns; this.shared.budget--;
+      this.state.nudgeBudget = this.shared.budget;
       this.persist(); return this.message("Multi-step work detected with no tasks; consider TaskManage.");
     }
     if (focus && this.state.toolCalls - this.state.maintenanceAt >= this.config.maintenanceToolThreshold) {
