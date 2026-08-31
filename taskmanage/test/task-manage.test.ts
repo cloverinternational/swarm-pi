@@ -81,4 +81,28 @@ describe("TaskManage", () => {
     expect(result.results.map(r=>r.status)).toEqual(["failed","skipped"]);
     expect(m.snapshot().tasks).toHaveLength(0);
   });
+  it("matches upstream key, lifecycle, deletion, metadata, inference, and DTO contracts", () => {
+    const m = new TaskManager();
+    const created = m.execute({operations:[{key:"build",op:"create",subject:"Investigate API",metadata:{keep:1,remove:2}}]});
+    expect(created.results[0].data).toEqual({task:{id:"1",subject:"Investigate API",status:"pending",active:false,parent_id:""}});
+    expect(m.execute({operations:[{key:"build",op:"update",status:"in_progress",metadata:{added:3,remove:null}}]}).status).toBe("succeeded");
+    expect(m.snapshot().tasks[0]).toMatchObject({category:"researching",active:true,metadata:{keep:1,added:3}});
+    expect(m.execute({operations:[{key:"build",op:"get"}]}).results[0].status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"list",op:"list"}]}).results[0].data).toMatchObject({
+      tasks:[{id:"1",subject:"Investigate API",category:"researching"}],
+      pagination:{total:1,offset:0,limit:50,more:false},
+    });
+    m.execute({operations:[{key:"child",op:"create",subject:"Child",parentTaskId:"1"}]});
+    const blocked = m.execute({operations:[{key:"build",op:"update",status:"deleted"}]});
+    expect(blocked.results[0].error?.code).toBe("validation_failed");
+    expect(m.snapshot().tasks).toHaveLength(2);
+    const atomic = m.execute({mode:"atomic",operations:[
+      {key:"child",op:"update",status:"deleted"},
+      {key:"fail",op:"get",taskId:"missing"},
+    ]});
+    expect(atomic.status).toBe("failed");
+    expect(m.snapshot().tasks).toHaveLength(2);
+    expect(m.execute({operations:[{key:"finish",op:"update",taskId:"2",status:"deleted"}]}).status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"gone",op:"get",taskId:{ref:"child"}}]}).results[0].error?.code).toBe("reference_failed");
+  });
 });

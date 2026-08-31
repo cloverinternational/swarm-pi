@@ -73,6 +73,18 @@ export class TaskManager {
     const id = local[ref.ref] ?? this.state.keys[ref.ref];
     return id ?? fail("reference_failed", `reference ${ref.ref} is not available`);
   }
+  private inferCategory(text: string): Category {
+    const value = text.toLowerCase();
+    const rules: [Category, string[]][] = [
+      ["planning", ["plan", "design", "architect", "strategy", "specification", "specify", "outline", "draft", "proposal", "tech spec", "write spec", "create spec"]],
+      ["researching", ["research", "explore", "investigate", "search", "find", "analyze", "read", "understand", "study", "review docs", "check docs", "examine", "discover"]],
+      ["debugging", ["debug", "troubleshoot", "trace error", "trace bug", "resolve error", "resolve issue", "investigate error", "fix bug", "fix error", "fix crash", "fix panic", "stack trace", "segfault", "deadlock"]],
+      ["verifying", ["test", "verify", "validate", "check", "confirm", "assert", "ensure", "prove", "inspect"]],
+      ["documenting", ["document", "write docs", "add docs", "update docs", "readme", "changelog", "comment", "comments", "documentation", "docstring", "javadoc", "godoc"]],
+    ];
+    for (const [category, words] of rules) if (words.some(word => value.includes(word))) return category;
+    return "acting";
+  }
   private validate(op: Operation, index: number): Failure | undefined {
     if (!isObj(op) || typeof op.key !== "string" || !op.key || !["create","update","get","list"].includes(op.op))
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
@@ -126,6 +138,10 @@ export class TaskManager {
       const operationBefore = this.snapshot(), localBefore = { ...local };
       const result = this.run(op, local);
       results.push(result);
+      if (result.status === "succeeded" && op.op !== "update" || (result.status === "succeeded" && op.status !== "deleted")) {
+        const produced = result.data as any;
+        if (produced?.task?.id) { this.state.keys[op.key] = produced.task.id; local[op.key] = produced.task.id; }
+      }
       if (result.status === "failed") {
         stopped = true;
         this.restore(params.mode === "atomic" ? before : operationBefore);
@@ -159,14 +175,14 @@ export class TaskManager {
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
-      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category, metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.active ?? op.status === "in_progress", dependsOn:[...new Set(deps as string[])], notes:[], audit:[{action:"created",at:now}], createdAt:now, updatedAt:now };
+      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.active ?? op.status === "in_progress", dependsOn:[...new Set(deps as string[])], notes:[], audit:[{action:"created",at:now}], createdAt:now, updatedAt:now };
       this.state.tasks.push(task); this.state.keys[op.key]=task.id; local[op.key]=task.id;
       for (const d of blocks as string[]) {
         const other = this.find(d)!;
         if (d === task.id || this.reaches(task.id, d) || this.reaches(d, task.id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","dependency would create a cycle")};
         if (!other.dependsOn.includes(task.id)) other.dependsOn.push(task.id);
       }
-      return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task)}};
+      return {key:op.key,op:op.op,status:"succeeded",data:{task:this.createAck(task)}};
     }
     if (op.op === "list") {
       const filtered = this.state.tasks.filter(t =>
@@ -174,11 +190,23 @@ export class TaskManager {
         (op.category === undefined || t.category === op.category) &&
         (op.status === undefined || t.status === op.status) &&
         (op.active === undefined || t.active === op.active));
-      const offset=op.offset??0, limit=op.limit??50; return {key:op.key,op:op.op,status:"succeeded",data:{tasks:filtered.slice(offset,offset+limit).map(t=>this.outputTask(t)),pagination:{total:filtered.length,offset,limit,more:offset+limit<filtered.length}}};
+      const offset=op.offset??0, limit=op.limit??50; return {key:op.key,op:op.op,status:"succeeded",data:{tasks:filtered.slice(offset,offset+limit).map(t=>this.summary(t)),pagination:{total:filtered.length,offset,limit,more:offset+limit<filtered.length}}};
     }
-    const id=target(op.taskId ?? op.key); if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
+    const id = op.taskId === undefined
+      ? (local[op.key] ?? this.state.keys[op.key] ?? fail("reference_failed", `operation key ${op.key} is not available`))
+      : target(op.taskId);
+    if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
     const task=this.find(id); if (!task) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${id} not found`)};
     if (op.op==="get") return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task, op.include_audit)}};
+    if (op.status === "deleted") {
+      if (this.state.tasks.some(t => t.parentTaskId === id))
+        return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot delete task ${id}: child task still exists`)};
+      if (this.state.tasks.some(t => t.id !== id && t.dependsOn.includes(id)))
+        return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot delete task ${id}: another task depends on it`)};
+      this.state.tasks = this.state.tasks.filter(t => t.id !== id);
+      for (const key of Object.keys(this.state.keys)) if (this.state.keys[key] === id) delete this.state.keys[key];
+      return {key:op.key,op:op.op,status:"succeeded",data:{}};
+    }
     const deps = [...task.dependsOn]; for (const r of op.addBlockedBy??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; if(!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)}; if(d===id || this.reaches(d,id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle",`dependency would create a cycle`)}; if(!deps.includes(d)) deps.push(d); }
     for (const r of op.addBlocks??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; const other=this.find(d); if(!other) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)}; if(d===id || this.reaches(id,d)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","dependency would create a cycle")}; if(!other.dependsOn.includes(id)) other.dependsOn.push(id); }
     if (op.parentTaskId !== undefined) {
@@ -187,13 +215,51 @@ export class TaskManager {
       if (!this.find(p)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`parent task ${p} not found`)};
       if (p === id || this.parentReaches(p, id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","parent would create a cycle")};
     }
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:op.metadata??task.metadata, owner_id:op.owner_id??task.owner_id, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
+    if (op.status === "in_progress") {
+      for (const dependency of deps) {
+        const dependencyTask = this.find(dependency);
+        if (dependencyTask?.status !== "completed")
+          return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot set task ${id} to in_progress: dependency ${dependency} is not completed`)};
+      }
+    }
+    if (op.status === "completed") {
+      const child = this.state.tasks.find(t => t.parentTaskId === id && t.status !== "completed");
+      if (child) return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot complete task ${id}: child task ${child.id} is not completed`)};
+    }
+    const mergedMetadata: Record<string, unknown> | undefined = op.metadata === undefined ? task.metadata : { ...(task.metadata ?? {}), ...clone(op.metadata) };
+    if (op.metadata) for (const [key, value] of Object.entries(op.metadata)) if (value === null) delete (mergedMetadata as Record<string, unknown>)[key];
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:mergedMetadata, owner_id:op.owner_id??task.owner_id, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
+    if (op.status === "in_progress") task.active = true;
     const updatedAt = new Date().toISOString();
     if(op.addNote) task.notes.push({text:op.addNote,type:op.noteType??"other",at:updatedAt});
     (task.audit ??= []).push({action:"updated",at:updatedAt});
     task.updatedAt = updatedAt;
-    return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task)}};
+    return {key:op.key,op:op.op,status:"succeeded",data:{task:this.updateAck(op, task)}};
   }
+  private createAck(task: Task): Record<string, unknown> {
+    return {id:task.id, subject:task.subject, status:task.status, active:task.active, parent_id:task.parentTaskId ?? ""};
+  }
+  private updateAck(op: Operation, task: Task): Record<string, unknown> {
+    const ack: Record<string, unknown> = {...this.createAck(task)};
+    if (op.description !== undefined) ack.description = task.description;
+    if (op.activeForm !== undefined) ack.active_form = task.activeForm;
+    if (op.category !== undefined) ack.category = task.category;
+    if (op.metadata !== undefined) ack.metadata = task.metadata;
+    if ((op.addBlocks?.length ?? 0) > 0) ack.blocks = this.blockedBy(task.id);
+    if ((op.addBlockedBy?.length ?? 0) > 0) ack.depends_on = [...task.dependsOn];
+    if (op.addNote) ack.note_added = true;
+    return ack;
+  }
+  private summary(task: Task): Record<string, unknown> {
+    const result: Record<string, unknown> = {...this.createAck(task)};
+    if (task.activeForm) result.active_form = task.activeForm;
+    if (task.category) result.category = task.category;
+    if (task.dependsOn.length) result.depends_on = [...task.dependsOn];
+    const blocks = this.blockedBy(task.id); if (blocks.length) result.blocks = blocks;
+    if (task.owner_id) result.owner_id = task.owner_id;
+    return result;
+  }
+  private blockedBy(id: string): string[] { return this.state.tasks.filter(t => t.dependsOn.includes(id)).map(t => t.id); }
   private outputTask(task: Task, includeAudit = false): Task {
     const result = clone(task);
     if (!includeAudit) delete result.audit;
