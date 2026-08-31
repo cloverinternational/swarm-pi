@@ -11,8 +11,8 @@ export interface TaskNote { text: string; type: NoteType; at: string }
 export interface Task {
   id: string; subject: string; description?: string; activeForm?: string; category?: Category;
   metadata?: Record<string, unknown>; parentTaskId?: string; owner_id?: string; status: Status;
-  active?: boolean; dependsOn: string[]; notes: TaskNote[]; createdAt: string; updatedAt: string;
-  audit?: AuditEvent[];
+  active?: boolean; dependsOn: string[]; notes: string[]; createdAt: string; updatedAt: string;
+  typed_notes?: TaskNote[]; audit_events?: AuditEvent[];
 }
 export interface Operation {
   key: string; op: "create" | "update" | "get" | "list"; taskId?: Ref; subject?: string;
@@ -90,7 +90,7 @@ export class TaskManager {
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
     const allowed: Record<Operation["op"], string[]> = {
       create: ["key","op","subject","description","activeForm","category","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy"],
-      update: ["key","op","taskId","subject","description","activeForm","category","metadata","owner_id","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
+      update: ["key","op","taskId","subject","description","activeForm","category","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
       get: ["key","op","taskId","include_audit"],
       list: ["key","op","subject","category","status","active","limit","offset"],
     };
@@ -107,6 +107,9 @@ export class TaskManager {
       }
     }
     if (op.op === "create" && (!op.subject || !op.subject.trim())) return fail("validation_failed", `operation ${op.key}: subject must not be blank`);
+    if (op.category !== undefined && !CATEGORIES.includes(op.category)) return fail("validation_failed", `operation ${op.key}: invalid category ${op.category}`);
+    if (op.status !== undefined && !["pending","in_progress","completed","deleted"].includes(op.status)) return fail("validation_failed", `operation ${op.key}: invalid status ${op.status}`);
+    if (op.noteType !== undefined && !NOTE_TYPES.includes(op.noteType)) return fail("validation_failed", `operation ${op.key}: invalid noteType ${op.noteType}`);
     if (op.limit !== undefined && (!Number.isInteger(op.limit) || op.limit < 1 || op.limit > 500)) return fail("validation_failed", `operation ${op.key}: limit must be 1..500`);
     if (op.offset !== undefined && (!Number.isInteger(op.offset) || op.offset < 0)) return fail("validation_failed", `operation ${op.key}: offset must be non-negative`);
     return undefined;
@@ -148,10 +151,13 @@ export class TaskManager {
         for (const key of Object.keys(local)) delete local[key];
         Object.assign(local, localBefore);
         if (params.mode === "atomic") this.restore(before);
+      } else if (result.status === "succeeded" && params.mode !== "atomic") {
+        // Sequential mode is a durable successful-prefix protocol: journal
+        // every operation, not merely the final batch state.
+        this.commit();
       }
     }
     if (params.mode === "atomic" && !stopped) this.commit();
-    else if (params.mode !== "atomic" && results.some(r => r.status === "succeeded")) this.commit();
     if (params.mode === "atomic" && stopped) {
       const failedIndex = results.findIndex(r => r.status === "failed");
       for (let i = 0; i < failedIndex; i++) {
@@ -175,8 +181,9 @@ export class TaskManager {
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
-      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.active ?? op.status === "in_progress", dependsOn:[...new Set(deps as string[])], notes:[], audit:[{action:"created",at:now}], createdAt:now, updatedAt:now };
+      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress", dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
       this.state.tasks.push(task); this.state.keys[op.key]=task.id; local[op.key]=task.id;
+      if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
         const other = this.find(d)!;
         if (d === task.id || this.reaches(task.id, d) || this.reaches(d, task.id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","dependency would create a cycle")};
@@ -205,6 +212,7 @@ export class TaskManager {
         return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot delete task ${id}: another task depends on it`)};
       this.state.tasks = this.state.tasks.filter(t => t.id !== id);
       for (const key of Object.keys(this.state.keys)) if (this.state.keys[key] === id) delete this.state.keys[key];
+      for (const key of Object.keys(local)) if (local[key] === id) delete local[key];
       return {key:op.key,op:op.op,status:"succeeded",data:{}};
     }
     const deps = [...task.dependsOn]; for (const r of op.addBlockedBy??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; if(!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)}; if(d===id || this.reaches(d,id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle",`dependency would create a cycle`)}; if(!deps.includes(d)) deps.push(d); }
@@ -228,11 +236,20 @@ export class TaskManager {
     }
     const mergedMetadata: Record<string, unknown> | undefined = op.metadata === undefined ? task.metadata : { ...(task.metadata ?? {}), ...clone(op.metadata) };
     if (op.metadata) for (const [key, value] of Object.entries(op.metadata)) if (value === null) delete (mergedMetadata as Record<string, unknown>)[key];
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:mergedMetadata, owner_id:op.owner_id??task.owner_id, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
-    if (op.status === "in_progress") task.active = true;
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
+    if (op.status === "in_progress") {
+      for (const other of this.state.tasks) other.active = other.id === id;
+    } else if (op.status !== undefined) {
+      task.active = false;
+    } else if (op.active === true) {
+      for (const other of this.state.tasks) other.active = other.id === id;
+    }
     const updatedAt = new Date().toISOString();
-    if(op.addNote) task.notes.push({text:op.addNote,type:op.noteType??"other",at:updatedAt});
-    (task.audit ??= []).push({action:"updated",at:updatedAt});
+    if(op.addNote) {
+      task.notes.push(op.addNote);
+      if (op.noteType !== undefined) (task.typed_notes ??= []).push({text:op.addNote,type:op.noteType,at:updatedAt});
+    }
+    (task.audit_events ??= []).push({action:"updated",at:updatedAt});
     task.updatedAt = updatedAt;
     return {key:op.key,op:op.op,status:"succeeded",data:{task:this.updateAck(op, task)}};
   }
@@ -260,9 +277,29 @@ export class TaskManager {
     return result;
   }
   private blockedBy(id: string): string[] { return this.state.tasks.filter(t => t.dependsOn.includes(id)).map(t => t.id); }
-  private outputTask(task: Task, includeAudit = false): Task {
-    const result = clone(task);
-    if (!includeAudit) delete result.audit;
+  private outputTask(task: Task, includeAudit = false): Record<string, unknown> {
+    const result: Record<string, unknown> = {
+      id: task.id, content: task.subject, status: task.status,
+      priority: "medium",
+      ...(task.active ? {active: true} : {}),
+      ...(task.description !== undefined ? {description: task.description} : {}),
+      ...(task.activeForm !== undefined ? {active_form: task.activeForm} : {}),
+      ...(task.metadata !== undefined ? {metadata: clone(task.metadata)} : {}),
+      ...(task.category !== undefined ? {category: task.category} : {}),
+      ...(task.dependsOn.length ? {depends_on: [...task.dependsOn]} : {}),
+      ...(task.owner_id !== undefined ? {owner_id: task.owner_id} : {}),
+      ...(task.parentTaskId !== undefined ? {parent_id: task.parentTaskId} : {}),
+      ...(task.notes.length ? {notes: [...task.notes]} : {}),
+      created_at: task.createdAt, updated_at: task.updatedAt,
+    };
+    if (includeAudit) {
+      if (task.audit_events) result.audit_events = task.audit_events.map(event => ({
+        type: event.action, timestamp: event.at,
+      }));
+      if (task.typed_notes) result.typed_notes = task.typed_notes.map(note => ({
+        type: note.type, content: note.text, created_at: note.at,
+      }));
+    }
     return result;
   }
   private reaches(from:string, to:string, visited=new Set<string>()):boolean { if(visited.has(from)) return false; visited.add(from); const t=this.find(from); return !!t && (t.dependsOn.includes(to)||t.dependsOn.some(d=>this.reaches(d,to,visited))); }

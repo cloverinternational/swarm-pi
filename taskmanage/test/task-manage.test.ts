@@ -70,8 +70,49 @@ describe("TaskManage", () => {
     m.execute({operations:[create("a")]});
     const normal = m.execute({operations:[{key:"g",op:"get",taskId:"1"}]});
     const audited = m.execute({operations:[{key:"ga",op:"get",taskId:"1",include_audit:true}]});
-    expect((normal.results[0].data as any).task.audit).toBeUndefined();
-    expect((audited.results[0].data as any).task.audit).toHaveLength(1);
+    expect((normal.results[0].data as any).task.audit_events).toBeUndefined();
+    expect((normal.results[0].data as any).task.typed_notes).toBeUndefined();
+    expect((audited.results[0].data as any).task.audit_events).toHaveLength(1);
+  });
+  it("makes in_progress the sole focus and clears active for every other status", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("a"), create("b")]});
+    m.execute({operations:[{key:"a",op:"update",status:"in_progress"}]});
+    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([true, false]);
+    m.execute({operations:[{key:"b",op:"update",status:"in_progress"}]});
+    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, true]);
+    m.execute({operations:[{key:"b",op:"update",status:"completed"}]});
+    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, false]);
+  });
+  it("keeps plain notes, typed notes, and audit history separate", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("a")]});
+    m.execute({operations:[{key:"a",op:"update",addNote:"plain"}]});
+    m.execute({operations:[{key:"a",op:"update",addNote:"typed",noteType:"decision"}]});
+    const task = m.snapshot().tasks[0];
+    expect(task.notes).toEqual(["plain", "typed"]);
+    expect(task.typed_notes).toHaveLength(1);
+    const output = m.execute({operations:[{key:"g",op:"get",taskId:"1",include_audit:true}]});
+    expect((output.results[0].data as any).task).toMatchObject({
+      content:"a", notes:["plain","typed"], typed_notes:[{content:"typed",type:"decision"}],
+    });
+    expect((output.results[0].data as any).task.audit_events).toHaveLength(3);
+  });
+  it("enforces the upstream update allowlist and removes deleted refs locally", () => {
+    const m = new TaskManager();
+    expect(m.execute({operations:[{key:"x",op:"update",taskId:"1",owner_id:"nope"} as any]}).results[0].error?.code).toBe("validation_failed");
+    const result = m.execute({operations:[
+      create("a"), {key:"gone",op:"update",taskId:{ref:"a"},status:"deleted"},
+      {key:"after",op:"get",taskId:{ref:"a"}},
+    ]});
+    expect(result.results[2].error?.code).toBe("reference_failed");
+  });
+  it("journals each successful sequential operation", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a"), create("b"), {key:"bad",op:"get",taskId:"missing"}]});
+    expect(entries).toHaveLength(2);
+    expect(entries.map(e => e.data.tasks.map(t=>t.subject))).toEqual([["a"],["a","b"]]);
   });
   it("stops and skips after cancellation", () => {
     const controller = new AbortController();
