@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import extension, { registerTaskManageExtension } from "../../.pi/extensions/taskmanage.ts";
+import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
 import { taskManageSchema } from "../src/index.js";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -67,5 +68,30 @@ describe("root Pi TaskManage extension", () => {
     expect(payload.status).toBe("succeeded");
     expect(payload.results[0].data.tasks).toHaveLength(1);
     expect(payload.results[0].data.tasks[0].subject).toBe("Build adapter");
+  });
+
+  it("handles Pi lifecycle payloads whose event name is not in the payload", () => {
+    const runtime = fakePi();
+    registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
+    const toolCall = runtime.handlers.get("tool_call")![0];
+
+    expect(toolCall({ toolName: "write", input: {} }, {})).toMatchObject({
+      block: true,
+    });
+  });
+
+  it("injects the canonical Forge prompt once and preserves Pi's base prompt", () => {
+    const runtime = fakePi();
+    promptExtension(runtime.pi as any);
+    const handler = runtime.handlers.get("before_agent_start")![0];
+    const result = handler({
+      systemPrompt: "Pi's existing system instructions",
+      systemPromptOptions: { cwd: "/workspace/project" },
+    }, {});
+
+    expect(result.systemPrompt).toContain("Pi's existing system instructions");
+    expect(result.systemPrompt).toContain("You are an expert software engineering assistant");
+    expect(result.systemPrompt).toContain("Current working directory: /workspace/project");
+    expect(handler({ systemPrompt: result.systemPrompt }, {})).toBeUndefined();
   });
 });

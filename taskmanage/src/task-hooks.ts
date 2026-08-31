@@ -314,6 +314,10 @@ export class TaskHooksCoordinator {
 export function registerTaskHooks(pi: HookPi, manager: TaskManager, config?: HookConfig): TaskHooksCoordinator {
   const coordinator = new TaskHooksCoordinator(manager, pi, config);
   for (const event of ["session_start", "shutdown", "session_shutdown", "input", "before_agent_start", "turn_start", "tool_call", "tool_execution_update", "tool_result", "tool_execution_end", "turn_end"])
-    pi.on(event, (e, ctx) => coordinator.on(e, ctx));
+    // Pi passes the event name to `on`, but its payload's `type` field is not
+    // part of the runtime contract for every lifecycle event. Normalize it at
+    // the adapter boundary so the coordinator also works with Pi's live
+    // payloads, not only with unit-test fixtures that add `type` manually.
+    pi.on(event, (e, ctx) => coordinator.on({ ...e, type: event }, ctx));
   return coordinator;
 }
