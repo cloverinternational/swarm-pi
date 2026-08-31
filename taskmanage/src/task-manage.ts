@@ -151,13 +151,14 @@ export class TaskManager {
         for (const key of Object.keys(local)) delete local[key];
         Object.assign(local, localBefore);
         if (params.mode === "atomic") this.restore(before);
-      } else if (result.status === "succeeded" && params.mode !== "atomic") {
-        // Sequential mode is a durable successful-prefix protocol: journal
-        // every operation, not merely the final batch state.
+      } else if (result.status === "succeeded" && params.mode !== "atomic" &&
+        (op.op === "create" || op.op === "update")) {
+        // Journal successful mutations only. Reads do not change durable state.
         this.commit();
       }
     }
-    if (params.mode === "atomic" && !stopped) this.commit();
+    if (params.mode === "atomic" && !stopped &&
+      ops.some((op, i) => (op.op === "create" || op.op === "update") && results[i]?.status === "succeeded")) this.commit();
     if (params.mode === "atomic" && stopped) {
       const failedIndex = results.findIndex(r => r.status === "failed");
       for (let i = 0; i < failedIndex; i++) {
@@ -172,6 +173,10 @@ export class TaskManager {
   private run(op: Operation, local: Record<string,string>): Result {
     const target = (r?: Ref) => this.resolve(r, local);
     if (op.op === "create") {
+      // Upstream permits active on create, but TodoItem validation requires
+      // an active task to be in progress. Creation then transfers sole focus.
+      if (op.active === true && op.status !== "in_progress")
+        return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot create task ${op.subject}: active task must be in_progress`)};
       const parent = op.parentTaskId === undefined ? undefined : target(op.parentTaskId); if (typeof parent !== "string" && op.parentTaskId) return { key:op.key,op:op.op,status:"failed",error:parent };
       const parentId = typeof parent === "string" ? parent : undefined;
       if (parentId && !this.find(parentId)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${parentId} not found`)};
@@ -181,7 +186,7 @@ export class TaskManager {
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
-      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress", dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
+      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
       this.state.tasks.push(task); this.state.keys[op.key]=task.id; local[op.key]=task.id;
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {

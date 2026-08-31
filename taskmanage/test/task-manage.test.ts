@@ -114,6 +114,35 @@ describe("TaskManage", () => {
     expect(entries).toHaveLength(2);
     expect(entries.map(e => e.data.tasks.map(t=>t.subject))).toEqual([["a"],["a","b"]]);
   });
+  it("journals sequential deletion so it stays deleted after rehydration", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a"), {key:"gone",op:"update",taskId:{ref:"a"},status:"deleted"}]});
+    expect(entries).toHaveLength(2);
+    const restored = new TaskManager();
+    restored.rehydrate(entries);
+    expect(restored.snapshot().tasks).toEqual([]);
+  });
+  it("does not journal successful read operations", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a")]});
+    expect(m.execute({operations:[{key:"g",op:"get",taskId:"1"}, {key:"l",op:"list"}]}).status).toBe("succeeded");
+    expect(entries).toHaveLength(1);
+    m.execute({mode:"atomic",operations:[{key:"g2",op:"get",taskId:"1"}]});
+    expect(entries).toHaveLength(1);
+  });
+  it("honors create active and matches upstream create deleted behavior", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("first")]});
+    const active = m.execute({operations:[{key:"active",op:"create",subject:"Active",status:"in_progress",active:true}]});
+    expect(active.status).toBe("succeeded");
+    expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, true]);
+    expect(m.execute({operations:[{key:"bad",op:"create",subject:"Bad",active:true}]}).results[0].error?.code).toBe("validation_failed");
+    const deleted = m.execute({operations:[{key:"deleted",op:"create",subject:"Not deleted",status:"deleted"}]});
+    expect(deleted.status).toBe("succeeded");
+    expect(m.snapshot().tasks.at(-1)).toMatchObject({subject:"Not deleted",status:"pending",active:false});
+  });
   it("stops and skips after cancellation", () => {
     const controller = new AbortController();
     controller.abort();
