@@ -50,6 +50,33 @@ describe("TaskManage", () => {
     expect(m.execute({operations:[{key:"child",op:"create",subject:"child",parentTaskId:"1"}]}).status).toBe("succeeded");
     expect(m.execute({operations:[{key:"bad-parent",op:"update",taskId:"1",parentTaskId:"2"}]}).results[0].error?.code).toBe("cycle");
   });
+  it("rejects incomplete dependencies before creating an in-progress task", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("dependency")]});
+    const result = m.execute({operations:[{
+      key:"blocked",op:"create",subject:"Blocked",status:"in_progress",addBlockedBy:["1"],
+    }]});
+    expect(result.results[0].error?.code).toBe("validation_failed");
+    expect(m.snapshot().tasks).toHaveLength(1);
+    expect(m.snapshot().nextId).toBe(2);
+  });
+  it("validates dependencies against an update's resulting in-progress state", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("dependency"),create("target")]});
+    expect(m.execute({operations:[{key:"start",op:"update",taskId:"2",status:"in_progress"}]}).status).toBe("succeeded");
+
+    const omittedStatus = m.execute({operations:[{
+      key:"blocked",op:"update",taskId:"2",addBlockedBy:["1"],
+    }]});
+    expect(omittedStatus.results[0].error?.code).toBe("validation_failed");
+    expect(m.snapshot().tasks.find(task => task.id === "2")?.dependsOn).toEqual([]);
+
+    const explicitStatus = m.execute({operations:[{
+      key:"pending-target",op:"update",taskId:"1",status:"in_progress",addBlockedBy:["2"],
+    }]});
+    expect(explicitStatus.results[0].error?.code).toBe("validation_failed");
+    expect(m.snapshot().tasks.find(task => task.id === "1")?.status).toBe("pending");
+  });
   it("rehydrates the latest state across multiple persisted entries and registers Pi shape", () => {
     const entries: JournalEntry[] = [];
     const m = new TaskManager(e => entries.push(e));

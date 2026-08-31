@@ -210,7 +210,12 @@ export class TaskManager {
       if (parentId && !this.find(parentId)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${parentId} not found`)};
       const deps = [...(op.addBlockedBy ?? [])].map(target);
       if (deps.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:deps.find(x=>typeof x!=="string") as Failure};
-      for (const d of deps as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)};
+      for (const d of deps as string[]) {
+        const dependency = this.find(d);
+        if (!dependency) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)};
+        if (op.status === "in_progress" && dependency.status !== "completed")
+          return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot create task ${op.subject}: dependency ${d} is not completed`)};
+      }
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
@@ -251,19 +256,20 @@ export class TaskManager {
       return {key:op.key,op:op.op,status:"succeeded",data:{}};
     }
     const deps = [...task.dependsOn]; for (const r of op.addBlockedBy??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; if(!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`dependency task ${d} not found`)}; if(d===id || this.reaches(d,id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle",`dependency would create a cycle`)}; if(!deps.includes(d)) deps.push(d); }
+    const resultingStatus = op.status ?? task.status;
+    if (resultingStatus === "in_progress") {
+      for (const dependency of deps) {
+        const dependencyTask = this.find(dependency);
+        if (dependencyTask?.status !== "completed")
+          return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot set task ${id} to in_progress: dependency ${dependency} is not completed`)};
+      }
+    }
     for (const r of op.addBlocks??[]) { const d=target(r); if(typeof d!=="string") return {key:op.key,op:op.op,status:"failed",error:d}; const other=this.find(d); if(!other) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)}; if(d===id || this.reaches(id,d)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","dependency would create a cycle")}; if(!other.dependsOn.includes(id)) other.dependsOn.push(id); }
     if (op.parentTaskId !== undefined) {
       const p = target(op.parentTaskId);
       if (typeof p !== "string") return {key:op.key,op:op.op,status:"failed",error:p};
       if (!this.find(p)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`parent task ${p} not found`)};
       if (p === id || this.parentReaches(p, id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","parent would create a cycle")};
-    }
-    if (op.status === "in_progress") {
-      for (const dependency of deps) {
-        const dependencyTask = this.find(dependency);
-        if (dependencyTask?.status !== "completed")
-          return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot set task ${id} to in_progress: dependency ${dependency} is not completed`)};
-      }
     }
     if (op.status === "completed") {
       const child = this.state.tasks.find(t => t.parentTaskId === id && t.status !== "completed");
