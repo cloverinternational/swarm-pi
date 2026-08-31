@@ -169,7 +169,8 @@ export class TaskManager {
       const operationBefore = this.snapshot(), localBefore = { ...local };
       const result = this.run(op, local);
       results.push(result);
-      if (result.status === "succeeded" && op.op !== "update" || (result.status === "succeeded" && op.status !== "deleted")) {
+      if (result.status === "succeeded" &&
+        (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
         const produced = result.data as any;
         if (produced?.task?.id) { this.state.keys[op.key] = produced.task.id; local[op.key] = produced.task.id; }
       }
@@ -220,7 +221,7 @@ export class TaskManager {
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
       const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
-      this.state.tasks.push(task); this.state.keys[op.key]=task.id; local[op.key]=task.id;
+      this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
         const other = this.find(d)!;

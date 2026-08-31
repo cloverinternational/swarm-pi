@@ -190,6 +190,21 @@ describe("TaskManage", () => {
     m.execute({mode:"atomic",operations:[{key:"g2",op:"get",taskId:"1"}]});
     expect(entries).toHaveLength(1);
   });
+  it("does not publish get keys across later mutation or rehydration", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a")]});
+
+    expect(m.execute({operations:[{key:"readAlias",op:"get",taskId:"1"}]}).status).toBe("succeeded");
+    expect(m.snapshot().keys).not.toHaveProperty("readAlias");
+
+    m.execute({operations:[{key:"mutate",op:"update",taskId:"1",subject:"changed"}]});
+    const restored = new TaskManager();
+    restored.rehydrate(entries);
+    expect(restored.snapshot().keys).not.toHaveProperty("readAlias");
+    expect(restored.execute({operations:[{key:"useReadAlias",op:"get",taskId:{ref:"readAlias"}}]}).results[0].error?.code)
+      .toBe("reference_failed");
+  });
   it("honors create active and matches upstream create deleted behavior", () => {
     const m = new TaskManager();
     m.execute({operations:[create("first")]});
