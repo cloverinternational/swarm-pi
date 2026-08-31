@@ -55,6 +55,77 @@ export const taskManageSchema = {
   }
 } as const;
 
+type RenderTheme = {
+  fg?: (color: string, text: string) => string;
+  bold?: (text: string) => string;
+  dim?: (text: string) => string;
+};
+type RenderContext = { isError?: boolean; isPartial?: boolean; expanded?: boolean };
+type RenderComponent = { render(width: number): string[] };
+
+const style = (theme: RenderTheme, color: string, value: string) =>
+  theme.fg ? theme.fg(color, value) : value;
+const bold = (theme: RenderTheme, value: string) => theme.bold ? theme.bold(value) : value;
+const dim = (theme: RenderTheme, value: string) => theme.dim ? theme.dim(value) : value;
+const fit = (value: string, width: number) => {
+  const max = Math.max(12, width - 6);
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+};
+const component = (lines: string[]): RenderComponent => ({
+  render: (width: number) => lines.map(line => fit(line, width)),
+});
+
+function operationLabel(operation: Operation): string {
+  const verb = operation.op === "create" ? "Create" :
+    operation.op === "update" ? "Update" :
+    operation.op === "get" ? "Inspect" : "List";
+  const subject = operation.subject ?? (typeof operation.taskId === "string" ? `#${operation.taskId}` : "");
+  return subject ? `${verb} ${subject}` : verb;
+}
+
+export const taskManageRenderers = {
+  renderCall(args: Params, theme: RenderTheme): RenderComponent {
+    const operations = Array.isArray(args?.operations) ? args.operations : [];
+    const mode = args?.mode === "atomic" ? "atomic · rollback on failure" : "sequential · commit successful prefix";
+    const preview = operations.slice(0, 3).map(operation => `  · ${operationLabel(operation)}`);
+    if (operations.length > 3) preview.push(`  · +${operations.length - 3} more`);
+    return component([
+      `${bold(theme, "▸ TaskManage")}  ${dim(theme, mode)}`,
+      ...preview,
+    ]);
+  },
+
+  renderResult(result: any, options: RenderContext, theme: RenderTheme): RenderComponent {
+    let batch: Batch | undefined;
+    const text = result?.content?.find((item: any) => item?.type === "text")?.text;
+    try { batch = typeof text === "string" ? JSON.parse(text) : undefined; } catch { /* use fallback */ }
+    if (!batch || !Array.isArray(batch.results)) {
+      return component([`${style(theme, "error", "✗ TaskManage")}  ${dim(theme, "Unable to read result")}`]);
+    }
+
+    const succeeded = batch.results.filter(item => item.status === "succeeded").length;
+    const failed = batch.results.filter(item => item.status === "failed").length;
+    const skipped = batch.results.filter(item => item.status === "skipped").length;
+    const isFailure = options.isError || batch.status === "failed";
+    const statusColor = isFailure ? "error" : batch.status === "partial" ? "warning" : "success";
+    const icon = isFailure ? "✗" : batch.status === "partial" ? "!" : "✓";
+    const lines = [
+      `${style(theme, statusColor, `${icon} TaskManage`)}  ${bold(theme, batch.status.toUpperCase())}  ${dim(theme, `${succeeded} succeeded · ${failed} failed · ${skipped} skipped`)}`,
+    ];
+    for (const item of batch.results.slice(0, options.expanded ? 50 : 6)) {
+      const itemIcon = item.status === "succeeded" ? "✓" : item.status === "failed" ? "✗" : "·";
+      const data = item.data as { task?: { subject?: string }; tasks?: unknown[] } | undefined;
+      const task = data?.task;
+      const taskCount = Array.isArray(data?.tasks) ? `${data.tasks.length} task(s)` : undefined;
+      const detail = item.error?.message ?? task?.subject ?? taskCount ?? (item.op === "list" ? "tasks updated" : item.op);
+      lines.push(`  ${style(theme, item.status === "failed" ? "error" : "muted", itemIcon)} ${item.key}  ${dim(theme, detail)}`);
+    }
+    if (batch.results.length > 6 && !options.expanded)
+      lines.push(`  ${dim(theme, `+${batch.results.length - 6} more · expand to inspect`)}`);
+    return component(lines);
+  },
+};
+
 export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
   constructor(private readonly persist?: (entry: JournalEntry) => void) {}
@@ -354,10 +425,14 @@ export class TaskManager {
   }
 }
 
-export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]}})=>void): void }): TaskManager {
+export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]}})=>void): void }, presentation = taskManageRenderers): TaskManager {
   const manager = new TaskManager(entry => pi.appendEntry(entry.type, entry.data));
   pi.on("session_start", (_event, ctx) => manager.rehydrate((ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]));
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
+    promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
+    promptGuidelines: ["Use TaskManage for multi-step work and keep exactly one active task when working sequentially."],
+    renderCall: presentation.renderCall,
+    renderResult: presentation.renderResult,
     execute: async (_id:string, params:Params, signal?:AbortSignal) => ({ content:[{type:"text",text:JSON.stringify(manager.execute(params,signal))}] }) });
   return manager;
 }

@@ -34,6 +34,9 @@ describe("root Pi TaskManage extension", () => {
     expect(runtime.tools[0]).toMatchObject({
       name: "TaskManage",
       parameters: taskManageSchema,
+      promptSnippet: expect.any(String),
+      renderCall: expect.any(Function),
+      renderResult: expect.any(Function),
     });
     expect(runtime.handlers.get("session_start")).toHaveLength(2);
     expect(runtime.handlers.get("tool_call")).toHaveLength(1);
@@ -93,5 +96,24 @@ describe("root Pi TaskManage extension", () => {
     expect(result.systemPrompt).toContain("You are an expert software engineering assistant");
     expect(result.systemPrompt).toContain("Current working directory: /workspace/project");
     expect(handler({ systemPrompt: result.systemPrompt }, {})).toBeUndefined();
+  });
+
+  it("renders task calls and results as compact readable status panels", async () => {
+    const runtime = fakePi();
+    extension(runtime.pi);
+    const tool = runtime.tools[0];
+    const call = tool.renderCall({
+      mode: "atomic",
+      operations: [{ key: "plan", op: "create", subject: "Design the renderer" }],
+    }, {}, {});
+    expect(call.render(80).join("\n")).toContain("TaskManage");
+    expect(call.render(80).join("\n")).toContain("Design the renderer");
+
+    const result = await tool.execute("call-3", {
+      operations: [{ key: "plan", op: "create", subject: "Design the renderer" }],
+    });
+    const panel = tool.renderResult(result, { isError: false, expanded: false }, {});
+    expect(panel.render(100).join("\n")).toContain("SUCCEEDED");
+    expect(panel.render(100).join("\n")).toContain("plan");
   });
 });
