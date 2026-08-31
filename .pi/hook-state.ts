@@ -7,10 +7,22 @@ const KEY = Symbol.for("pi-swarm-hook-state");
 type Shared = { state: State; pi?: any };
 const root = globalThis as typeof globalThis & { [KEY]?: Shared };
 const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
+// Pi /reload can retain Symbol.for state from an older extension module. Normalize
+// it before any handler registration so upgrades never fail on missing fields.
+function normalizeState() {
+  if (!shared.state || typeof shared.state !== "object") shared.state = { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } };
+  const state = shared.state as Partial<State>;
+  state.enabled = state.enabled && typeof state.enabled === "object" ? state.enabled : {};
+  state.visible = typeof state.visible === "boolean" ? state.visible : true;
+  state.recent = Array.isArray(state.recent) ? state.recent.slice(-200) : [];
+  state.counts = { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0, ...(state.counts ?? {}) };
+  shared.state = state as State;
+}
+normalizeState();
 
-export function hookState() { return shared.state; }
+export function hookState() { normalizeState(); return shared.state; }
 export function setHookPi(pi: any) { shared.pi = pi; }
-export function isHookEnabled(group: string) { return shared.state.enabled[group] !== false; }
+export function isHookEnabled(group: string) { normalizeState(); return shared.state.enabled[group] !== false; }
 export function toggleHook(group: string, enabled?: boolean) { shared.state.enabled[group] = enabled ?? !isHookEnabled(group); return isHookEnabled(group); }
 export function setHookVisibility(visible?: boolean) { shared.state.visible = visible ?? !shared.state.visible; return shared.state.visible; }
 const terminalByCall = new Set<string>();
@@ -31,6 +43,7 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
 (globalThis as any).__piSwarmRegisterHook = registerHook;
 
 export function registerHook(pi: any, group: HookGroup, event: string, handler: any) {
+  normalizeState();
   shared.state.counts.registered++;
   pi.on(event, async (payload: any, ctx: any) => {
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
