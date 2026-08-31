@@ -102,11 +102,24 @@ export class TaskManager {
     }
     for (const field of ["addBlocks", "addBlockedBy"] as const) {
       const refs = (op as Record<string, unknown>)[field];
-      if (refs !== undefined && (!Array.isArray(refs) || refs.some(ref => this.validateRef(ref, field)))) {
+      if (refs !== undefined && (!Array.isArray(refs) || refs.some(ref => ref === undefined || this.validateRef(ref, field)))) {
         return fail("validation_failed", `operation ${op.key}: ${field} must contain only task IDs or {ref, field:"taskId"} references`);
       }
     }
+    const stringFields = ["subject", "description", "activeForm", "owner_id", "addNote", "noteType", "category", "status"] as const;
+    for (const field of stringFields) {
+      if ((op as Record<string, unknown>)[field] !== undefined && typeof (op as Record<string, unknown>)[field] !== "string")
+        return fail("validation_failed", `operation ${op.key}: ${field} must be a string`);
+    }
+    if (op.metadata !== undefined && (!isObj(op.metadata) || !this.isJSONValue(op.metadata)))
+      return fail("validation_failed", `operation ${op.key}: metadata must be a JSON-compatible object`);
+    for (const field of ["active", "include_audit"] as const) {
+      if ((op as Record<string, unknown>)[field] !== undefined && typeof (op as Record<string, unknown>)[field] !== "boolean")
+        return fail("validation_failed", `operation ${op.key}: ${field} must be a boolean`);
+    }
     if (op.op === "create" && (!op.subject || !op.subject.trim())) return fail("validation_failed", `operation ${op.key}: subject must not be blank`);
+    if (op.active === true && (op.op === "create" || op.status !== undefined) && op.status !== "in_progress")
+      return fail("validation_failed", `operation ${op.key}: active task must be in_progress`);
     if (op.category !== undefined && !CATEGORIES.includes(op.category)) return fail("validation_failed", `operation ${op.key}: invalid category ${op.category}`);
     if (op.status !== undefined && !["pending","in_progress","completed","deleted"].includes(op.status)) return fail("validation_failed", `operation ${op.key}: invalid status ${op.status}`);
     if (op.noteType !== undefined && !NOTE_TYPES.includes(op.noteType)) return fail("validation_failed", `operation ${op.key}: invalid noteType ${op.noteType}`);
@@ -114,8 +127,23 @@ export class TaskManager {
     if (op.offset !== undefined && (!Number.isInteger(op.offset) || op.offset < 0)) return fail("validation_failed", `operation ${op.key}: offset must be non-negative`);
     return undefined;
   }
+  private isJSONValue(value: unknown, seen = new Set<unknown>()): boolean {
+    if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+    if (typeof value === "number") return Number.isFinite(value);
+    if (typeof value !== "object" || seen.has(value)) return false;
+    seen.add(value);
+    const valid = Array.isArray(value)
+      ? value.every(item => this.isJSONValue(item, seen))
+      : isObj(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) &&
+        Object.values(value).every(item => this.isJSONValue(item, seen));
+    seen.delete(value);
+    return valid;
+  }
   private validateRef(value: unknown, field: string): Failure | undefined {
-    if (value === undefined || typeof value === "string") return undefined;
+    if (value === undefined) return undefined;
+    if (typeof value === "string") {
+      return value.trim() ? undefined : fail("validation_failed", `${field} must be a task ID or reference`);
+    }
     if (!isObj(value) || typeof value.ref !== "string" || !value.ref.trim() ||
       (value.field !== undefined && value.field !== "taskId") ||
       Object.keys(value).some(key => key !== "ref" && key !== "field"))
@@ -210,6 +238,8 @@ export class TaskManager {
     if (typeof id !== "string") return {key:op.key,op:op.op,status:"failed",error:id};
     const task=this.find(id); if (!task) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${id} not found`)};
     if (op.op==="get") return {key:op.key,op:op.op,status:"succeeded",data:{task:this.outputTask(task, op.include_audit)}};
+    if (op.active === true && op.status === undefined && task.status !== "in_progress")
+      return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot focus task ${id}: active task must be in_progress`)};
     if (op.status === "deleted") {
       if (this.state.tasks.some(t => t.parentTaskId === id))
         return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot delete task ${id}: child task still exists`)};
@@ -244,6 +274,8 @@ export class TaskManager {
     Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
+      // Explicit false is applied after the focus transition.
+      if (op.active === false) task.active = false;
     } else if (op.status !== undefined) {
       task.active = false;
     } else if (op.active === true) {
@@ -292,6 +324,7 @@ export class TaskManager {
       ...(task.metadata !== undefined ? {metadata: clone(task.metadata)} : {}),
       ...(task.category !== undefined ? {category: task.category} : {}),
       ...(task.dependsOn.length ? {depends_on: [...task.dependsOn]} : {}),
+      ...(this.blockedBy(task.id).length ? {blocks: this.blockedBy(task.id)} : {}),
       ...(task.owner_id !== undefined ? {owner_id: task.owner_id} : {}),
       ...(task.parentTaskId !== undefined ? {parent_id: task.parentTaskId} : {}),
       ...(task.notes.length ? {notes: [...task.notes]} : {}),

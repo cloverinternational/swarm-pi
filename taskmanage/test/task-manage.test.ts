@@ -84,6 +84,37 @@ describe("TaskManage", () => {
     m.execute({operations:[{key:"b",op:"update",status:"completed"}]});
     expect(m.snapshot().tasks.map(t=>t.active)).toEqual([false, false]);
   });
+  it("validates focus transitions and preserves explicit active:false", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("a")]});
+    expect(m.execute({operations:[{key:"bad",op:"update",taskId:"1",active:true}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.execute({operations:[{key:"start",op:"update",taskId:"1",status:"in_progress",active:false}]}).status).toBe("succeeded");
+    expect(m.snapshot().tasks[0]).toMatchObject({status:"in_progress",active:false});
+    expect(m.execute({operations:[{key:"focus",op:"update",taskId:"1",active:true}]}).status).toBe("succeeded");
+    expect(m.snapshot().tasks[0].active).toBe(true);
+    expect(m.execute({operations:[{key:"bad2",op:"update",taskId:"1",status:"completed",active:true}]}).results[0].error?.code).toBe("validation_failed");
+  });
+  it("includes computed reverse dependencies in GET after rehydration", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a"), create("b"), {key:"link",op:"update",taskId:{ref:"b"},addBlockedBy:[{ref:"a"}]}]});
+    const restored = new TaskManager();
+    restored.rehydrate(entries);
+    const result = restored.execute({operations:[{key:"get",op:"get",taskId:"1"}]});
+    expect((result.results[0].data as any).task.blocks).toEqual(["2"]);
+  });
+  it("rejects invalid direct scalar and metadata values before persistence", () => {
+    const m = new TaskManager();
+    for (const field of ["subject", "description", "activeForm", "owner_id", "active", "include_audit"]) {
+      const operation: any = {key:"bad",op: field === "include_audit" ? "get" : "create", subject:"x", [field]: field === "active" || field === "include_audit" ? "yes" : 42};
+      if (operation.op === "get") delete operation.subject;
+      expect(m.execute({operations:[operation]}).results[0].error?.code, field).toBe("validation_failed");
+    }
+    const circular: any = {}; circular.self = circular;
+    expect(m.execute({operations:[{key:"cycle",op:"create",subject:"x",metadata:circular}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.execute({operations:[{key:"bad-json",op:"create",subject:"x",metadata:{value:NaN}}]}).results[0].error?.code).toBe("validation_failed");
+    expect(m.snapshot().tasks).toHaveLength(0);
+  });
   it("keeps plain notes, typed notes, and audit history separate", () => {
     const m = new TaskManager();
     m.execute({operations:[create("a")]});
