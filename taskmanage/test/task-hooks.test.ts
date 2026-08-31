@@ -21,8 +21,9 @@ describe("TaskManage hooks coordinator", () => {
   });
   it("guides task lifecycle and records redacted outcomes", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
-    m.execute({ operations: [{ key: "a", op: "create", subject: "work" }] });
-    expect(h.on(event("tool_result", { toolName: "TaskManage", input: { operations: [{ key: "a", op: "create", subject: "work" }] }, result: { results: [] } }))).toBeDefined();
+    const createInput = { operations: [{ key: "a", op: "create", subject: "work" }] };
+    const createResult = m.execute(createInput);
+    expect(h.on(event("tool_result", { toolName: "TaskManage", input: createInput, result: createResult }))).toBeDefined();
     m.execute({ operations: [{ key: "focus", op: "update", taskId: "1", status: "in_progress" }] });
     h.on(event("tool_result", { toolName: "bash", input: { command: "curl -H 'token=abc' https://x" }, result: {} }));
     expect(h.auditSnapshot()[0].summary).toContain("[REDACTED]");
@@ -38,5 +39,49 @@ describe("TaskManage hooks coordinator", () => {
     const restored = new TaskHooksCoordinator(m, p, { nudgeInterval: 2, nudgeToolThreshold: 1 });
     restored.on(event("session_start"), { sessionManager: { getEntries: () => entries } });
     expect(restored.auditSnapshot()).toEqual(h.auditSnapshot());
+  });
+
+  it("deduplicates Pi terminal events and rejects failed or partial batches", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
+    const input = { operations: [{ key: "a", op: "create", subject: "work", status: "in_progress" }] };
+    const result = m.execute(input);
+    const end = event("tool_execution_end", { toolCallId: "call-1", toolName: "TaskManage", input, result, isError: false });
+    expect(h.on(event("tool_result", { ...end, content: [{ type: "text", text: JSON.stringify(result) }] }))).toBeDefined();
+    expect(h.on(end)).toBeUndefined();
+    expect(h.auditSnapshot()).toHaveLength(0);
+    expect(h.on(event("tool_result", { toolCallId: "call-2", toolName: "TaskManage", input, content: [{ type: "text", text: JSON.stringify({ status: "partial", results: [{ key: "a", status: "succeeded" }] }) }] }))).toBeUndefined();
+  });
+
+  it("redacts secrets embedded in headers, paths, URLs, subjects, and commands", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
+    m.execute({ operations: [{ key: "f", op: "create", subject: "work", status: "in_progress" }] });
+    h.on(event("tool_result", { toolCallId: "x", toolName: "bash", input: {
+      command: "curl --private_key=abc https://host/x?access_token=def", path: "/tmp/private_key=ghi",
+      subject: "token=jkl", headers: { Authorization: "Bearer mno" }
+    }, result: {} }));
+    expect(h.auditSnapshot()[0].summary).not.toMatch(/abc|def|ghi|jkl|mno/);
+  });
+
+  it("exempts classifier aliases and resets maintenance when focus changes", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { maintenanceToolThreshold: 1 });
+    expect(h.on(event("tool_call", { toolName: "readFile", input: {} }))).toBeUndefined();
+    expect(h.on(event("tool_call", { toolName: "web_search", input: {} }))).toBeUndefined();
+    m.execute({ operations: [{ key: "a", op: "create", subject: "a", status: "in_progress" }, { key: "b", op: "create", subject: "b" }] });
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined(); // focus change establishes the baseline
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))?.message).toContain("a");
+    m.execute({ operations: [{ key: "f", op: "update", taskId: "2", status: "in_progress" }] });
+    expect(h.on(event("turn_end"))).toBeUndefined();
+  });
+
+  it("shares the empty-task nudge budget across coordinators in one session", () => {
+    const p = pi(), m = new TaskManager(), h1 = new TaskHooksCoordinator(m, p, { nudgeInterval: 1, nudgeToolThreshold: 1 });
+    const h2 = new TaskHooksCoordinator(m, p, { nudgeInterval: 1, nudgeToolThreshold: 1 });
+    h1.on(event("turn_start")); h1.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h1.on(event("turn_end"))).toBeUndefined(); // first turn is never nudged
+    h1.on(event("turn_start")); expect(h1.on(event("turn_end"))?.message).toContain("no tasks");
+    h2.on(event("turn_start")); h2.on(event("turn_start")); h2.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h2.on(event("turn_end"))).toBeUndefined();
   });
 });
