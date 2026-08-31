@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import extension, { registerTaskManageExtension } from "../../.pi/extensions/taskmanage.ts";
 import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
+import thinkingExtension from "../../.pi/extensions/swarm-thinking.ts";
 import { taskManageSchema } from "../src/index.js";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -115,5 +116,39 @@ describe("root Pi TaskManage extension", () => {
     const panel = tool.renderResult(result, { isError: false, expanded: false }, {});
     expect(panel.render(100).join("\n")).toContain("SUCCEEDED");
     expect(panel.render(100).join("\n")).toContain("plan");
+  });
+
+  it("opens thinking settings from Ctrl+T and applies the selected level", async () => {
+    let level = "off";
+    let selectedTitle = "";
+    let selectedOptions: string[] = [];
+    const notifications: string[] = [];
+    const shortcuts: any[] = [];
+    const commands: any[] = [];
+    const thinkingPi = {
+      getThinkingLevel: () => level,
+      setThinkingLevel: (next: string) => { level = next; },
+      registerShortcut: (shortcut: string, options: any) => shortcuts.push({ shortcut, options }),
+      registerCommand: (name: string, options: any) => commands.push({ name, options }),
+    };
+    thinkingExtension(thinkingPi as any);
+    const ctx = {
+      ui: {
+        select: async (title: string, options: string[]) => {
+          selectedTitle = title;
+          selectedOptions = options;
+          return options.find(option => option.includes("High"));
+        },
+        notify: (message: string) => notifications.push(message),
+      },
+    };
+
+    await shortcuts[0].options.handler(ctx);
+    expect(shortcuts[0].shortcut).toBe("ctrl+t");
+    expect(commands[0].name).toBe("thinking");
+    expect(selectedTitle).toContain("Thinking settings");
+    expect(selectedOptions).toHaveLength(6);
+    expect(level).toBe("high");
+    expect(notifications).toEqual(["Thinking level: high."]);
   });
 });
