@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TaskManager, type JournalEntry } from "../src/task-manage.js";
+import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } from "../src/task-manage.js";
 
 const create = (key:string, subject=key) => ({key,op:"create" as const,subject});
 describe("TaskManage", () => {
@@ -17,5 +17,68 @@ describe("TaskManage", () => {
     const entries:JournalEntry[]=[]; const m=new TaskManager(e=>entries.push(e)); m.execute({operations:[create("a"),create("b")]});
     const restored=new TaskManager(); restored.rehydrate(entries); const page=restored.execute({operations:[{key:"l",op:"list",limit:1}]});
     expect((page.results[0].data as any).pagination).toMatchObject({total:2,more:true});
+  });
+  it("publishes exact reference item schemas and rejects malformed references", () => {
+    const item = (taskManageSchema.properties.operations as any).items;
+    for (const field of ["addBlocks", "addBlockedBy"]) {
+      const ref = item.properties[field].items.oneOf[1];
+      expect(ref.required).toEqual(["ref"]);
+      expect(ref.additionalProperties).toBe(false);
+    }
+    const m = new TaskManager();
+    expect(m.execute({operations:[{key:"x",op:"create",subject:"x",addBlocks:[{ref:"a",extra:true} as any]}]}).results[0].error?.code).toBe("validation_failed");
+  });
+  it("rejects fields that do not apply to an operation", () => {
+    const m = new TaskManager();
+    for (const operation of [
+      {key:"x",op:"list" as const,addNote:"no"},
+      {key:"x",op:"get" as const,status:"completed" as const},
+      {key:"x",op:"create" as const,subject:"x",include_audit:true},
+    ]) expect(m.execute({operations:[operation as any]}).results[0].error?.code).toBe("validation_failed");
+  });
+  it("rolls back reverse dependency mutations when sequential update fails", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("a"),create("b"),create("c")]});
+    const result = m.execute({operations:[{key:"u",op:"update",taskId:"1",addBlocks:["2","missing"]}]});
+    expect(result.status).toBe("failed");
+    expect((m.snapshot().tasks.find(t=>t.id==="2")!).dependsOn).toEqual([]);
+  });
+  it("validates create dependencies and parent cycles without leaking tasks", () => {
+    const m = new TaskManager();
+    expect(m.execute({operations:[create("a"),{key:"bad",op:"create",subject:"bad",addBlockedBy:["missing"]}]}).status).toBe("partial");
+    expect(m.snapshot().tasks).toHaveLength(1);
+    expect(m.execute({operations:[{key:"child",op:"create",subject:"child",parentTaskId:"1"}]}).status).toBe("succeeded");
+    expect(m.execute({operations:[{key:"bad-parent",op:"update",taskId:"1",parentTaskId:"2"}]}).results[0].error?.code).toBe("cycle");
+  });
+  it("rehydrates the latest state across multiple persisted entries and registers Pi shape", () => {
+    const entries: JournalEntry[] = [];
+    const m = new TaskManager(e => entries.push(e));
+    m.execute({operations:[create("a")]});
+    m.execute({operations:[create("b")]});
+    const restored = new TaskManager(); restored.rehydrate(entries);
+    expect(restored.snapshot().tasks.map(t=>t.subject)).toEqual(["a","b"]);
+    const registered: any[] = [];
+    registerTaskManage({
+      appendEntry: () => {},
+      registerTool: tool => registered.push(tool),
+      on: () => {},
+    });
+    expect(registered[0]).toMatchObject({name:"TaskManage", parameters:taskManageSchema});
+  });
+  it("implements get include_audit without leaking audit by default", () => {
+    const m = new TaskManager();
+    m.execute({operations:[create("a")]});
+    const normal = m.execute({operations:[{key:"g",op:"get",taskId:"1"}]});
+    const audited = m.execute({operations:[{key:"ga",op:"get",taskId:"1",include_audit:true}]});
+    expect((normal.results[0].data as any).task.audit).toBeUndefined();
+    expect((audited.results[0].data as any).task.audit).toHaveLength(1);
+  });
+  it("stops and skips after cancellation", () => {
+    const controller = new AbortController();
+    controller.abort();
+    const m = new TaskManager();
+    const result = m.execute({operations:[create("a"),create("b")]}, controller.signal);
+    expect(result.results.map(r=>r.status)).toEqual(["failed","skipped"]);
+    expect(m.snapshot().tasks).toHaveLength(0);
   });
 });
