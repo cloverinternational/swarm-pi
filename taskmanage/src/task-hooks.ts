@@ -1,4 +1,9 @@
 import type { JournalEntry, TaskManager, Task, Operation, Status } from "./task-manage.js";
+function registerHook(pi: HookPi, group: string, event: string, handler: any) {
+  const globalRegister = (globalThis as any).__piSwarmRegisterHook;
+  if (typeof globalRegister === "function") return globalRegister(pi, group, event, handler);
+  pi.on(event, handler);
+}
 
 export type EnforcementMode = "advise" | "block" | "off";
 export interface HookConfig {
@@ -318,6 +323,6 @@ export function registerTaskHooks(pi: HookPi, manager: TaskManager, config?: Hoo
     // part of the runtime contract for every lifecycle event. Normalize it at
     // the adapter boundary so the coordinator also works with Pi's live
     // payloads, not only with unit-test fixtures that add `type` manually.
-    pi.on(event, (e, ctx) => coordinator.on({ ...e, type: event }, ctx));
+    registerHook(pi, "taskmanage", event, (e: HookEvent, ctx: HookContext) => coordinator.on({ ...e, type: event }, ctx));
   return coordinator;
 }

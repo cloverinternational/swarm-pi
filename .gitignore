@@ -1,0 +1,11 @@
+# Local API credentials (never commit real keys)
+.pi/config/api-keys.json
+.pi/config/*.local.json
+
+# Generated/runtime state
+.swarm/
+autogenskills/dist/
+taskmanage/dist/
+
+# Dependencies
+**/node_modules/

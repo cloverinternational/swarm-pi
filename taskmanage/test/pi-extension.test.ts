@@ -144,7 +144,7 @@ describe("root Pi TaskManage extension", () => {
     };
 
     await shortcuts[0].options.handler(ctx);
-    expect(shortcuts[0].shortcut).toBe("ctrl+t");
+    expect(shortcuts[0].shortcut).toBe("ctrl+alt+t");
     expect(commands[0].name).toBe("thinking");
     expect(selectedTitle).toContain("Thinking settings");
     expect(selectedOptions).toHaveLength(6);

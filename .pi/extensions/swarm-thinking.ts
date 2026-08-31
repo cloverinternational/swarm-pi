@@ -49,7 +49,7 @@ export async function openThinkingSettings(pi: ThinkingAPI, ctx: ThinkingContext
 
 export default function swarmThinkingExtension(pi: ThinkingAPI): void {
   const open = (ctx: ThinkingContext) => openThinkingSettings(pi, ctx);
-  pi.registerShortcut("ctrl+t", {
+  pi.registerShortcut("ctrl+alt+t", {
     description: "Open thinking settings",
     handler: open,
   });

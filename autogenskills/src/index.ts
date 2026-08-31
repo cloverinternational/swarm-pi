@@ -1,0 +1,83 @@
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+
+export type Mode = "never" | "manual" | "auto";
+export type TriggerReason = "manual" | "tool_call_threshold" | "error_resolution" | "llm_nudge";
+export interface Config { mode?: Mode; dir?: string; toolCallThreshold?: number; errorResolutionThreshold?: number; nudgeInterval?: number; minInstructionsLength?: number; }
+export interface Skill { name: string; description: string; instructions: string; tags: string[]; category?: string; version: string; path: string; updatedAt: string; }
+export interface SkillEntry { type: "pi-swarm-autogen-state"; data: State; }
+export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; }
+interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; }
+const HISTORY_FORMAT = 1;
+const SUPPORT_ROOTS = new Set(["references", "templates", "scripts", "assets"]);
+
+export const skillManageSchema = {
+  type: "object", additionalProperties: false, required: ["action"],
+  properties: {
+    action: { type: "string", enum: ["create", "patch", "view", "list", "read_file", "write_file", "review", "history", "undo", "archive"] },
+    name: { type: "string", pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 64 }, description: { type: "string" }, instructions: { type: "string" },
+    append: { type: "boolean" }, tags: { type: "string" }, category: { type: "string" }, file_path: { type: "string" }, file_content: { type: "string" },
+    review_reason: { type: "string" }, expected_revision: { type: "string" }, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1 },
+  },
+} as const;
+
+const safeName = (n: unknown) => typeof n === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64 && n !== "archive";
+const now = () => new Date().toISOString();
+const clone = <T>(x: T): T => structuredClone(x);
+
+export class AutoSkillManager {
+  private state: State = { skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0 };
+  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength">>;
+  constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
+    const home = process.env.HOME ?? process.cwd();
+    this.config = { mode: config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never", dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"), toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1, nudgeInterval: config.nudgeInterval ?? 15, minInstructionsLength: config.minInstructionsLength ?? 200 };
+  }
+  snapshot(): State { return clone(this.state); }
+  restore(state: State) { this.state = clone(state); }
+  rehydrate(entries: readonly unknown[]) { const e = [...entries].reverse().find((x: any) => x?.type === "pi-swarm-autogen-state") as SkillEntry | undefined; if (e?.data) this.restore(e.data); }
+  private commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
+  private dir(name: string) { return join(this.config.dir, name); }
+  private file(name: string) { return join(this.dir(name), "SKILL.md"); }
+  private parse(name: string): Skill {
+    const content = readFileSync(this.file(name), "utf8"), match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    if (!match) throw new Error(`invalid SKILL.md for ${name}`);
+    const fields: Record<string,string> = {}; for (const line of match[1].split("\n")) { const i = line.indexOf(":"); if (i > 0) fields[line.slice(0,i).trim()] = line.slice(i+1).trim(); }
+    return { name: fields.name || name, description: fields.description || "", instructions: match[2].trimEnd(), tags: fields.tags ? fields.tags.split(",").map(x=>x.trim()).filter(Boolean) : [], category: fields.category || undefined, version: fields.version || "1.0.0", path: this.dir(name), updatedAt: fields.updated_at || now() };
+  }
+  private body(skill: Skill) { return `---\nname: ${skill.name}\ndescription: ${skill.description}\nversion: ${skill.version}\n${skill.tags.length ? `tags: ${skill.tags.join(", ")}\n` : ""}${skill.category ? `category: ${skill.category}\n` : ""}updated_at: ${skill.updatedAt}\n---\n\n${skill.instructions}\n`; }
+  private hashBytes(data: string | Buffer) { return createHash("sha256").update(data).digest("hex"); }
+  private packageFiles(name: string): Record<string, string> { const out: Record<string,string> = {}; const walk = (root: string, prefix = "") => { if (!existsSync(root)) return; for (const e of readdirSync(root, { withFileTypes: true })) { const p = join(root, e.name), rel = prefix ? `${prefix}/${e.name}` : e.name; if (e.isDirectory()) walk(p, rel); else if (e.isFile()) out[rel] = this.hashBytes(readFileSync(p)); } }; walk(this.dir(name)); return out; }
+  private snapshotRevision(name: string, action: string, parent?: string): Revision { const files = this.packageFiles(name), blobs: Record<string,string> = {}; for (const path of Object.keys(files)) blobs[path] = readFileSync(join(this.dir(name), path)).toString("base64"); const canonical = JSON.stringify({ format: HISTORY_FORMAT, skill: name, parent: parent ?? "", action, files }); return { id: this.hashBytes(canonical), parent, action, createdAt: now(), files, blobs }; }
+  private saveRevision(name: string, action: string, parent?: string) { const rev = this.snapshotRevision(name, action, parent); const root = join(this.config.dir, ".history", "revisions", name); mkdirSync(root, { recursive: true, mode: 0o755 }); try { writeFileSync(join(root, `${rev.id}.json`), JSON.stringify({ format: HISTORY_FORMAT, ...rev }, null, 2) + "\n", { flag: "wx", mode: 0o444 }); } catch (e: any) { if (e?.code !== "EEXIST") throw e; } mkdirSync(join(this.config.dir, ".history", "heads"), { recursive: true }); writeFileSync(join(this.config.dir, ".history", "heads", name), rev.id + "\n"); return rev; }
+  private write(skill: Skill, action: string) { mkdirSync(this.dir(skill.name), { recursive: true, mode: 0o755 }); const parent = this.state.skills[skill.name]?.hash; const body = this.body(skill); const tmp = `${this.file(skill.name)}.${process.pid}.tmp`; writeFileSync(tmp, body, { mode: 0o644 }); renameSync(tmp, this.file(skill.name)); const rev = this.saveRevision(skill.name, action, parent); this.state.skills[skill.name] = { ...(this.state.skills[skill.name] ?? { uses: 0 }), version: skill.version, hash: rev.id, lastUsed: now() }; }
+  private assertEnabled() { if (this.config.mode === "never") throw new Error("autogenerated skills are disabled (mode=never)"); }
+  execute(input: any): any {
+    this.assertEnabled(); const action = input?.action;
+    if (action === "list") return { skills: this.list() };
+    if (!safeName(input?.name) && action !== "review") throw new Error("name must match lowercase skill identifier syntax");
+    if (action === "review") { this.state.reviews++; this.commit(); return { reviewed: true, reason: input.review_reason ?? "no reusable learning" }; }
+    const name = input.name as string;
+    if (action === "create") { if (existsSync(this.file(name))) throw new Error(`skill ${name} already exists; view and patch it instead`); if (!input.description || !input.instructions) throw new Error("description and instructions are required"); if (input.instructions.length < this.config.minInstructionsLength) throw new Error(`instructions must contain at least ${this.config.minInstructionsLength} characters`); const s: Skill = { name, description: input.description, instructions: input.instructions, tags: String(input.tags ?? "").split(",").map((x:string)=>x.trim()).filter(Boolean), category: input.category, version: "1.0.0", path: this.dir(name), updatedAt: now() }; this.write(s, "create"); this.commit(); return { skill: s, revision: this.state.skills[name].hash }; }
+    if (action === "view") { const s = this.parse(name); const offset = input.offset ?? 0, limit = input.limit ?? 80000; const hash = this.state.skills[name]?.hash ?? this.snapshotRevision(name, "external").id; this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: s.version, hash, lastUsed: now() }; this.commit(); return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit) }, revision: hash, version: s.version }; }
+    if (action === "patch") { if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const s = this.parse(name); const currentRevision = this.state.skills[name]?.hash ?? this.snapshotRevision(name, "external").id; if (input.expected_revision && input.expected_revision !== currentRevision && input.expected_revision !== s.version) throw new Error(`revision conflict: expected ${input.expected_revision}, current ${currentRevision}`); s.instructions = input.append ? `${s.instructions}\n\n${input.instructions ?? ""}` : (input.instructions || s.instructions); if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch"); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
+    if (action === "archive") { const s = this.parse(name); const target = join(this.config.dir, ".archive", `${name}-${Date.now()}`); mkdirSync(join(this.config.dir, ".archive"), { recursive: true }); renameSync(s.path, target); delete this.state.skills[name]; this.commit(); return { archived: name, path: target }; }
+    if (action === "history") { const root = join(this.config.dir, ".history", "revisions", name); if (!existsSync(root)) return { revisions: [] }; const revisions = readdirSync(root).filter(x => x.endsWith(".json")).map(x => JSON.parse(readFileSync(join(root, x), "utf8")) as Revision).sort((a,b) => b.createdAt.localeCompare(a.createdAt)); return { revisions: revisions.map(r => ({ id: r.id, parent: r.parent, action: r.action, createdAt: r.createdAt, files: r.files })) }; }
+    if (action === "undo") { const id = String(input.revision ?? ""); if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("undo requires a valid revision hash"); const p = join(this.config.dir, ".history", "revisions", name, `${id}.json`); if (!existsSync(p)) throw new Error(`revision ${id} not found`); const rev = JSON.parse(readFileSync(p, "utf8")) as Revision; if (!rev.blobs) throw new Error("revision has no restorable file snapshot"); for (const [path, encoded] of Object.entries(rev.blobs)) { const target = resolve(this.dir(name), path); mkdirSync(resolve(target, ".."), { recursive: true }); writeFileSync(target, Buffer.from(encoded, "base64"), { mode: 0o644 }); } const s = this.parse(name); const next = this.saveRevision(name, "undo", this.state.skills[name]?.hash); this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: s.version, hash: next.id, lastUsed: now() }; this.commit(); return { restored: id, revision: next.id }; }
+    if (action === "read_file" || action === "write_file") { const raw = String(input.file_path ?? ""); const p = resolve(this.dir(name), raw); const first = raw.replaceAll("\\", "/").split("/")[0]; if (!SUPPORT_ROOTS.has(first) || relative(this.dir(name), p).startsWith("..")) throw new Error("support path must stay under references/, templates/, scripts/, or assets/"); if (action === "read_file") return { path: p, content: readFileSync(p, "utf8"), revision: this.state.skills[name]?.hash }; mkdirSync(resolve(p, ".."), { recursive: true }); writeFileSync(p, input.file_content ?? "", { mode: 0o644 }); const rev = this.saveRevision(name, "write_file", this.state.skills[name]?.hash); this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: this.parse(name).version, hash: rev.id, lastUsed: now() }; this.commit(); return { path: p, written: true, revision: rev.id }; }
+    throw new Error(`unknown action ${action}`);
+  }
+  list(): Skill[] { if (!existsSync(this.config.dir)) return []; return readdirSync(this.config.dir, { withFileTypes: true }).filter((e) => e.isDirectory() && safeName(e.name) && existsSync(this.file(e.name))).map((e) => this.parse(e.name)); }
+  observeTool(success: boolean, toolName?: string, input?: any) { if (success) this.state.toolCalls++; else this.state.errors++; if (success && toolName && /^(skill|skillmanage)$/i.test(toolName) && input?.name && this.state.skills[input.name]) { this.state.skills[input.name].uses++; this.state.skills[input.name].lastUsed = now(); this.commit(); } }
+  observeTurn(): string | undefined { this.state.turns++; if (this.config.mode !== "auto" || this.state.turns <= 1 || this.state.turns - this.state.lastNudgeTurn < this.config.nudgeInterval || (this.state.toolCalls < this.config.toolCallThreshold && this.state.resolved < this.config.errorResolutionThreshold)) return; this.state.lastNudgeTurn = this.state.turns; this.commit(); return `Review reusable learning class-first: patch an existing skill or add a support file before creating one. Existing skills: ${this.list().map(s=>s.name).join(", ") || "none"}. A no-mutation review is valid.`; }
+}
+
+export function registerAutoSkills(pi: any, config: Config = {}) {
+  const manager = new AutoSkillManager(config, (entry) => pi.appendEntry(entry.type, entry.data));
+  const register = (event: string, handler: any) => { const globalRegister = (globalThis as any).__piSwarmRegisterHook; return typeof globalRegister === "function" ? globalRegister(pi, "autogenskills", event, handler) : pi.on(event, handler); };
+  register("session_start", (_e: any, ctx: any) => manager.rehydrate(ctx.sessionManager?.getEntries?.() ?? []));
+  register("tool_result", (e: any) => manager.observeTool(!e.isError && !e.error && !e.result?.isError, e.toolName ?? e.tool_name, e.input ?? e.params));
+  register("turn_end", (_e: any, ctx: any) => { const nudge = manager.observeTurn(); if (nudge) ctx.ui?.notify(nudge, "info"); });
+  pi.registerTool({ name: "SkillManage", label: "Manage autogenerated skills", description: "Create, review, patch, inspect, and archive reusable autogenerated skill packages. Prefer patching an existing umbrella; never overwrite skills.", parameters: skillManageSchema, async execute(_id: string, params: any) { try { return { content: [{ type: "text", text: JSON.stringify(manager.execute(params)) }], details: {} }; } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; } } });
+  return manager;
+}

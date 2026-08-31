@@ -1,0 +1,8 @@
+{
+  "exa": {
+    "apiKey": "YOUR_EXA_API_KEY"
+  },
+  "xai": {
+    "apiKey": "YOUR_XAI_API_KEY"
+  }
+}
