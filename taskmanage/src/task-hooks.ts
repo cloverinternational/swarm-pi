@@ -43,14 +43,34 @@ const text = (x: unknown) => typeof x === "string" ? x : "";
 function readOnlyBash(command: string): boolean {
   // Do not parse shell syntax: reject control, expansion, grouping, globbing,
   // and redirection syntax rather than risk allowing a write through the gate.
-  if (/[;&|<>`$(){}[\]\\\r\n*?]/.test(command)) return false;
-  return /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show|branch)|cat|head|tail|sed|awk|wc|which|type|echo|printf)\b/i.test(command.trim());
+  if (!command.trim()) return false;
+  let quote = "";
+  for (const ch of command) {
+    if (ch === "'" && quote !== '"') { quote = quote ? "" : "'"; continue; }
+    if (ch === '"' && quote !== "'") { quote = quote ? "" : '"'; continue; }
+    if (ch === "$" && quote !== "'") return false;
+    if (!quote && /[;&|<>`$(){}[\]\\\r\n*?]/.test(ch)) return false;
+  }
+  if (quote) return false;
+  const words = command.trim().split(/\s+/);
+  const executable = words.shift()!.toLowerCase();
+  const args = words;
+  if (!/^(pwd|ls|find|grep|rg|git|cat|head|tail|sed|awk|wc|which|type|echo|printf)$/.test(executable)) return false;
+  if (args.some(a => /^(?:-i(?:[^a-z]|$)|--in-place(?:=|$))/i.test(a))) return false;
+  if (executable === "awk" && args.some(a => /^-i(?:=|$)/i.test(a) || /^inplace$/i.test(a))) return false;
+  if (executable === "find" && args.some(a => /^-(?:delete|exec|execdir|ok|okdir|fls|fprint|fprint0|fprintf)(?:=|$)/i.test(a))) return false;
+  if (executable === "git") {
+    const subcommand = args.shift()?.toLowerCase();
+    if (!subcommand || !/^(?:status|log|diff|show|branch)$/.test(subcommand)) return false;
+    if (subcommand === "branch" && args.some(a => /^(?:-(?:d|D|f|m|M|c|C)(?:=|$)|--(?:delete|force|move|copy|set-upstream-to|unset-upstream|edit-description|track|no-track)(?:=|$))/i.test(a))) return false;
+    if (subcommand === "diff" && args.some(a => /^(?:--output(?:=|$)|--no-index$)/i.test(a))) return false;
+  }
+  return true;
 }
 function exempt(name: string, args: any): boolean {
   const n = normalize(name);
   return TASK_TOOLS.has(n) || PLAN_TOOLS.has(n) || READ_TOOLS.has(n) || INTERACTION_TOOLS.has(n) ||
-    SKILL_TOOLS.has(n) || RESEARCH_TOOLS.has(n) || n === "lsp" || n.startsWith("lsp") ||
-    n === "recall" || n.endsWith("recall") || (n === "bash" && readOnlyBash(text(args?.command)));
+    SKILL_TOOLS.has(n) || RESEARCH_TOOLS.has(n) || (n === "bash" && readOnlyBash(text(args?.command)));
 }
 function stateFrom(entries: readonly unknown[]): HookState {
   const found = [...entries].reverse().find((e: any) => e?.type === "pi-swarm-task-hooks");
@@ -190,7 +210,7 @@ export class TaskHooksCoordinator {
     if (isFailure) this.state.hadError = true;
     // Failed or partial skill calls do not count as successful reusable-skill
     // usage and must not make the next review appear complete.
-    if ((n === "skill" || n === "skillmanage") && !isFailure) {
+    if (SKILL_TOOLS.has(n) && !isFailure) {
       this.state.skillCalls++;
       this.state.lastSkillReview = this.state.toolCalls;
     }

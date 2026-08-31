@@ -21,8 +21,19 @@ describe("TaskManage hooks coordinator", () => {
   });
   it("only bypasses genuinely simple read-only bash commands", () => {
     const h = new TaskHooksCoordinator(new TaskManager(), pi(), { enforcementMode: "block" });
-    expect(h.on(event("tool_call", { toolName: "bash", input: { command: "echo hello" } }))).toBeUndefined();
-    for (const command of ["echo x > file", "pwd && rm -rf .", "pwd; rm file", "echo $(rm file)", "pwd | tee file", "echo `rm file`", "(pwd)"]) {
+    for (const command of [
+      "pwd", "ls -la", "find src -type f", "grep -n TODO file", "rg --hidden pattern .",
+      "git status --short", "git log --oneline", "git diff --stat", "git show HEAD:file",
+      "cat file", "head -n 5 file", "tail -f log", "sed -n 1,5p file", "awk '{print $1}' file",
+      "wc -l file", "which node", "type npm", "echo hello", "printf '%s' hello",
+    ]) expect(h.on(event("tool_call", { toolName: "bash", input: { command } }))).toBeUndefined();
+    for (const command of [
+      "echo x > file", "pwd && rm -rf .", "pwd; rm file", "echo $(rm file)", "pwd | tee file", "echo `rm file`", "(pwd)",
+      "sed -i s/a/b/ file", "sed --in-place file", "awk -i inplace '{print}' file",
+      "find . -delete", "find . -exec rm {} \\;", "find . -execdir touch {} \\;",
+      "find . -ok rm {} \\;", "find . -fprint output", "git branch -d old", "git branch -D old",
+      "git branch -m old new", "git diff --output=out", "git diff --no-index a b",
+    ]) {
       expect(h.on(event("tool_call", { toolName: "bash", input: { command } }))).toMatchObject({ block: true });
     }
   });
@@ -91,9 +102,13 @@ describe("TaskManage hooks coordinator", () => {
   });
 
   it("exempts classifier aliases and resets maintenance when focus changes", () => {
-    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { maintenanceToolThreshold: 1 });
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { enforcementMode: "block", maintenanceToolThreshold: 1 });
     expect(h.on(event("tool_call", { toolName: "readFile", input: {} }))).toBeUndefined();
     expect(h.on(event("tool_call", { toolName: "web_search", input: {} }))).toBeUndefined();
+    for (const toolName of ["lsp", "lspSymbols", "recall", "skill", "skillManage", "skillReview", "patchSkill"])
+      expect(h.on(event("tool_call", { toolName, input: {} }))).toBeUndefined();
+    for (const toolName of ["lspwrite", "lspapply", "untrustedrecall"])
+      expect(h.on(event("tool_call", { toolName, input: {} }))).toMatchObject({ block: true });
     m.execute({ operations: [{ key: "a", op: "create", subject: "a", status: "in_progress" }, { key: "b", op: "create", subject: "b" }] });
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
     expect(h.on(event("turn_end"))).toBeUndefined(); // focus change establishes the baseline
@@ -133,6 +148,16 @@ describe("TaskManage hooks coordinator", () => {
     h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
     expect(h.on(event("turn_end"))?.message).toContain("Review reusable learning");
     expect(h.on(event("turn_end"))).toBeUndefined(); // bounded until another interval elapses
+  });
+
+  it("counts successful review and patch tools as completed skill reviews", () => {
+    const h = new TaskHooksCoordinator(new TaskManager(), pi());
+    h.on(event("tool_result", { toolName: "skill", input: {}, result: {} }));
+    for (let i = 0; i < 9; i++) h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    h.on(event("tool_result", { toolName: "skillReview", input: {}, result: {} }));
+    h.on(event("tool_result", { toolName: "patchSkill", input: {}, result: {} }));
+    for (let i = 0; i < 9; i++) h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined();
   });
 
   it("shares the empty-task nudge budget across coordinators in one session", () => {
