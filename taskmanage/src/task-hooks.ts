@@ -41,28 +41,32 @@ const failed = (e: HookEvent) => e.isError === true || e.error != null ||
 const text = (x: unknown) => typeof x === "string" ? x : "";
 
 function readOnlyBash(command: string): boolean {
-  // Do not parse shell syntax: reject control, expansion, grouping, globbing,
-  // and redirection syntax rather than risk allowing a write through the gate.
+  // This is deliberately an argv allowlist, not a shell parser. Quoted
+  // arguments are refused so quoted callbacks/options cannot bypass it.
   if (!command.trim()) return false;
-  let quote = "";
-  for (const ch of command) {
-    if (ch === "'" && quote !== '"') { quote = quote ? "" : "'"; continue; }
-    if (ch === '"' && quote !== "'") { quote = quote ? "" : '"'; continue; }
-    if (ch === "$" && quote !== "'") return false;
-    if (!quote && /[;&|<>`$(){}[\]\\\r\n*?]/.test(ch)) return false;
-  }
-  if (quote) return false;
+  if (/[^\x20-\x7e]|["'`$;&|<>()[\]{}\\*?]/.test(command)) return false;
   const words = command.trim().split(/\s+/);
   const executable = words.shift()!.toLowerCase();
   const args = words;
-  if (!/^(pwd|ls|find|grep|rg|git|cat|head|tail|sed|awk|wc|which|type|echo|printf)$/.test(executable)) return false;
-  if (args.some(a => /^(?:-i(?:[^a-z]|$)|--in-place(?:=|$))/i.test(a))) return false;
-  if (executable === "awk" && args.some(a => /^-i(?:=|$)/i.test(a) || /^inplace$/i.test(a))) return false;
-  if (executable === "find" && args.some(a => /^-(?:delete|exec|execdir|ok|okdir|fls|fprint|fprint0|fprintf)(?:=|$)/i.test(a))) return false;
+  const safeArg = (arg: string) => /^[A-Za-z0-9_./:@%+=,-]+$/.test(arg);
+  if (!args.every(safeArg)) return false;
+  if (!/^(pwd|ls|find|grep|rg|git|cat|head|tail|wc|which|type|echo|printf)$/.test(executable)) return false;
+  if (executable === "pwd" && args.length) return false;
+  if ((executable === "which" || executable === "type") && args.length !== 1) return false;
+  if (executable === "cat" && args.some(a => a.startsWith("-"))) return false;
+  if ((executable === "echo" || executable === "printf") && args.some(a => a.startsWith("-"))) return false;
+  if ((executable === "head" || executable === "tail") &&
+      args.some(a => a.startsWith("-") && !/^(?:-[0-9]+|-[nmc][0-9]+|-[nmc]|-f)$/.test(a))) return false;
+  if (executable === "ls" && args.some(a => a.startsWith("-") && !/^(?:-[A-Za-z]+|--[a-z-]+)$/.test(a))) return false;
+  if ((executable === "grep" || executable === "rg") &&
+      args.some(a => a.startsWith("-") && !/^(?:-[A-Za-z]+|--[a-z-]+(?:=[A-Za-z0-9_.-]+)?)$/.test(a))) return false;
+  if (executable === "find" && args.some(a => a.startsWith("-") &&
+      !/^(?:-type|-[0-9]+|--maxdepth|--mindepth|-[a-z]+)$/i.test(a))) return false;
+  if (executable === "find" && args.some(a => /^(?:-?(?:delete|exec|execdir|ok|okdir|fls|fprint|fprint0|fprintf|d|i))(?:=|$)/i.test(a))) return false;
   if (executable === "git") {
     const subcommand = args.shift()?.toLowerCase();
     if (!subcommand || !/^(?:status|log|diff|show|branch)$/.test(subcommand)) return false;
-    if (subcommand === "branch" && args.some(a => /^(?:-(?:d|D|f|m|M|c|C)(?:=|$)|--(?:delete|force|move|copy|set-upstream-to|unset-upstream|edit-description|track|no-track)(?:=|$))/i.test(a))) return false;
+    if (subcommand === "branch" && args.some(a => a.startsWith("-"))) return false;
     if (subcommand === "diff" && args.some(a => /^(?:--output(?:=|$)|--no-index$)/i.test(a))) return false;
   }
   return true;
@@ -115,6 +119,7 @@ export class TaskHooksCoordinator {
   private prompt = "";
   private shared: SharedNudgeState;
   private sessionOwner?: object;
+  private anonymousTerminals: { fingerprint: string; type: string }[] = [];
   constructor(private readonly manager: TaskManager, private readonly pi: HookPi, config: HookConfig = {}) {
     this.config = { enforcementMode: config.enforcementMode ?? "advise", nudgeInterval: config.nudgeInterval ?? 5,
       nudgeToolThreshold: config.nudgeToolThreshold ?? 2, maintenanceToolThreshold: config.maintenanceToolThreshold ?? 8 };
@@ -179,6 +184,17 @@ export class TaskHooksCoordinator {
     if (event.type === "tool_result" || event.type === "tool_execution_end") {
       const id = event.toolCallId ?? event.tool_call_id;
       if (id && this.state.completedCalls.includes(String(id))) return;
+      if (!id) {
+        const fingerprint = this.anonymousTerminalFingerprint(event);
+        const inverse = event.type === "tool_result" ? "tool_execution_end" : "tool_result";
+        const duplicate = this.anonymousTerminals.findIndex(x => x.type === inverse && x.fingerprint === fingerprint);
+        if (duplicate >= 0) {
+          this.anonymousTerminals.splice(duplicate, 1);
+          return;
+        }
+        this.anonymousTerminals.push({ fingerprint, type: event.type });
+        this.anonymousTerminals = this.anonymousTerminals.slice(-20);
+      }
       // Pi emits tool_result before tool_execution_end. The first terminal event
       // is authoritative; the stable call id prevents the second from replaying it.
       if (id) {
@@ -188,6 +204,16 @@ export class TaskHooksCoordinator {
       return this.outcome(event, ctx);
     }
     if (event.type === "turn_end") return this.endTurn(ctx);
+  }
+  private anonymousTerminalFingerprint(e: HookEvent): string {
+    const stable = (value: unknown): string => {
+      if (value === undefined) return "";
+      if (value === null || typeof value !== "object") return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+      return `{${Object.keys(value as object).sort().map(k =>
+        `${JSON.stringify(k)}:${stable((value as any)[k])}`).join(",")}}`;
+    };
+    return stable({ name: toolName(e), input: input(e), failed: failed(e), batch: this.batchResult(e) });
   }
   private gate(e: HookEvent, ctx: HookContext) {
     if (this.config.enforcementMode === "off" || this.isSubagent?.(ctx) ||
@@ -208,6 +234,8 @@ export class TaskHooksCoordinator {
     // cadence. Completion de-duplication is done before reaching this method.
     if (!TASK_TOOLS.has(n) && !PLAN_TOOLS.has(n)) this.state.toolCalls++;
     if (isFailure) this.state.hadError = true;
+    const resolvedError = !isFailure && this.state.hadError;
+    if (resolvedError) this.state.hadError = false;
     // Failed or partial skill calls do not count as successful reusable-skill
     // usage and must not make the next review appear complete.
     if (SKILL_TOOLS.has(n) && !isFailure) {
@@ -221,7 +249,7 @@ export class TaskHooksCoordinator {
       this.state.audit = this.state.audit.slice(-200);
     }
     this.persist();
-    if (!isFailure && this.state.hadError) { this.state.hadError = false; return this.message("An error was resolved; preserve any reusable learning in an existing skill."); }
+    if (resolvedError) return this.message("An error was resolved; preserve any reusable learning in an existing skill.");
     if (n === "taskmanage" && this.resultSucceeded(e)) return this.guidance(this.taskOps(e), e);
     return;
   }

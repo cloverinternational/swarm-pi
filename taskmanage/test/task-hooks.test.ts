@@ -24,8 +24,8 @@ describe("TaskManage hooks coordinator", () => {
     for (const command of [
       "pwd", "ls -la", "find src -type f", "grep -n TODO file", "rg --hidden pattern .",
       "git status --short", "git log --oneline", "git diff --stat", "git show HEAD:file",
-      "cat file", "head -n 5 file", "tail -f log", "sed -n 1,5p file", "awk '{print $1}' file",
-      "wc -l file", "which node", "type npm", "echo hello", "printf '%s' hello",
+      "cat file", "head -n 5 file", "tail -f log",
+      "wc -l file", "which node", "type npm", "echo hello", "printf %s hello",
     ]) expect(h.on(event("tool_call", { toolName: "bash", input: { command } }))).toBeUndefined();
     for (const command of [
       "echo x > file", "pwd && rm -rf .", "pwd; rm file", "echo $(rm file)", "pwd | tee file", "echo `rm file`", "(pwd)",
@@ -33,6 +33,9 @@ describe("TaskManage hooks coordinator", () => {
       "find . -delete", "find . -exec rm {} \\;", "find . -execdir touch {} \\;",
       "find . -ok rm {} \\;", "find . -fprint output", "git branch -d old", "git branch -D old",
       "git branch -m old new", "git diff --output=out", "git diff --no-index a b",
+      "find . '-exec' rm {} \\;", "find . '-d' .", "find . '-i' .",
+      "grep '$(touch pwned)' file", "git log --format='$(touch pwned)'",
+      "sed -n 1,5p file", "awk '{print $1}' file",
     ]) {
       expect(h.on(event("tool_call", { toolName: "bash", input: { command } }))).toMatchObject({ block: true });
     }
@@ -48,6 +51,10 @@ describe("TaskManage hooks coordinator", () => {
     expect(h.auditSnapshot()[0].outcome).toBe("success");
     h.on(event("tool_result", { toolName: "bash", input: {}, error: "nope" }));
     expect((h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }))?.message)).toContain("resolved");
+    expect((p.entries.at(-1) as any).data.hadError).toBe(false);
+    const restored = new TaskHooksCoordinator(m, p);
+    restored.on(event("session_start"), { sessionManager: { getEntries: () => p.entries } });
+    expect(restored.on(event("tool_result", { toolName: "bash", input: {}, result: {} }))).toBeUndefined();
   });
   it("uses a cadence and budget for empty-task nudges, then rehydrates it", () => {
     const entries: JournalEntry[] = [], p = pi(entries), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { nudgeInterval: 2, nudgeToolThreshold: 1 });
@@ -70,6 +77,15 @@ describe("TaskManage hooks coordinator", () => {
     expect(h.on(end)).toBeUndefined();
     expect(h.auditSnapshot()).toHaveLength(0);
     expect(h.on(event("tool_result", { toolCallId: "call-2", toolName: "TaskManage", input, content: [{ type: "text", text: JSON.stringify({ status: "partial", results: [{ key: "a", status: "succeeded" }] }) }] }))).toBeUndefined();
+  });
+
+  it("deduplicates ID-less result/end pairs without merging distinct calls", () => {
+    const p = pi(), h = new TaskHooksCoordinator(new TaskManager(), p);
+    h.on(event("tool_result", { toolName: "bash", input: { command: "pwd" }, result: {} }));
+    h.on(event("tool_execution_end", { toolName: "bash", input: { command: "pwd" }, result: {} }));
+    h.on(event("tool_result", { toolName: "bash", input: { command: "pwd" }, result: {} }));
+    h.on(event("tool_execution_end", { toolName: "bash", input: { command: "pwd" }, result: {} }));
+    expect(h.auditSnapshot()).toHaveLength(2);
   });
 
   it("redacts secrets embedded in headers, paths, URLs, subjects, and commands", () => {
