@@ -1,0 +1,5 @@
+{
+  "apiVersion": "swarm.ai/v0unknown-fixture-only",
+  "kind": "Harness",
+  "metadata": { "name": "no-path-fixture" }
+}

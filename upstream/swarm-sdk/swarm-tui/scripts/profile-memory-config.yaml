@@ -1,0 +1,5 @@
+current_provider: fake-profile
+current_model: fake-profile-model
+stream_response: true
+telemetry_enabled: false
+telemetry_consent_acknowledged: true

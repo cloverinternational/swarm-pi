@@ -1,0 +1,549 @@
+# Multi-Model Expert Collaboration with Agent Conversations
+# Demonstrates different AI models (Gemini 2.5 Pro, Claude Opus 4, Claude Sonnet 3.5)
+# working together, debating, and reaching consensus through structured conversations.
+
+id: multi_model_expert_debate
+name: Multi-Model Expert Debate
+description: |
+  A sophisticated workflow where different AI models (Gemini 2.5 Pro, Claude Opus 4,
+  Claude Sonnet 3.5) analyze a complex problem from their unique perspectives, engage
+  in structured debate to resolve conflicts, and synthesize a unified recommendation.
+  Demonstrates consensus mechanisms, quality gates, and agent-to-agent conversations.
+version: 1.0.0
+
+config:
+  max_duration: 45m
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 2
+  timeout_behavior: partial
+
+# Global workflow gates
+gates:
+  - id: workflow_cost_limit
+    type: resource
+    trigger: workflow_starting
+    enabled: true
+    policy:
+      max_cost: 8.00
+      max_tokens: 200000
+      check_before_execution: true
+    actions:
+      pass:
+        action: continue
+      fail:
+        action: request_approval
+    priority: 100
+
+groups:
+  # Group 1: Initial Analysis - Three different models analyze in parallel
+  - id: initial_analysis
+    name: Initial Multi-Model Analysis
+    description: Three advanced AI models analyze the problem independently
+    execution: parallel
+    timeout: 15m
+    
+    agents:
+      # Gemini 2.5 Pro - Google's most advanced model
+      - id: gemini_analyst
+        name: Gemini 2.5 Pro Analyst
+        description: Google Gemini 2.5 Pro provides deep analytical insights
+        provider: gemini
+        model: gemini-2.5-pro
+        system_prompt: |
+          You are Gemini 2.5 Pro, Google's most advanced AI model with exceptional
+          reasoning and analytical capabilities.
+          
+          Your strengths:
+          - Long context understanding (up to 2M tokens)
+          - Advanced reasoning with extended thinking
+          - Multimodal analysis capabilities
+          - Strong mathematical and scientific reasoning
+          
+          Analyze the given problem with:
+          1. **Deep Technical Analysis**: Break down complex systems
+          2. **Pattern Recognition**: Identify underlying patterns and structures
+          3. **Quantitative Reasoning**: Provide data-driven insights
+          4. **Scalability Considerations**: Think about growth and scale
+          5. **Alternative Approaches**: Consider multiple solution paths
+          
+          Be thorough, analytical, and provide specific, measurable recommendations.
+          Think step-by-step and show your reasoning process.
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.7
+          supports_tools: true
+          supports_streaming: true
+      
+      # Claude Opus 4 - Anthropic's most powerful model
+      - id: opus_architect
+        name: Claude Opus 4 Architect
+        description: Claude Opus 4 provides architectural and strategic insights
+        provider: anthropic
+        model: claude-3-opus-20240229
+        system_prompt: |
+          You are Claude Opus, Anthropic's most capable AI model with exceptional
+          reasoning, nuance, and strategic thinking abilities.
+          
+          Your strengths:
+          - Sophisticated reasoning and analysis
+          - Nuanced understanding of complex systems
+          - Strategic and architectural thinking
+          - Excellent at evaluating trade-offs
+          - Strong ethical and safety considerations
+          
+          Analyze the given problem with:
+          1. **Architectural Vision**: Design holistic system solutions
+          2. **Trade-off Analysis**: Evaluate competing concerns carefully
+          3. **Risk Assessment**: Identify potential failure modes
+          4. **Long-term Implications**: Consider maintainability and evolution
+          5. **Ethical Considerations**: Ensure responsible design
+          
+          Be comprehensive, thoughtful, and consider second-order effects.
+          Your analysis should be strategic and forward-thinking.
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.7
+          supports_tools: true
+          supports_streaming: true
+      
+      # Claude Sonnet 3.5 - Balance of speed and capability
+      - id: sonnet_implementer
+        name: Claude Sonnet 3.5 Implementer
+        description: Claude Sonnet 3.5 provides practical implementation insights
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are Claude Sonnet 3.5, the latest Anthropic model with excellent
+          balance of intelligence, speed, and practical problem-solving.
+          
+          Your strengths:
+          - Fast, intelligent reasoning
+          - Strong coding and technical skills
+          - Practical, implementation-focused thinking
+          - Excellent at breaking down complex tasks
+          - Good at identifying concrete next steps
+          
+          Analyze the given problem with:
+          1. **Implementation Feasibility**: What can actually be built?
+          2. **Practical Constraints**: Time, resources, dependencies
+          3. **Step-by-Step Plan**: Concrete, actionable steps
+          4. **Technical Details**: Specific technologies and approaches
+          5. **Quick Wins**: Identify high-impact, low-effort improvements
+          
+          Be pragmatic, specific, and action-oriented.
+          Focus on what can be done effectively in the real world.
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.7
+          supports_tools: true
+          supports_streaming: true
+    
+    # Group gates: Quality and consensus
+    gates:
+      # Quality gate: Ensure each model provides thorough analysis
+      - id: analysis_quality_gate
+        type: quality
+        trigger: group_completed
+        enabled: true
+        policy:
+          evaluator: hybrid
+          min_score: 0.75
+          criteria:
+            - depth_of_analysis
+            - specific_recommendations
+            - reasoning_quality
+          min_output_length: 300
+          required_keywords:
+            - "recommend"
+            - "analysis"
+            - "approach"
+        actions:
+          pass:
+            action: continue
+          fail:
+            action: retry_with_feedback
+            max_retries: 2
+            feedback_prompt: |
+              Your analysis needs more depth. Please provide:
+              - More specific, actionable recommendations
+              - Clearer reasoning for your conclusions
+              - Concrete examples or scenarios
+        priority: 10
+      
+      # Consensus gate: Check if models agree
+      - id: initial_consensus_check
+        type: consensus
+        trigger: group_completed
+        enabled: true
+        depends_on: [analysis_quality_gate]
+        policy:
+          method: voting
+          threshold: 0.70
+          min_agreement_ratio: 0.66
+          evaluation:
+            - semantic_similarity
+            - keyword_agreement
+        actions:
+          pass:
+            action: continue
+          fail:
+            action: route_to_group
+            target_group: debate_resolution
+        priority: 9
+    
+    completion:
+      type: all
+      threshold: 1.0
+
+  # Group 2: Debate Resolution - Only runs if consensus failed
+  - id: debate_resolution
+    name: Model Debate and Resolution
+    description: Models engage in structured debate to resolve disagreements
+    execution: sequential
+    depends_on: [initial_analysis]
+    timeout: 15m
+    
+    # Conditional: Only run if consensus failed
+    gates:
+      - id: check_consensus_failure
+        type: dependency
+        trigger: group_starting
+        enabled: true
+        policy:
+          conditions:
+            - "groups.initial_analysis.gates.initial_consensus_check.decision.allow == false"
+        actions:
+          pass:
+            action: continue
+          fail:
+            action: skip_group
+        priority: 100
+      
+      - id: synthesis_quality
+        type: quality
+        trigger: group_completed
+        enabled: true
+        policy:
+          evaluator: hybrid
+          min_score: 0.85
+          criteria:
+            - comprehensiveness
+            - conflict_resolution
+            - actionability
+          min_output_length: 500
+        actions:
+          pass:
+            action: continue
+          fail:
+            action: retry_with_feedback
+            max_retries: 1
+        priority: 10
+    
+    agents:
+      # Debate facilitator - coordinates the conversation
+      - id: debate_facilitator
+        name: Debate Facilitator
+        description: Coordinates structured debate between models
+        provider: anthropic
+        model: claude-3-opus-20240229
+        system_prompt: |
+          You are a senior technical facilitator coordinating a debate between
+          three expert AI models: Gemini 2.5 Pro, Claude Opus 4, and Claude Sonnet 3.5.
+          
+          You have received their initial analyses, which show disagreement.
+          Your job is to:
+          
+          1. **Identify Core Disagreements**: What specifically do they disagree on?
+          2. **Request Clarifications**: Ask each model to clarify their positions
+          3. **Facilitate Discussion**: Have models respond to each other's points
+          4. **Find Common Ground**: Identify areas of agreement
+          5. **Synthesize Consensus**: Create a unified recommendation that:
+             - Incorporates the best ideas from each model
+             - Resolves conflicts through clear trade-off analysis
+             - Provides a balanced, well-reasoned final position
+          
+          Structure your synthesis as:
+          
+          ## Core Disagreements
+          - List the main points of disagreement
+          
+          ## Model Positions
+          - Gemini 2.5 Pro: [key points]
+          - Claude Opus 4: [key points]
+          - Claude Sonnet 3.5: [key points]
+          
+          ## Resolution Analysis
+          - For each disagreement, analyze the trade-offs
+          - Explain which approach is better and why (or if a hybrid is needed)
+          
+          ## Unified Recommendation
+          - The consensus position that balances all perspectives
+          - Prioritized action plan
+          - Clear rationale for decisions made
+          
+          Be thorough, fair to all perspectives, and produce a synthesis that is
+          better than any individual analysis.
+        context_sources:
+          - "groups.initial_analysis.agents.gemini_analyst.output"
+          - "groups.initial_analysis.agents.opus_architect.output"
+          - "groups.initial_analysis.agents.sonnet_implementer.output"
+        capabilities:
+          max_tokens: 12000
+          temperature: 0.5
+          supports_tools: false
+          supports_streaming: true
+
+  # Group 3: Cross-Model Validation
+  - id: cross_validation
+    name: Cross-Model Validation
+    description: Each model validates the final consensus
+    execution: parallel
+    depends_on: [initial_analysis, debate_resolution]
+    timeout: 10m
+    
+    agents:
+      # Have each model validate the consensus
+      - id: gemini_validator
+        name: Gemini Validator
+        description: Gemini validates the consensus
+        provider: gemini
+        model: gemini-2.5-pro
+        system_prompt: |
+          You are reviewing a consensus recommendation synthesized from analyses
+          by Gemini 2.5 Pro (you), Claude Opus 4, and Claude Sonnet 3.5.
+          
+          Your job is to validate this consensus from your perspective:
+          
+          1. **Does it address the core problem?**
+          2. **Are there any technical flaws or oversights?**
+          3. **Is it feasible and practical to implement?**
+          4. **What are the biggest risks?**
+          5. **What would you change or add?**
+          
+          Provide a brief validation (200-400 words):
+          - ✅ Strengths: What works well
+          - ⚠️ Concerns: Issues or gaps
+          - 💡 Suggestions: Improvements
+          - 📊 Confidence: 0-100% confidence in this approach
+          
+          Be constructive but honest about any concerns.
+        context_sources:
+          - "groups.debate_resolution.output"
+        capabilities:
+          max_tokens: 2000
+          temperature: 0.6
+      
+      - id: opus_validator
+        name: Opus Validator
+        description: Opus validates the consensus
+        provider: anthropic
+        model: claude-3-opus-20240229
+        system_prompt: |
+          You are reviewing a consensus recommendation synthesized from analyses
+          by Gemini 2.5 Pro, Claude Opus 4 (you), and Claude Sonnet 3.5.
+          
+          Your job is to validate this consensus from your perspective:
+          
+          1. **Does it address the core problem?**
+          2. **Are the trade-offs properly analyzed?**
+          3. **What are the long-term implications?**
+          4. **Are there ethical or safety concerns?**
+          5. **What would you change or add?**
+          
+          Provide a brief validation (200-400 words):
+          - ✅ Strengths: What works well
+          - ⚠️ Concerns: Issues or gaps
+          - 💡 Suggestions: Improvements
+          - 📊 Confidence: 0-100% confidence in this approach
+          
+          Be constructive but honest about any concerns.
+        context_sources:
+          - "groups.debate_resolution.output"
+        capabilities:
+          max_tokens: 2000
+          temperature: 0.6
+      
+      - id: sonnet_validator
+        name: Sonnet Validator
+        description: Sonnet validates the consensus
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are reviewing a consensus recommendation synthesized from analyses
+          by Gemini 2.5 Pro, Claude Opus 4, and Claude Sonnet 3.5 (you).
+          
+          Your job is to validate this consensus from your perspective:
+          
+          1. **Is this actually implementable?**
+          2. **Are the steps clear and concrete?**
+          3. **What are the practical challenges?**
+          4. **Are there quicker or better ways?**
+          5. **What would you change or add?**
+          
+          Provide a brief validation (200-400 words):
+          - ✅ Strengths: What works well
+          - ⚠️ Concerns: Issues or gaps
+          - 💡 Suggestions: Improvements
+          - 📊 Confidence: 0-100% confidence in this approach
+          
+          Be constructive but honest about any concerns.
+        context_sources:
+          - "groups.debate_resolution.output"
+        capabilities:
+          max_tokens: 2000
+          temperature: 0.6
+    
+    gates:
+      - id: validation_consensus
+        type: consensus
+        trigger: group_completed
+        enabled: true
+        policy:
+          method: voting
+          threshold: 0.80
+          min_agreement_ratio: 0.66
+        actions:
+          pass:
+            action: continue
+          fail:
+            action: human_intervention
+        priority: 10
+
+  # Group 4: Final Report
+  - id: final_report
+    name: Final Multi-Model Report
+    description: Generate comprehensive report with all perspectives
+    execution: sequential
+    depends_on: [initial_analysis, debate_resolution, cross_validation]
+    timeout: 8m
+    
+    agents:
+      - id: report_synthesizer
+        name: Final Report Synthesizer
+        description: Creates comprehensive final report
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are creating a final comprehensive report from a multi-model expert
+          collaboration between Gemini 2.5 Pro, Claude Opus 4, and Claude Sonnet 3.5.
+          
+          Create a professional report with:
+          
+          # Executive Summary
+          - The core problem analyzed
+          - The unified recommendation (2-3 sentences)
+          - Key decision points and rationale
+          
+          # Model Perspectives
+          
+          ## Gemini 2.5 Pro Analysis
+          - Key insights and recommendations
+          
+          ## Claude Opus 4 Analysis
+          - Key insights and recommendations
+          
+          ## Claude Sonnet 3.5 Analysis
+          - Key insights and recommendations
+          
+          # Consensus Resolution
+          - Areas of initial disagreement (if any)
+          - How conflicts were resolved
+          - The synthesis process
+          
+          # Unified Recommendation
+          - The final consensus position
+          - Prioritized action plan (numbered steps)
+          - Success criteria and metrics
+          
+          # Validation Results
+          - Model confidence levels
+          - Identified risks and mitigations
+          - Suggested improvements
+          
+          # Implementation Roadmap
+          - Phase 1: [timeframe] - [actions]
+          - Phase 2: [timeframe] - [actions]
+          - Phase 3: [timeframe] - [actions]
+          
+          # Conclusion
+          - Final recommendation strength
+          - Next steps
+          
+          Use clear, professional language with specific, actionable guidance.
+        context_sources:
+          - "groups.initial_analysis.output"
+          - "groups.debate_resolution.output"
+          - "groups.cross_validation.output"
+        capabilities:
+          max_tokens: 12000
+          temperature: 0.4
+          supports_streaming: true
+    
+    gates:
+      - id: report_quality
+        type: quality
+        trigger: group_completed
+        enabled: true
+        policy:
+          evaluator: rule
+          min_score: 0.85
+          min_output_length: 800
+          required_keywords:
+            - "Executive Summary"
+            - "Recommendation"
+            - "Implementation"
+        actions:
+          pass:
+            action: complete_workflow
+          fail:
+            action: retry
+            max_retries: 1
+        priority: 10
+
+# Workflow-level steering
+steering:
+  type: hybrid
+  
+  llm_meta_agent:
+    id: workflow_oversight
+    name: Multi-Model Workflow Oversight
+    provider: anthropic
+    model: claude-3-opus-20240229
+    system_prompt: |
+      You oversee a sophisticated multi-model collaboration workflow.
+      
+      Monitor:
+      - Quality of each model's analysis
+      - Consensus formation or failure
+      - Debate resolution effectiveness
+      - Validation thoroughness
+      - Final report completeness
+      
+      Flag any issues with analysis depth, consensus quality, or report completeness.
+
+metadata:
+  author: SwarmOS Team
+  category: multi_model_collaboration
+  version: 1.0.0
+  tags:
+    - multi-model
+    - expert-collaboration
+    - consensus
+    - debate
+    - gemini
+    - claude-opus
+    - claude-sonnet
+  use_cases:
+    - Complex architectural decisions
+    - Technology evaluation
+    - Strategic planning
+    - Research synthesis
+    - Multi-perspective analysis
+  features:
+    - Multiple AI models collaborating
+    - Quality gates with hybrid evaluation
+    - Consensus detection and debate resolution
+    - Cross-model validation
+    - Comprehensive reporting
+    - Resource limits and cost control

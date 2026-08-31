@@ -1,0 +1,75 @@
+{
+  "hooks": [
+    {
+      "name": "block_git_writes",
+      "type": "pre_tool",
+      "priority": 100,
+      "enabled": true,
+      "filter": {
+        "tool_name": "file_write",
+        "params": {
+          "path": ".git/*"
+        }
+      },
+      "action": {
+        "block": true,
+        "log": "Blocked write to .git directory"
+      },
+      "metadata": {
+        "created_by": "autonomous_agent",
+        "reason": "Prevent accidental git corruption"
+      }
+    },
+    {
+      "name": "log_all_bash",
+      "type": "pre_tool",
+      "priority": 50,
+      "enabled": true,
+      "filter": {
+        "tool_name": "bash"
+      },
+      "action": {
+        "log": "Bash command executed"
+      },
+      "metadata": {}
+    }
+  ],
+  "tool_permissions": {
+    "file_write": {
+      "allowed": true,
+      "require_approval": false,
+      "allowed_paths": [
+        "/tmp/*",
+        "./workspace/*",
+        "./hooks/*"
+      ],
+      "denied_paths": [
+        ".git/*",
+        "/etc/*",
+        "/sys/*"
+      ]
+    },
+    "bash": {
+      "allowed": true,
+      "require_approval": true,
+      "rate_limit": 10
+    }
+  },
+  "agent_behaviors": {
+    "autonomous_coder": {
+      "max_turns": 20,
+      "temperature": 0.7,
+      "system_prompt": "You are an autonomous coding agent. You can modify your own configuration by writing to runtime_config.json.",
+      "disabled_tools": [],
+      "custom_settings": {
+        "allow_self_modification": true
+      }
+    }
+  },
+  "global_settings": {
+    "enable_auto_reload": true,
+    "poll_interval_seconds": 2,
+    "allow_dynamic_hooks": true,
+    "max_hooks": 50
+  }
+}

@@ -1,0 +1,46 @@
+config:
+    allow_human_intervention: false
+    fail_on_steering_block: false
+    max_duration: 5m
+    max_retries: 1
+    timeout_behavior: partial
+description: |
+    Minimal workflow with one agent for testing basic execution.
+    Agent just analyzes a simple question.
+groups:
+    - agents:
+        - capabilities:
+            max_tokens: 1000
+            temperature: 0.7
+          description: Analyzes the input question
+          id: analyzer
+          model: '@current'
+          name: Simple Analyzer
+          provider: '@current'
+          system_prompt: |
+            You are a helpful AI assistant. Analyze the user's question
+            and provide a clear, concise answer.
+
+            Keep your response under 200 words.
+      completion:
+        threshold: 1
+        type: all
+      description: Single agent analyzes input
+      execution: sequential
+      id: analysis
+      name: Simple Analysis
+      timeout: 3m
+id: test_simple
+metadata:
+    author: SwarmOS Team
+    category: testing
+    tags:
+        - test
+        - simple
+        - minimal
+    use_cases:
+        - Testing workflow execution
+name: Simple Test Workflow
+steering:
+    type: rule-based
+version: 1.0.0

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "level": "",
+  "timeoutSeconds": 0,
+  "timeoutBehavior": "",
+  "defaults": {
+    "policies": null
+  },
+  "overrides": {
+    "tools": {
+      "bash": "ask"
+    }
+  },
+  "metadata": {}
+}

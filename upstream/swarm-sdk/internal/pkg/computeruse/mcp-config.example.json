@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "servers": [
+    {
+      "name": "computer-use",
+      "type": "stdio",
+      "enabled": true,
+      "command": "computer-use-mcp",
+      "args": [],
+      "env": {
+        "DISPLAY": ":0"
+      }
+    }
+  ]
+}

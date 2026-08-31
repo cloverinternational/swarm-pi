@@ -1,0 +1,33 @@
+{
+  "fakes": [
+    "automation_test.TestDriverScrollKeys",
+    "chat.TestAssertParallelSubAgentsNotMerged_BothAsync",
+    "chat.TestAssertParallelSubAgentsNotMerged_BothSync_Correct",
+    "chat.TestAssertParallelSubAgentsNotMerged_MergeBug",
+    "chat.TestAssertParallelSubAgentsNotMerged_SingleTask",
+    "chat.TestAssertParallelSubAgentsNotMerged_SyncAndAsyncMixed",
+    "chat.TestAttachmentLineOverflow",
+    "chat.TestCacheDebugger",
+    "chat.TestCacheHitLatency",
+    "chat.TestCenteringPreservesMessage",
+    "chat.TestConversationCachePipeline",
+    "chat.TestDetailViewer_SetSizeClamps",
+    "chat.TestEmojiWidths",
+    "chat.TestExpectedBehavior",
+    "chat.TestInlineStyles",
+    "chat.TestMarkdownRendering",
+    "chat.TestOpenRouterVsModelsDev",
+    "chat.TestRefreshModelCapabilities",
+    "chat.TestScanConversationStoreForEmptyMessages",
+    "chat.TestStreamingVsNonStreaming",
+    "chat.TestTokenFlowVisualization",
+    "chat.TestUpdateProvidersWithCapabilities",
+    "chatui_test.TestPanelView",
+    "client_test.TestAliasesCompile",
+    "safego.TestGoNilLoggerFallback",
+    "sdk.TestTokenCountBug_ReproduceMillions",
+    "settings.TestVaultExecutionHelper",
+    "subagent.TestRenderTable_NarrowDoesNotPanic",
+    "tools.TestSetDenialReason_NoSinkIsSafe"
+  ]
+}

@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0")
+string("\x1b]\t")
+string("0")
+int(18)

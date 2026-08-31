@@ -1,0 +1,23 @@
+ 	case commands.ModeSwitchMsg:
+		// Switch operating mode
+		logDebug("[MODE] ModeSwitchMsg received: mode=%s, sdk=%v", msg.Mode, a.sdk != nil)
+		if a.sdk != nil {
+			a.sdk.SetOperatingMode(msg.Mode)
+			a.operatingMode = msg.Mode // Update local state for sidepanel
+			modeUpper := strings.ToUpper(msg.Mode)
+			if modeUpper == "" {
+				modeUpper = "OFF"
+			}
+			a.addNotification("success", fmt.Sprintf("Switched to %s mode", modeUpper))
+			logDebug("[MODE] Mode set to: %s", msg.Mode)
+			if a.debugScreen != nil {
+				a.debugScreen.AddLog(fmt.Sprintf("[MODE] ✓ Switched to %s mode", modeUpper))
+			}
+
+			// Add or replace system message showing the mode change
+			// If in an active conversation, replaces the last mode message to avoid filling context
+			// Otherwise, appends the message
+			modeObj := mode.GetBuiltinMode(msg.Mode)
+			a.addOrReplaceModeMessage(modeUpper, modeObj)
+		}
+		return a, nil

@@ -1,0 +1,125 @@
+# ===========================
+# Compiled Binaries & Objects
+# ===========================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.o
+*.a
+*.test
+*.out
+
+# Go build cache
+/bin/
+/dist/
+
+# Named binaries (root-level build outputs)
+/swarm
+/swarmos
+/swarmos-ipc
+/ipc-server
+/tui-client
+/anthropic-web-search
+/swarm_test
+/test_build
+/chat.test
+/tui
+/tui_test
+# Additional root-level build outputs that were historically committed by mistake
+# (survey 2026-04-27 flagged ~260MB of tracked binaries and a 41MB merge conflict
+# on swarm-headless that forced manual `git show :1:` byte-size comparisons).
+# Re-tracking any of these now requires an explicit `git add -f`.
+/swarm-headless
+/swarm-tui-bin
+/acp-server
+/swarm-server
+
+# Binary outputs in cmd/
+cmd/*/[a-z]*
+!cmd/*/*.go
+!cmd/*/README.md
+
+# ===========================
+# Runtime & Debug Artifacts
+# ===========================
+*.log
+*.pid
+*.seed
+*.prof
+*.cpu
+*.mem
+*.trace
+*.coverprofile
+coverage.out
+
+# ===========================
+# OS & Editor
+# ===========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# ===========================
+# Language-specific
+# ===========================
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Node
+node_modules/
+
+# ===========================
+# Project-specific
+# ===========================
+# Internal working state
+.swarm/
+sdk/.swarm/
+sdk/.tmp/
+manual_tests/vhs/output/
+
+# Reference repos (not part of this project)
+/opencode/
+/example code/
+
+# Go workspace (local only)
+go.work
+
+# Prompts (local)
+/prompts/
+
+# Config (example stays, real config is local)
+config.json
+!config.example.json
+
+# ===========================
+# Root Documentation
+# ===========================
+# Only README.md, CHANGELOG.md, and LICENSE belong at root.
+# Everything else goes in docs/.
+/*.md
+!/README.md
+!/CHANGELOG.md
+!/AGENTS.md
+!/SWARM.md
+
+# Text/log artifacts at root
+/*.txt
+/*.log
+!/LICENSE.txt
+
+# Legacy doc dirs at root
+/to-do/
+/todo/
+/claude-code-analysis/
+/token-counting-experiment/
+/tmp/sidecar-ref

@@ -1,0 +1,312 @@
+# SwarmOS TUI Screen Configurations
+# Auto-generated from codebase analysis
+#
+# Screens discovered from internal/chat/app.go
+# Navigation keys from key handlers throughout the codebase
+
+screens:
+  # ============================================================================
+  # MAIN SCREENS
+  # ============================================================================
+
+  home:
+    id: "home"
+    type: "ScreenHome"
+    regions:
+      - id: "button_new_chat"
+        bounds: { x: 2, y: 5, width: 30, height: 3 }
+        clickable: true
+        navigation_target: "new_chat_modal"
+      - id: "button_conversations"
+        bounds: { x: 2, y: 8, width: 30, height: 3 }
+        clickable: true
+        navigation_target: "chats"
+      - id: "button_workflows"
+        bounds: { x: 2, y: 11, width: 30, height: 3 }
+        clickable: true
+        navigation_target: "workflows"
+      - id: "button_viewer"
+        bounds: { x: 2, y: 14, width: 30, height: 3 }
+        clickable: true
+        navigation_target: "viewer"
+      - id: "button_settings"
+        bounds: { x: 2, y: 17, width: 30, height: 3 }
+        clickable: true
+        navigation_target: "settings"
+    navigation:
+      to_new_chat: ["n"]
+      to_chats: ["c", "i"]
+      to_workflows: ["w"]
+      to_viewer: ["v"]
+      to_settings: ["s"]
+      to_debug_chatui: ["d"]
+      quit: ["q"]
+      next_button: ["j", "down", "tab", "l", "right"]
+      prev_button: ["k", "up", "shift+tab", "h", "left"]
+      select_button: ["enter", "space"]
+    detection:
+      text_patterns:
+        - "New Chat"
+        - "Conversations"
+        - "Workflows"
+
+  chats:
+    id: "chats"
+    type: "ScreenChats"
+    regions:
+      - id: "conversation_list"
+        bounds: { x: 0, y: 2, width: 40, height: -4 }
+        scrollable: true
+      - id: "conversation_preview"
+        bounds: { x: 42, y: 2, width: -2, height: -4 }
+        scrollable: true
+    navigation:
+      to_home: ["esc"]
+      to_new_chat: ["n"]
+      next_conv: ["j", "down"]
+      prev_conv: ["k", "up"]
+      first_conv: ["g"]
+      last_conv: ["G"]
+      scroll_preview_left: ["h", "left"]
+      scroll_preview_right: ["l", "right"]
+      open_conv: ["enter"]
+      filter_all: ["1"]
+      filter_branch: ["2"]
+      filter_no_branch: ["3"]
+    detection:
+      text_patterns:
+        - "Conversations"
+
+  chat:
+    id: "chat"
+    type: "ScreenChat"
+    regions:
+      - id: "message_list"
+        bounds: { x: 0, y: 2, width: -38, height: -6 }
+        scrollable: true
+      - id: "input_box"
+        bounds: { x: 2, y: -4, width: -40, height: 3 }
+        input: true
+      - id: "side_panel"
+        bounds: { x: -38, y: 2, width: 38, height: -6 }
+        optional: true
+        scrollable: true
+      - id: "top_bar"
+        bounds: { x: 0, y: 0, width: -1, height: 2 }
+    navigation:
+      to_home: ["esc"]  # Shows exit modal first
+      toggle_debug: ["ctrl+d"]
+      cycle_mode: ["shift+tab"]
+      toggle_tool_output: ["ctrl+o"]
+      next_tool: ["ctrl+]"]
+      prev_tool: ["ctrl+["]
+      toggle_tool_expand: ["ctrl+e"]
+      expand_all_tools: ["ctrl+shift+e"]
+      collapse_all_tools: ["ctrl+shift+c"]
+      toggle_message_nav: ["tab"]
+      scroll_up: ["up", "k"]
+      scroll_down: ["down", "j"]
+      page_up: ["ctrl+u"]
+      page_down: ["ctrl+d"]
+      jump_top: ["g"]
+      jump_bottom: ["G"]
+      prev_assistant_msg: ["ctrl+up"]
+      next_assistant_msg: ["ctrl+down"]
+      submit: ["enter"]
+      tool_page_prev: ["alt+left", "alt+h"]
+      tool_page_next: ["alt+right", "alt+l"]
+    detection:
+      text_patterns:
+        - "│"  # Message border
+
+  workflows:
+    id: "workflows"
+    type: "ScreenWorkflows"
+    regions:
+      - id: "workflow_list"
+        bounds: { x: 0, y: 2, width: 45, height: -4 }
+        scrollable: true
+      - id: "workflow_detail"
+        bounds: { x: 47, y: 2, width: -2, height: -4 }
+        optional: true
+    navigation:
+      to_home: ["esc"]
+      next_item: ["j", "down"]
+      prev_item: ["k", "up"]
+      select: ["enter"]
+      new_workflow: ["n"]
+    detection:
+      text_patterns:
+        - "Workflows"
+
+  viewer:
+    id: "viewer"
+    type: "ScreenViewer"
+    regions:
+      - id: "file_tree"
+        bounds: { x: 0, y: 0, width: 35, height: -1 }
+        scrollable: true
+      - id: "file_content"
+        bounds: { x: 37, y: 0, width: -1, height: -1 }
+        scrollable: true
+    navigation:
+      to_home: ["esc"]
+      toggle_tree: ["t"]
+      focus_tree: ["h", "left"]
+      focus_viewer: ["l", "right"]
+      expand_folder: ["enter", "right"]
+      collapse_folder: ["left"]
+      next_item: ["j", "down"]
+      prev_item: ["k", "up"]
+    detection:
+      text_patterns:
+        - "📁"
+
+  settings:
+    id: "settings"
+    type: "ScreenSettings"
+    regions:
+      - id: "settings_nav"
+        bounds: { x: 0, y: 2, width: 30, height: -4 }
+        scrollable: true
+      - id: "settings_content"
+        bounds: { x: 32, y: 2, width: -2, height: -4 }
+    navigation:
+      to_home: ["esc"]
+      next_section: ["j", "down", "tab"]
+      prev_section: ["k", "up", "shift+tab"]
+      select: ["enter"]
+      toggle: ["space"]
+    detection:
+      text_patterns:
+        - "Settings"
+
+  debug:
+    id: "debug"
+    type: "DebugScreen"
+    regions:
+      - id: "tab_bar"
+        bounds: { x: 0, y: 0, width: -1, height: 2 }
+      - id: "request_list"
+        bounds: { x: 0, y: 2, width: 40, height: -4 }
+        scrollable: true
+      - id: "detail_panel"
+        bounds: { x: 42, y: 2, width: -2, height: -4 }
+        scrollable: true
+    navigation:
+      close: ["ctrl+d", "esc"]
+      next_tab: ["tab", "l", "right"]
+      prev_tab: ["shift+tab", "h", "left"]
+      next_request: ["j", "down"]
+      prev_request: ["k", "up"]
+    detection:
+      text_patterns:
+        - "Debug"
+        - "Requests"
+
+  # ============================================================================
+  # MODALS
+  # ============================================================================
+
+  modal_new_chat:
+    id: "modal_new_chat"
+    type: "NewChatModal"
+    regions:
+      - id: "mode_selector"
+        bounds: { x: 10, y: 6, width: 60, height: 8 }
+        scrollable: true
+      - id: "branch_input"
+        bounds: { x: 10, y: 16, width: 60, height: 3 }
+        input: true
+        optional: true
+    navigation:
+      close: ["esc"]
+      next_mode: ["j", "down", "tab"]
+      prev_mode: ["k", "up", "shift+tab"]
+      select: ["enter"]
+      confirm: ["enter"]
+    detection:
+      text_patterns:
+        - "New Chat"
+        - "Select mode"
+
+  modal_exit:
+    id: "modal_exit"
+    type: "ModalExitChat"
+    regions:
+      - id: "options"
+        bounds: { x: 15, y: 8, width: 50, height: 6 }
+    navigation:
+      close: ["esc"]
+      confirm_exit: ["enter"]
+      cancel: ["n"]
+    detection:
+      text_patterns:
+        - "Exit"
+        - "unsaved"
+
+  modal_stop_agent:
+    id: "modal_stop_agent"
+    type: "ModalStopAgent"
+    regions:
+      - id: "options"
+        bounds: { x: 15, y: 8, width: 50, height: 6 }
+    navigation:
+      close: ["esc"]
+      confirm: ["y", "enter"]
+      cancel: ["n"]
+    detection:
+      text_patterns:
+        - "Stop"
+        - "agent"
+
+  modal_git_checkout:
+    id: "modal_git_checkout"
+    type: "CheckoutModal"
+    regions:
+      - id: "options"
+        bounds: { x: 10, y: 6, width: 60, height: 10 }
+    navigation:
+      close: ["esc"]
+      next_option: ["j", "down"]
+      prev_option: ["k", "up"]
+      select: ["enter"]
+    detection:
+      text_patterns:
+        - "checkout"
+        - "branch"
+
+  # ============================================================================
+  # OVERLAYS
+  # ============================================================================
+
+  autocomplete:
+    id: "autocomplete"
+    type: "Autocomplete"
+    regions:
+      - id: "suggestions"
+        bounds: { x: 2, y: -12, width: 50, height: 10 }
+        scrollable: true
+    navigation:
+      close: ["esc"]
+      next: ["down", "ctrl+n"]
+      prev: ["up", "ctrl+p"]
+      select: ["tab", "enter"]
+      into_dir: ["right"]
+      up_dir: ["left"]
+
+  command_palette:
+    id: "command_palette"
+    type: "CommandPalette"
+    regions:
+      - id: "search_input"
+        bounds: { x: 10, y: 4, width: 60, height: 1 }
+        input: true
+      - id: "commands"
+        bounds: { x: 10, y: 5, width: 60, height: 15 }
+        scrollable: true
+    navigation:
+      close: ["esc"]
+      next: ["down", "ctrl+n"]
+      prev: ["up", "ctrl+p"]
+      select: ["enter"]

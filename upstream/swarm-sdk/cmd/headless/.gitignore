@@ -1,0 +1,19 @@
+# Binaries
+headless
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test storage
+.headless_conversations/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/

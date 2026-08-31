@@ -1,0 +1,4 @@
+{
+  "from": "swarm.ai/v0alpha-fixture-only",
+  "wantAppliedNames": ["fixture-v0-to-v0b", "fixture-v0b-to-v1alpha1"]
+}

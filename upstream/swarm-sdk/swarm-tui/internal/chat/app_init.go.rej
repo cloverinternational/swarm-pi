@@ -1,0 +1,21 @@
+--- internal/chat/app_init.go
++++ internal/chat/app_init.go
+@@ -502,16 +502,16 @@ func NewAppWithOptions(opts AppOptions) (*App, error) {
+ 	// Easter egg: 1/10 chance of AutoVac mode (Asimov Multivac tribute)
+ 	// Roll the dice once at startup - if successful, override branding
+ 	if rand.Intn(10) == 0 {
+ 		app.autovacMode = true
+ 		app.autovacLogoText = autovacLogoText
+ 		app.autovacBrandName = "Multivac"
+-		app.autovacSplashTexts = autovacSplashTexts
+ 		// Override theme with retro green terminal aesthetic
+ 		app.theme = AutoVacTheme
++		app.currentSplashText = autovacSplashTexts[rand.Intn(len(autovacSplashTexts))]
+ 		logDebug("🎱 AutoVac mode activated! 1/10 Easter egg triggered.")
+ 	} else {
+ 		app.autovacMode = false
+ 		app.autovacLogoText = introLogoText
+ 		app.autovacBrandName = "Swarm"
+-		app.autovacSplashTexts = splashTexts
++		app.currentSplashText = splashTexts[rand.Intn(len(splashTexts))]
+ 	}

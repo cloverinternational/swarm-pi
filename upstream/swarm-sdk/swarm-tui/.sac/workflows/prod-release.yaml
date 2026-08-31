@@ -1,0 +1,43 @@
+# Production Release Workflow for SwarmOS TUI
+name: prod-release
+description: "Production release workflow - builds, tags, and publishes to GitHub releases"
+version: "1.0"
+
+lint:
+  enabled: false
+
+commit:
+  group: false
+  verbose: true
+  conventional: true
+  one_liner: false
+
+push:
+  remote: origin
+  force: false
+
+# Custom scripts for release commands
+scripts:
+  full:
+    description: "Complete production release: build, tag, publish"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh prod"
+
+  bump:
+    description: "Bump version (usage: sac run bump v1.2.3)"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh bump $VERSION"
+
+  tag:
+    description: "Create tag and GitHub release for current version"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh tag"
+
+env:
+  GO111MODULE: "on"
+
+variables:
+  project: "swarm-tui"

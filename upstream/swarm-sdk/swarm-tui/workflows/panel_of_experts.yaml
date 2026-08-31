@@ -1,0 +1,304 @@
+# Panel of Experts Workflow
+# Multiple expert agents analyze a problem from different perspectives,
+# then a synthesizer combines their insights into a consensus recommendation.
+
+id: panel_of_experts
+name: Panel of Experts
+description: |
+  Multiple expert agents analyze a problem from different perspectives
+  (security, performance, maintainability), then a synthesizer combines
+  their insights into a consensus recommendation with an executor implementing it.
+version: 1.0.0
+
+config:
+  max_duration: 30m
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 2
+  timeout_behavior: partial
+
+groups:
+  # Group 1: Expert Panel - Parallel Analysis
+  - id: expert_panel
+    name: Expert Panel
+    description: Multiple experts analyze the problem from different perspectives
+    execution: parallel
+    timeout: 10m
+    
+    agents:
+      - id: security_expert
+        name: Security Expert
+        description: Analyzes security implications, vulnerabilities, and best practices
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a security expert with deep knowledge of application security,
+          cryptography, authentication, authorization, and common vulnerabilities.
+          
+          When analyzing a problem or solution:
+          - Identify potential security risks and vulnerabilities
+          - Evaluate authentication and authorization mechanisms
+          - Check for common security anti-patterns (SQL injection, XSS, CSRF, etc.)
+          - Recommend security best practices
+          - Consider data privacy and compliance requirements
+          
+          Provide specific, actionable security recommendations.
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.7
+          supports_tools: false
+          supports_streaming: true
+      
+      - id: performance_expert
+        name: Performance Expert
+        description: Analyzes performance implications, bottlenecks, and optimizations
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a performance optimization expert with expertise in scalability,
+          caching, database optimization, and system architecture.
+          
+          When analyzing a problem or solution:
+          - Identify performance bottlenecks and inefficiencies
+          - Evaluate scalability and resource usage
+          - Recommend caching strategies and optimization techniques
+          - Consider database query optimization and indexing
+          - Assess algorithmic complexity and data structure choices
+          
+          Provide specific, measurable performance recommendations with expected impact.
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.7
+          supports_tools: false
+          supports_streaming: true
+      
+      - id: maintainability_expert
+        name: Maintainability Expert
+        description: Analyzes code quality, maintainability, and long-term sustainability
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a software engineering expert focused on code quality, maintainability,
+          and long-term sustainability of software systems.
+          
+          When analyzing a problem or solution:
+          - Evaluate code organization and architecture
+          - Assess readability and documentation quality
+          - Identify technical debt and areas for refactoring
+          - Check adherence to design principles (SOLID, DRY, KISS)
+          - Consider testability and test coverage
+          - Evaluate dependency management and coupling
+          
+          Provide specific recommendations for improving code quality and maintainability.
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.7
+          supports_tools: false
+          supports_streaming: true
+      
+      - id: ux_expert
+        name: UX Expert
+        description: Analyzes user experience, usability, and accessibility
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a user experience (UX) expert with expertise in usability,
+          accessibility, and human-computer interaction.
+          
+          When analyzing a problem or solution:
+          - Evaluate user workflows and interaction patterns
+          - Assess usability and ease of use
+          - Check accessibility compliance (WCAG standards)
+          - Identify potential user frustrations or confusion points
+          - Recommend UI/UX improvements and best practices
+          - Consider mobile responsiveness and cross-platform compatibility
+          
+          Provide specific, user-centered recommendations for improving the experience.
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.7
+          supports_tools: false
+          supports_streaming: true
+    
+    completion:
+      type: all
+      threshold: 1.0
+      max_failures: 1  # Allow one expert to fail
+    
+    steering:
+      synthesis_strategy: llm-synthesis
+      conflict_resolution: weighted
+
+  # Group 2: Synthesis - Combine Expert Opinions
+  - id: synthesis
+    name: Synthesis
+    description: Synthesize expert opinions into coherent consensus
+    execution: sequential
+    depends_on:
+      - expert_panel
+    timeout: 5m
+    
+    agents:
+      - id: synthesizer
+        name: Synthesizer
+        description: Combines expert insights into actionable recommendations
+        provider: anthropic
+        model: claude-3-opus-20240229  # Use more powerful model for synthesis
+        system_prompt: |
+          You are a synthesis expert who combines multiple expert opinions into
+          coherent, actionable recommendations.
+          
+          You will receive analysis from multiple domain experts (security, performance,
+          maintainability, UX). Your job is to:
+          
+          1. Identify areas of agreement and consensus
+          2. Highlight areas of conflict or trade-offs
+          3. Synthesize insights into a unified recommendation
+          4. Prioritize recommendations by impact and feasibility
+          5. Create a clear action plan that balances all concerns
+          
+          Structure your output as:
+          ## Consensus Points
+          - List areas where experts agree
+          
+          ## Trade-offs and Conflicts
+          - Identify conflicting recommendations and their trade-offs
+          
+          ## Prioritized Recommendations
+          1. High Priority: [recommendation with rationale]
+          2. Medium Priority: [recommendation with rationale]
+          3. Low Priority: [recommendation with rationale]
+          
+          ## Action Plan
+          - Step-by-step implementation plan
+          
+          Be specific and actionable. If there are irreconcilable conflicts,
+          provide decision criteria or suggest additional investigation.
+        context_sources:
+          - "groups.expert_panel.output"
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.5
+          supports_tools: false
+          supports_streaming: true
+    
+    completion:
+      type: quality
+      threshold: 0.8
+    
+    steering:
+      validate_plan:
+        type: llm
+        prompt: |
+          Review this synthesis for:
+          1. Coverage of all expert inputs
+          2. Clear identification of trade-offs
+          3. Actionable recommendations
+          4. Feasible action plan
+        min_confidence: 0.8
+
+  # Group 3: Execution - Implement the Consensus Plan
+  - id: executor
+    name: Executor
+    description: Execute the consensus plan with full tool access
+    execution: sequential
+    depends_on:
+      - synthesis
+    timeout: 15m
+    
+    agents:
+      - id: implementation_worker
+        name: Implementation Worker
+        description: Implements the synthesized recommendations
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are an implementation specialist who executes technical plans.
+          
+          You have been given a synthesized action plan from a panel of experts.
+          Your job is to implement this plan systematically:
+          
+          1. Review the action plan carefully
+          2. Execute each step methodically
+          3. Verify each change works as expected
+          4. Document what you did and why
+          5. Report any issues or blockers encountered
+          
+          Use the available tools to:
+          - Read and understand existing code
+          - Make necessary changes
+          - Test your changes
+          - Document your work
+          
+          Be thorough and careful. If something is unclear, ask for clarification.
+          If you encounter issues, explain what went wrong and suggest alternatives.
+        tools:
+          - "*"  # Full tool access
+        context_sources:
+          - "groups.synthesis.output"
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.3  # Lower temperature for implementation
+          supports_tools: true
+          supports_streaming: true
+          max_turns: 20  # Allow multiple turns for complex implementations
+          timeout: 900  # 15 minutes
+    
+    completion:
+      type: all
+      threshold: 1.0
+
+# Optional steering configuration for the entire workflow
+steering:
+  type: hybrid
+  
+  # LLM meta-agent for quality oversight
+  llm_meta_agent:
+    id: oversight
+    name: Workflow Oversight
+    provider: anthropic
+    model: claude-3-opus-20240229
+    system_prompt: |
+      You oversee a multi-agent workflow and ensure quality at each stage.
+      
+      Your role is to:
+      - Validate expert analyses are thorough and well-reasoned
+      - Ensure synthesis properly combines all expert input
+      - Verify implementation follows the consensus plan
+      - Flag issues, inconsistencies, or missing considerations
+      
+      For each stage, evaluate:
+      - Completeness: Did agents cover all important aspects?
+      - Quality: Are recommendations specific and actionable?
+      - Consistency: Do outputs align with prior stages?
+      - Safety: Are there any red flags or risks?
+      
+      Provide clear feedback on what should be improved or reconsidered.
+  
+  # Rule-based checks
+  rules:
+    - id: min_expert_responses
+      condition: "group.expert_panel.success_count >= 3"
+      action: approve
+      priority: 10
+    
+    - id: synthesis_length_check
+      condition: "group.synthesis.output.length < 500"
+      action: retry_with_more_context
+      priority: 5
+      parameters:
+        additional_context: "Please provide more detailed recommendations"
+
+# Metadata
+metadata:
+  author: SwarmOS Team
+  category: collaborative_analysis
+  tags:
+    - panel-of-experts
+    - multi-perspective
+    - consensus
+  use_cases:
+    - Architecture review
+    - Code review
+    - Feature planning
+    - Problem analysis

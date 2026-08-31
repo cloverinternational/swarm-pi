@@ -1,0 +1,132 @@
+name: Auto-cleanup Documentation
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  cleanup-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Check for misplaced documentation files
+        id: check
+        run: |
+          # Create docs folder if it doesn't exist
+          mkdir -p docs
+          
+          # Define files that should stay in root
+          KEEP_FILES=(
+            "README.md"
+            "CHANGELOG.md"
+            "LICENSE"
+            "Makefile"
+            "Dockerfile"
+            ".gitignore"
+            ".gitmodules"
+            "install"
+            "install.sh"
+            "go.mod"
+            "go.sum"
+            "go.work.sum"
+            "config.example.json"
+          )
+          
+          # Function to check if file should be kept
+          should_keep_file() {
+            local file="$1"
+            local basename=$(basename "$file")
+            
+            # Keep shell scripts in root
+            if [[ "$basename" == *.sh ]]; then
+              return 0
+            fi
+            
+            # Check against keep list
+            for keep in "${KEEP_FILES[@]}"; do
+              if [[ "$basename" == "$keep" ]]; then
+                return 0
+              fi
+            done
+            
+            return 1
+          }
+          
+          moved=0
+          
+          # Process markdown files
+          while IFS= read -r -d '' file; do
+            basename=$(basename "$file")
+            if [[ "$file" != ./docs/* ]]; then
+              if ! should_keep_file "$file"; then
+                echo "Moving $basename to docs/"
+                git mv "$file" "docs/" 2>/dev/null || mv "$file" "docs/"
+                ((moved++))
+              fi
+            fi
+          done < <(find . -maxdepth 1 -type f -name "*.md" -print0 2>/dev/null || true)
+          
+          # Process text files
+          while IFS= read -r -d '' file; do
+            basename=$(basename "$file")
+            if [[ "$file" != ./docs/* ]]; then
+              echo "Moving $basename to docs/"
+              git mv "$file" "docs/" 2>/dev/null || mv "$file" "docs/"
+              ((moved++))
+            fi
+          done < <(find . -maxdepth 1 -type f -name "*.txt" -print0 2>/dev/null || true)
+          
+          # Move orphaned directories
+          for dir in to-do todo claude-code-analysis token-counting-experiment; do
+            if [ -d "$dir" ]; then
+              echo "Moving $dir/ to docs/"
+              git mv "$dir" "docs/" 2>/dev/null || mv "$dir" "docs/"
+              ((moved++))
+            fi
+          done
+          
+          echo "moved=$moved" >> $GITHUB_OUTPUT
+      
+      - name: Commit changes
+        if: steps.check.outputs.moved != '0'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/
+          git commit -m "chore: auto-move documentation to docs/ folder [skip ci]" || echo "No changes to commit"
+      
+      - name: Push changes
+        if: steps.check.outputs.moved != '0' && github.event_name == 'push'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
+      
+      - name: Comment on PR
+        if: steps.check.outputs.moved != '0' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🤖 Auto-cleanup bot moved ${{ steps.check.outputs.moved }} documentation file(s) to the `docs/` folder to keep the repository root clean.'
+            })

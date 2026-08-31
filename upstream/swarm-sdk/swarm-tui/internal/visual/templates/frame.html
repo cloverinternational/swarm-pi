@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm Visual Picker</title>
+<link rel="stylesheet" href="/static/app.bundle.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="sw-root"></div>
+<script>
+  window.__SW_CSRF__ = "{{.CSRF}}";
+  window.__SW_SESSION__ = "{{.SessionID}}";
+  window.__SW_AUTH__ = "{{.AuthToken}}";
+</script>
+<script src="/static/app.bundle.js"></script>
+<script src="/static/transport.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+*
+
+# Dockerfile.stress builds the swarm-sdk module with its local swarm-core
+# replacement. Keep the build context to those two source trees.
+!swarm-sdk/
+!swarm-sdk/**
+!swarm-core/
+!swarm-core/**
+
+# Exclude generated binaries, worktrees, profiles, and local runtime state.
+**/.git/
+swarm-sdk/.worktrees/
+swarm-sdk/.swarm/
+swarm-sdk/.swarmflow/
+swarm-sdk/debug/
+swarm-sdk/report/
+swarm-sdk/swarm-tui/.worktrees/
+swarm-sdk/swarm-tui/.swarm/
+swarm-sdk/swarm-tui/debug/
+swarm-sdk/swarm-tui/reports/
+swarm-sdk/swarm-tui/profiles/
+swarm-sdk/swarm-tui/profiles-*/
+**/*.pb.gz
+**/*.prof
+swarm-sdk/swarm-tui/swarm
+swarm-sdk/swarm-tui/swarm-headless
+swarm-sdk/swarmos
+swarm-sdk/headless
+swarm-sdk/swarm-gateway

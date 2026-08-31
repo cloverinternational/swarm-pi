@@ -1,0 +1,38 @@
+name: test-completion-signals
+description: Test workflow to demonstrate completion signal system
+
+config:
+  execution: parallel
+  completion:
+    type: all  # All agents must complete (with IsWorkComplete = true)
+
+groups:
+  - name: analysis-team
+    description: Parallel analysis group
+    agents:
+      - id: analyst1
+        name: Market Analyst
+        provider: '@current'
+        model: '@current'
+        description: Analyze market trends
+      
+      - id: analyst2
+        name: Risk Analyst
+        provider: '@current'
+        model: '@current'
+        description: Assess risk factors
+
+input: |
+  Please analyze the following company:
+  
+  Name: TechCorp Inc
+  Industry: Cloud Computing
+  Market Cap: $500M
+  
+  Provide a comprehensive analysis including:
+  1. Current market position
+  2. Growth potential
+  3. Risk assessment
+  4. Investment thesis
+  
+  Conclude with a clear final summary.

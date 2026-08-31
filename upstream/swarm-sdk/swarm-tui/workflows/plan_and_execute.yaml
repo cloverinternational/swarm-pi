@@ -1,0 +1,259 @@
+# Plan and Execute Workflow
+# A planning agent creates a detailed plan, then an executor implements it.
+# This is a classic two-stage workflow for complex tasks.
+
+id: plan_and_execute
+name: Plan and Execute
+description: |
+  A planning agent analyzes the problem and creates a detailed execution plan,
+  then an executor agent implements the plan step-by-step with full tool access.
+version: 1.0.0
+
+config:
+  max_duration: 45m
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 3
+  timeout_behavior: partial
+
+groups:
+  # Group 1: Planning - Create detailed execution plan
+  - id: planning
+    name: Planning
+    description: Analyze problem and create detailed execution plan
+    execution: sequential
+    timeout: 10m
+    
+    agents:
+      - id: planner
+        name: Strategic Planner
+        description: Creates comprehensive execution plans
+        provider: anthropic
+        model: claude-3-opus-20240229  # Use powerful model for planning
+        system_prompt: |
+          You are a strategic planning expert who excels at breaking down complex
+          problems into clear, executable steps.
+          
+          When creating a plan:
+          1. Analyze the problem thoroughly
+          2. Identify all required steps and dependencies
+          3. Consider potential risks and edge cases
+          4. Create a clear, ordered sequence of actions
+          5. Specify success criteria for each step
+          6. Include verification and testing steps
+          
+          Your plan should be:
+          - Specific: Concrete actions, not vague descriptions
+          - Ordered: Clear dependencies and sequence
+          - Complete: Cover all aspects of the problem
+          - Verifiable: Include how to validate each step
+          - Resilient: Account for potential failures
+          
+          Structure your output as:
+          ## Problem Analysis
+          - Summary of the problem
+          - Key requirements and constraints
+          - Success criteria
+          
+          ## Execution Plan
+          ### Step 1: [Step Name]
+          - **Action**: What to do
+          - **Why**: Rationale
+          - **How**: Specific implementation details
+          - **Verification**: How to verify success
+          - **Dependencies**: What must be done first
+          - **Risks**: Potential issues
+          
+          [Repeat for all steps]
+          
+          ## Testing Strategy
+          - How to validate the overall solution
+          
+          ## Rollback Plan
+          - How to undo changes if something goes wrong
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.7
+          supports_tools: true  # Can read code to inform planning
+          supports_streaming: true
+    
+    completion:
+      type: all
+      threshold: 1.0
+    
+    steering:
+      validate_plan:
+        type: llm
+        prompt: |
+          Review this execution plan for:
+          1. Completeness: Are all necessary steps included?
+          2. Clarity: Is each step specific and actionable?
+          3. Order: Are dependencies properly sequenced?
+          4. Safety: Are risks identified and mitigated?
+          5. Verification: Can each step be validated?
+          
+          Approve if score >= 8/10. Provide specific feedback for improvements.
+        min_confidence: 0.8
+
+  # Group 2: Execution - Implement the plan
+  - id: execution
+    name: Execution
+    description: Execute the plan step-by-step
+    execution: sequential
+    depends_on:
+      - planning
+    timeout: 30m
+    
+    agents:
+      - id: executor
+        name: Execution Agent
+        description: Implements the plan with full tool access
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are an implementation specialist who executes detailed plans.
+          
+          You have been given a comprehensive execution plan. Your job is to:
+          
+          1. Review the plan carefully before starting
+          2. Execute each step in order
+          3. Verify each step completes successfully before proceeding
+          4. Document your actions and results
+          5. Handle errors gracefully and adjust as needed
+          6. Report progress and any deviations from the plan
+          
+          For each step:
+          - State what you're about to do
+          - Execute the action using available tools
+          - Verify the result matches expectations
+          - Document any issues or changes
+          - Proceed to next step only after verification
+          
+          If you encounter problems:
+          - Explain what went wrong
+          - Assess if you can recover or need to adjust the plan
+          - Suggest alternatives if the original approach doesn't work
+          - Ask for guidance if needed
+          
+          Be methodical, thorough, and transparent about your actions.
+        tools:
+          - "*"  # Full tool access
+        context_sources:
+          - "groups.planning.output"
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.3  # Lower temperature for precise execution
+          supports_tools: true
+          supports_streaming: true
+          max_turns: 30  # Allow many turns for complex implementations
+          timeout: 1800  # 30 minutes
+    
+    completion:
+      type: all
+      threshold: 1.0
+
+  # Group 3: Verification - Validate the implementation
+  - id: verification
+    name: Verification
+    description: Verify the implementation meets all requirements
+    execution: sequential
+    depends_on:
+      - execution
+    timeout: 10m
+    
+    agents:
+      - id: verifier
+        name: Verification Agent
+        description: Validates implementation against plan requirements
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a quality assurance specialist who verifies implementations
+          against their original requirements and plans.
+          
+          You have access to:
+          - The original plan (from planning stage)
+          - The execution log (what was actually done)
+          
+          Your job is to:
+          
+          1. Compare the implementation against the plan
+          2. Verify each step was completed as specified
+          3. Test the solution against the success criteria
+          4. Identify any gaps or deviations
+          5. Validate that the solution works end-to-end
+          6. Document test results
+          
+          Structure your verification report:
+          
+          ## Verification Results
+          
+          ### Steps Completed
+          - [List each planned step and its completion status]
+          
+          ### Success Criteria
+          - [Check each criterion from the plan]
+          
+          ### Testing
+          - [Describe tests performed and results]
+          
+          ### Deviations
+          - [Any differences from the original plan]
+          
+          ### Issues Found
+          - [Any problems or concerns]
+          
+          ### Overall Assessment
+          - **Status**: Pass/Fail/Partial
+          - **Confidence**: High/Medium/Low
+          - **Recommendations**: Any follow-up actions needed
+          
+          Be thorough and objective. If something doesn't work, explain clearly.
+        tools:
+          - "*"  # Full tool access for testing
+        context_sources:
+          - "groups.planning.output"
+          - "groups.execution.output"
+        capabilities:
+          max_tokens: 6000
+          temperature: 0.5
+          supports_tools: true
+          supports_streaming: true
+          max_turns: 15
+    
+    completion:
+      type: all
+      threshold: 1.0
+
+# Steering configuration
+steering:
+  type: llm-based
+  
+  llm_meta_agent:
+    id: supervisor
+    name: Workflow Supervisor
+    provider: anthropic
+    model: claude-3-opus-20240229
+    system_prompt: |
+      You supervise a plan-and-execute workflow to ensure quality.
+      
+      Monitor each stage:
+      - Planning: Is the plan complete, clear, and feasible?
+      - Execution: Is the executor following the plan correctly?
+      - Verification: Are tests thorough and results valid?
+      
+      Flag issues early and suggest corrections when needed.
+      Approve progression only when quality standards are met.
+
+metadata:
+  author: SwarmOS Team
+  category: structured_execution
+  tags:
+    - planning
+    - execution
+    - verification
+  use_cases:
+    - Complex refactoring
+    - Feature implementation
+    - System migration
+    - Infrastructure changes

@@ -1,0 +1,147 @@
+config:
+    allow_human_intervention: true
+    fail_on_steering_block: false
+    max_duration: 20m
+    max_retries: 3
+    timeout_behavior: partial
+description: Stages changes, reviews them, separates into logical individual commits, then merges and commits
+groups:
+    - agents:
+        - capabilities:
+            max_tokens: 25000
+            temperature: 0.3
+          description: Stages changes and reviews code quality
+          id: staging_agent
+          model: zai-glm-4.7
+          name: Staging Agent
+          provider: Cerebras
+          system_prompt: |-
+            You are a Git staging specialist. Your role is to:
+            1. Analyze all changes in the working directory using git status and git diff
+            2. Stage appropriate changes using git add
+            3. Review the staged changes for quality, consistency, and potential issues
+            4. Provide a detailed report of what was staged and any concerns
+            5. Identify different types of changes (features, fixes, refactors, docs, etc.)
+
+            Be thorough in your review and flag any issues before proceeding to commit.
+          tools:
+            - Bash
+            - Grep
+            - Read
+            - Write
+            - Edit
+            - apply_patch
+            - TodoRead
+            - TodoWrite
+            - Task
+            - BackgroundTask
+            - ReadBackgroundCommand
+      completion:
+        threshold: 1
+        type: all
+      description: Stages changes and performs initial review
+      execution: sequential
+      id: staging_review
+      name: Staging & Review
+      timeout: 5m
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.4
+          description: Analyzes staged changes and creates logical commit groupings
+          id: separation_agent
+          model: zai-glm-4.7
+          name: Commit Separator
+          provider: Cerebras
+          system_prompt: |-
+            You are a commit organization specialist. Your role is to:
+            1. Analyze all staged changes from the previous stage
+            2. Group changes into logical, atomic commits based on:
+               - Type of change (feature, bugfix, refactor, docs, tests, style)
+               - Related functionality or files
+               - Dependencies between changes
+            3. Create a detailed plan for individual commits with:
+               - Which files/hunks belong to each commit
+               - Descriptive commit messages following conventional commit format
+               - Order of commits (respecting dependencies)
+            4. Ensure each commit is self-contained and builds successfully
+
+            Output a clear, structured plan for the merge agent to execute.
+          tools:
+            - Bash
+            - Grep
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+      completion:
+        threshold: 1
+        type: all
+      depends_on:
+        - staging_review
+      description: Analyzes changes and separates them into logical individual commits
+      execution: sequential
+      id: commit_separation
+      name: Commit Separation
+      timeout: 8m
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.2
+          description: Executes individual commits and performs final merge
+          id: merge_agent
+          model: zai-glm-4.7
+          name: Merge Agent
+          provider: Cerebras
+          system_prompt: |-
+            You are a Git commit execution specialist. Your role is to:
+            1. Follow the commit plan from the separation stage
+            2. For each planned commit:
+               - Stage only the specified files/changes using git add
+               - Create the commit with the provided message using git commit
+               - Verify the commit was successful
+            3. After all individual commits are made:
+               - Verify the working directory is clean
+               - Check if any merge operations are needed
+               - Execute any final merge commands
+            4. Provide a summary of all commits created and final repository state
+
+            Execute commits carefully and verify each step. If any commit fails, report the issue immediately.
+          tools:
+            - Bash
+            - Grep
+            - Read
+            - Write
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+      completion:
+        threshold: 1
+        type: all
+      depends_on:
+        - commit_separation
+      description: Executes the individual commits and performs final merge
+      execution: sequential
+      id: merge_commit
+      name: Merge & Commit
+      timeout: 5m
+id: git_staging_workflow
+metadata:
+    author: Workflow Assistant
+    category: development
+    created_at: "2026-02-05T12:35:01-04:00"
+    tags:
+        - git
+        - version-control
+        - staging
+        - commit
+    use_cases:
+        - git workflow automation
+        - code staging
+        - commit organization
+        - version control
+        - automated code review
+name: Git Staging & Commit Workflow
+steering:
+    type: none
+version: 1.0.0

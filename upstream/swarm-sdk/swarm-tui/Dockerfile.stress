@@ -1,0 +1,65 @@
+# Dockerfile for Swarm TUI Memory Stress Testing
+# Minimal image with 100MB memory limit support
+
+# Build stage - use golang:latest which has the newest Go version
+FROM golang:alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set GOTOOLCHAIN to auto to allow Go to download required version
+ENV GOTOOLCHAIN=auto
+
+# Copy only the modules needed by this build (build context = repo root).
+# NOTE: swarm-tui is NOT a standalone module anymore — it lives under
+# swarm-sdk/swarm-tui and is part of the github.com/Swarm-Code/mono/swarm-sdk
+# module, wired via the top-level go.work workspace. Build it from there.
+COPY swarm-sdk ./swarm-sdk
+COPY swarm-core ./swarm-core
+
+# Build with debugging symbols for profiling.
+# GOWORK=off so the image build doesn't require every go.work `use` dir;
+# build directly within the swarm-sdk module which contains swarm-tui.
+RUN cd swarm-sdk && \
+    GOWORK=off GOFLAGS=-mod=mod CGO_ENABLED=0 \
+    go build -tags fts5 -ldflags="-s -w" -o /build/swarm-tui-binary ./swarm-tui/cmd/swarmos && \
+    ls -la /build/
+
+# Runtime stage - minimal
+FROM alpine:3.19
+
+# Install minimal runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    ncurses-terminfo-base \
+    wget \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN adduser -D -g '' swarmuser
+
+# Set up environment
+ENV TERM=xterm-256color \
+    COLORTERM=truecolor \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    SWARMOS_PPROF=6060
+
+# Copy binary
+COPY --from=builder /build/swarm-tui-binary /usr/local/bin/swarm-tui
+
+# Create directories for credentials and profiles
+RUN mkdir -p /home/swarmuser/.config/swarm /tmp/profiles && \
+    chown -R swarmuser:swarmuser /home/swarmuser /tmp/profiles
+
+WORKDIR /home/swarmuser
+USER swarmuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD pgrep swarm-tui || exit 1
+
+ENTRYPOINT ["/usr/local/bin/swarm-tui"]

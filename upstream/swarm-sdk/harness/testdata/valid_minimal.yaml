@@ -1,0 +1,13 @@
+apiVersion: swarm.ai/v1alpha1
+kind: Harness
+metadata:
+  name: minimal
+provider:
+  id: anthropic
+  model: claude-x
+agent:
+  systemPrompt:
+    inline: "You are a helpful harness agent."
+  tools:
+    - forge.read
+    - forge.apply_patch

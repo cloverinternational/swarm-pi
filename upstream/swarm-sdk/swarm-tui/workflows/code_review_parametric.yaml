@@ -1,0 +1,219 @@
+id: code_review_parametric
+name: Code Review (Interactive)
+description: Interactive code review with configurable parameters
+version: 1.0.0
+
+# Interactive parameters collected before execution
+parameters:
+  - id: code_path
+    question: "What directory or file would you like to review?"
+    description: "Enter the path to the code you want reviewed (relative or absolute)"
+    type: text
+    required: true
+    validation:
+      min_length: 1
+      max_length: 500
+    metadata:
+      title: "Code Path"
+      priority: "high"
+  
+  - id: review_depth
+    question: "How thorough should the review be?"
+    description: "Choose the level of detail for the code review"
+    type: choice
+    required: true
+    choices:
+      - "quick"
+      - "standard"
+      - "thorough"
+    default: "standard"
+    metadata:
+      title: "Review Depth"
+      priority: "medium"
+  
+  - id: focus_areas
+    question: "Select focus areas for the review (optional)"
+    description: "Choose which aspects to emphasize"
+    type: multi_choice
+    required: false
+    choices:
+      - "security"
+      - "performance"
+      - "maintainability"
+      - "testing"
+      - "documentation"
+    default:
+      - "security"
+      - "maintainability"
+    metadata:
+      title: "Focus Areas"
+      priority: "medium"
+  
+  - id: include_suggestions
+    question: "Include improvement suggestions?"
+    description: "Whether to provide concrete suggestions for improvements"
+    type: confirm
+    required: false
+    default: true
+    metadata:
+      title: "Include Suggestions"
+      priority: "low"
+
+config:
+  max_duration: 15m
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 2
+  timeout_behavior: partial
+
+groups:
+  - id: review_team
+    name: Code Review Team
+    description: Analyze code from different perspectives
+    execution: parallel
+    timeout: 10m
+    
+    agents:
+      - id: security_reviewer
+        name: Security Reviewer
+        description: Focus on security vulnerabilities and best practices
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a security-focused code reviewer.
+          
+          Review the code at: {{ .code_path }}
+          Review depth: {{ .review_depth }}
+          Focus areas: {{ .focus_areas }}
+          
+          Analyze the code for security vulnerabilities, including:
+          - Input validation issues
+          - Authentication/authorization flaws
+          - SQL injection risks
+          - XSS vulnerabilities
+          - Sensitive data exposure
+          - Cryptographic weaknesses
+          
+          {% if .include_suggestions %}
+          For each issue found, provide:
+          1. Description of the vulnerability
+          2. Severity level (critical/high/medium/low)
+          3. Concrete code example showing how to fix it
+          4. References to security standards (OWASP, CWE, etc.)
+          {% endif %}
+        
+        tools:
+          - Read
+          - Grep
+          - Bash
+        
+        capabilities:
+          max_tokens: 6000
+          temperature: 0.3
+      
+      - id: maintainability_reviewer
+        name: Maintainability Reviewer
+        description: Focus on code quality and maintainability
+        provider: anthropic
+        model: claude-3-5-sonnet-20241022
+        system_prompt: |
+          You are a code quality and maintainability expert.
+          
+          Review the code at: {{ .code_path }}
+          Review depth: {{ .review_depth }}
+          Focus areas: {{ .focus_areas }}
+          
+          Analyze the code for maintainability issues:
+          - Code complexity (cyclomatic complexity, nesting depth)
+          - Code duplication (DRY violations)
+          - Naming conventions
+          - Function/class size
+          - Separation of concerns
+          - Design patterns usage
+          
+          {% if .include_suggestions %}
+          For each issue, provide:
+          1. Description of the problem
+          2. Impact on maintainability
+          3. Refactoring recommendations with examples
+          4. Best practices references
+          {% endif %}
+        
+        tools:
+          - Read
+          - Grep
+          - Bash
+        
+        capabilities:
+          max_tokens: 6000
+          temperature: 0.3
+    
+    completion:
+      type: all
+      threshold: 1.0
+  
+  - id: synthesis
+    name: Synthesis
+    description: Combine findings into actionable report
+    execution: sequential
+    depends_on:
+      - review_team
+    timeout: 5m
+    
+    agents:
+      - id: synthesizer
+        name: Review Synthesizer
+        description: Combine all findings into a comprehensive report
+        provider: anthropic
+        model: claude-3-opus-20240229
+        system_prompt: |
+          You are synthesizing code review findings.
+          
+          Original request:
+          - Code path: {{ .code_path }}
+          - Review depth: {{ .review_depth }}
+          - Focus areas: {{ .focus_areas }}
+          - Include suggestions: {{ .include_suggestions }}
+          
+          Create a comprehensive code review report with:
+          1. Executive Summary
+          2. Critical Findings (priority: high/critical)
+          3. Recommendations (medium/low priority)
+          4. Action Items (prioritized list)
+          {% if .include_suggestions %}
+          5. Implementation Guide (step-by-step improvement plan)
+          {% endif %}
+          
+          Be concise, actionable, and reference specific code locations.
+        
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.5
+    
+    completion:
+      type: all
+      threshold: 1.0
+
+steering:
+  type: rule-based
+  rules:
+    - id: validate_path_exists
+      condition: "code_path_invalid"
+      action: block
+      priority: 10
+      parameters:
+        message: "The specified code path does not exist or is not accessible"
+
+metadata:
+  author: SwarmOS Team
+  category: code_review
+  tags:
+    - code_review
+    - interactive
+    - parametric
+    - security
+    - quality
+  use_cases:
+    - Interactive code reviews with customizable focus
+    - Security audits
+    - Code quality assessments

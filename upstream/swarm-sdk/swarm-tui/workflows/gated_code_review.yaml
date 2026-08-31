@@ -1,0 +1,273 @@
+config:
+    allow_human_intervention: true
+    fail_on_steering_block: false
+    max_duration: 30m
+    max_retries: 2
+    timeout_behavior: partial
+description: |
+    A comprehensive code review workflow that uses quality gates and consensus
+    mechanisms to ensure thorough, high-quality reviews. Features adaptive routing
+    based on consensus results and quality scores.
+groups:
+    - agents:
+        - capabilities:
+            max_tokens: 4000
+            temperature: 0.3
+          description: Reviews code for security vulnerabilities
+          id: security_reviewer
+          model: claude-sonnet-4-5-20250929
+          name: Security Reviewer
+          provider: ClaudeCode
+          system_prompt: |
+            You are a security-focused code reviewer. Analyze the code for:
+            - Security vulnerabilities (SQL injection, XSS, CSRF, etc.)
+            - Authentication and authorization issues
+            - Data validation and sanitization
+            - Sensitive data exposure
+            - Cryptographic weaknesses
+
+            Provide specific, actionable feedback with severity ratings.
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+        - capabilities:
+            max_tokens: 4000
+            temperature: 0.3
+          description: Reviews code for performance issues
+          id: performance_reviewer
+          model: claude-3-5-sonnet-20241022
+          name: Performance Reviewer
+          provider: anthropic
+          system_prompt: |
+            You are a performance-focused code reviewer. Analyze the code for:
+            - Algorithmic complexity issues
+            - Database query optimization opportunities
+            - Memory leaks and resource management
+            - Caching opportunities
+            - Bottlenecks and scalability concerns
+
+            Provide specific, measurable recommendations.
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+        - capabilities:
+            max_tokens: 4000
+            temperature: 0.3
+          description: Reviews code quality and maintainability
+          id: code_quality_reviewer
+          model: claude-3-5-sonnet-20241022
+          name: Code Quality Reviewer
+          provider: anthropic
+          system_prompt: |
+            You are a code quality reviewer. Analyze the code for:
+            - Code organization and structure
+            - Adherence to design principles (SOLID, DRY, KISS)
+            - Naming conventions and readability
+            - Error handling and edge cases
+            - Test coverage and testability
+
+            Provide constructive feedback for improvement.
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+      completion:
+        threshold: 1
+        type: all
+      description: Multiple reviewers analyze the code in parallel
+      execution: parallel
+      id: initial_review
+      name: Initial Code Review
+      steering:
+        conflict_resolution: weighted
+        synthesis_strategy: llm-synthesis
+      timeout: 10m
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.4
+          context_sources:
+            - groups.initial_review.output
+          description: Synthesizes conflicting reviews
+          id: synthesis_agent
+          model: claude-3-opus-20240229
+          name: Synthesis Agent
+          provider: anthropic
+          system_prompt: |
+            You are a senior technical reviewer who synthesizes multiple code reviews.
+
+            You will receive reviews from security, performance, and quality reviewers.
+            Your job is to:
+            1. Identify areas of agreement
+            2. Resolve conflicts and trade-offs
+            3. Prioritize recommendations
+            4. Create a unified, actionable review
+
+            Structure your output clearly with:
+            - Critical Issues (must fix)
+            - Important Improvements (should fix)
+            - Optional Enhancements (nice to have)
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+      completion:
+        threshold: 1
+        type: all
+      depends_on:
+        - initial_review
+      description: Synthesize divergent reviews into unified recommendations
+      execution: sequential
+      id: consensus_synthesis
+      name: Consensus Synthesis
+      timeout: 5m
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.2
+          context_sources:
+            - groups.initial_review.agents.security_reviewer.output
+          description: Expert security analyst
+          id: security_specialist
+          model: claude-3-opus-20240229
+          name: Security Specialist
+          provider: anthropic
+          system_prompt: |
+            You are a security specialist performing deep security analysis.
+
+            Review the code and initial security findings for:
+            - Exploitation scenarios
+            - Attack vectors
+            - Impact assessment
+            - Remediation strategies
+
+            Provide detailed security recommendations with:
+            - Severity: Critical, High, Medium, Low
+            - CVSS score (if applicable)
+            - Step-by-step remediation
+            - Prevention strategies
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+      completion:
+        threshold: 1
+        type: all
+      depends_on:
+        - initial_review
+        - consensus_synthesis
+      description: In-depth security analysis if critical issues detected
+      execution: sequential
+      id: security_deep_dive
+      name: Security Deep Dive
+      timeout: 8m
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.3
+          context_sources:
+            - groups.initial_review.output
+            - groups.consensus_synthesis.output
+            - groups.security_deep_dive.output
+          description: Generates final review report
+          id: report_generator
+          model: claude-3-5-sonnet-20241022
+          name: Report Generator
+          provider: anthropic
+          system_prompt: |
+            You are a technical writer generating a code review report.
+
+            Synthesize all review findings into a professional report with:
+            1. Executive Summary
+            2. Critical Issues (blocker for merge)
+            3. Important Recommendations
+            4. Optional Enhancements
+            5. Security Analysis Summary
+            6. Performance Recommendations
+            7. Code Quality Improvements
+
+            Use clear markdown formatting with severity indicators.
+          tools:
+            - Bash
+            - Read
+            - TodoRead
+            - TodoWrite
+            - ReadBackgroundCommand
+            - Grep
+      completion:
+        threshold: 0.85
+        type: quality
+      depends_on:
+        - initial_review
+        - consensus_synthesis
+        - security_deep_dive
+      description: Generate comprehensive review report
+      execution: sequential
+      id: final_report
+      name: Final Report Generation
+      timeout: 5m
+id: gated_code_review
+metadata:
+    author: SwarmOS Team
+    category: code_review
+    features:
+        - Quality gates with hybrid evaluation
+        - Consensus-based review validation
+        - Adaptive routing to deep-dive analysis
+        - Automatic synthesis of conflicting reviews
+        - Cost and resource limits
+    tags:
+        - code-review
+        - quality-gates
+        - consensus
+        - gated-workflow
+    use_cases:
+        - Pull request review
+        - Security audit
+        - Code quality assessment
+    version: 1.0.0
+name: Gated Code Review with Consensus
+steering:
+    llm_meta_agent:
+        id: oversight
+        model: claude-3-opus-20240229
+        name: Code Review Oversight
+        provider: anthropic
+        system_prompt: |
+            You oversee a multi-agent code review workflow.
+
+            Your role is to:
+            - Validate that reviews are thorough and accurate
+            - Ensure consensus is properly evaluated
+            - Verify critical issues are addressed
+            - Monitor overall quality
+
+            Flag any concerns about review quality or completeness.
+    rules:
+        - action: approve
+          condition: group.initial_review.success_count >= 3
+          id: min_reviewers_passed
+          priority: 10
+        - action: route_to_group
+          condition: output contains 'CRITICAL'
+          id: critical_issues_found
+          priority: 20
+    type: hybrid
+version: 1.0.0

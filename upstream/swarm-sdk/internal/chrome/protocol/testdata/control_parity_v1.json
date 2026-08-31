@@ -1,0 +1,107 @@
+{
+  "secret": "utf8-秘密-0123456789abcdef0123456789",
+  "selected": {
+    "rpc": "swarm.chrome.rpc/1.0",
+    "events": "swarm.chrome.events/1.0",
+    "capabilities": [
+      "claim_v1",
+      "execution_journal_v1",
+      "close_epoch_v1",
+      "ownership_rebind_v1",
+      "ownership_reconcile_v1"
+    ]
+  },
+  "handshake": {
+    "installation_id": "installation-fixture",
+    "client_nonce": "client-nonce-fixture",
+    "server_nonce": "server-nonce-fixture",
+    "manager_epoch": 42,
+    "manager_instance_id": "manager-instance-fixture",
+    "server_proof": "_asJY6rZgbazvaojnRG4IDbFAA7O3yT3LUnULp3EWoo",
+    "client_proof": "RbPuMhBoVEMV_2IK_oaev0HFh-lctK4jrvEZxjEt1GM"
+  },
+  "rebind": {
+    "claim_id": "claim-fixture",
+    "generation": 7,
+    "window_id": 91,
+    "challenge": "challenge-fixture",
+    "proof": "oY59BKRfPxv0tz-7RIODL8XgbpCYeKfTSL-f85bxjbA"
+  },
+  "extension_to_manager": [
+    {
+      "contract": "swarm.chrome.control/1.0",
+      "kind": "auth_hello",
+      "installation_id": "installation-fixture",
+      "client_nonce": "client-nonce-fixture",
+      "supported": {
+        "rpc": [{"major": 1, "min_minor": 0, "max_minor": 0}],
+        "events": [{"major": 1, "min_minor": 0, "max_minor": 0}],
+        "capabilities": ["claim_v1", "execution_journal_v1", "close_epoch_v1", "ownership_rebind_v1", "ownership_reconcile_v1"]
+      }
+    },
+    {
+      "contract": "swarm.chrome.control/1.0",
+      "kind": "auth_proof",
+      "installation_id": "installation-fixture",
+      "client_nonce": "client-nonce-fixture",
+      "server_nonce": "server-nonce-fixture",
+      "manager_epoch": 42,
+      "manager_instance_id": "manager-instance-fixture",
+      "selected": {
+        "rpc": "swarm.chrome.rpc/1.0",
+        "events": "swarm.chrome.events/1.0",
+        "capabilities": ["claim_v1", "execution_journal_v1", "close_epoch_v1", "ownership_rebind_v1", "ownership_reconcile_v1"]
+      },
+      "client_proof": "RbPuMhBoVEMV_2IK_oaev0HFh-lctK4jrvEZxjEt1GM"
+    },
+    {"contract": "swarm.chrome.control/1.0", "kind": "window_claim_requested", "launch_id": "launch-fixture", "window_id": 91, "tab_ids": [92]},
+    {"contract": "swarm.chrome.control/1.0", "kind": "claim_staged", "launch_id": "launch-fixture", "claim_id": "claim-fixture", "generation": 7, "window_id": 91},
+    {"contract": "swarm.chrome.control/1.0", "kind": "window_claimed", "launch_id": "launch-fixture", "claim_id": "claim-fixture", "generation": 7, "window_id": 91},
+    {"contract": "swarm.chrome.control/1.0", "kind": "capability_proof", "installation_id": "installation-fixture", "claim_id": "claim-fixture", "generation": 7, "window_id": 91, "challenge": "challenge-fixture", "proof": "oY59BKRfPxv0tz-7RIODL8XgbpCYeKfTSL-f85bxjbA"},
+    {"contract": "swarm.chrome.control/1.0", "kind": "ownership_snapshot", "records": [{"claim_id": "claim-fixture", "generation": 7, "window_id": 91, "tab_ids": [92]}]},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_prepared", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_cancelled", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_committed", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "reconcile_result", "claim_id": "claim-fixture", "generation": 7, "entries": [{"request_id": "request-fixture", "state": "completed_cached", "response": {"cached": true}}]}
+  ],
+  "manager_to_extension": [
+    {
+      "contract": "swarm.chrome.control/1.0",
+      "kind": "auth_challenge",
+      "installation_id": "installation-fixture",
+      "client_nonce": "client-nonce-fixture",
+      "server_nonce": "server-nonce-fixture",
+      "manager_epoch": 42,
+      "manager_instance_id": "manager-instance-fixture",
+      "selected": {
+        "rpc": "swarm.chrome.rpc/1.0",
+        "events": "swarm.chrome.events/1.0",
+        "capabilities": ["claim_v1", "execution_journal_v1", "close_epoch_v1", "ownership_rebind_v1", "ownership_reconcile_v1"]
+      },
+      "server_proof": "_asJY6rZgbazvaojnRG4IDbFAA7O3yT3LUnULp3EWoo"
+    },
+    {
+      "contract": "swarm.chrome.control/1.0",
+      "kind": "negotiated",
+      "session_id": "session-fixture",
+      "manager_epoch": 42,
+      "manager_instance_id": "manager-instance-fixture",
+      "selected": {
+        "rpc": "swarm.chrome.rpc/1.0",
+        "events": "swarm.chrome.events/1.0",
+        "capabilities": ["claim_v1", "execution_journal_v1", "close_epoch_v1", "ownership_rebind_v1", "ownership_reconcile_v1"]
+      }
+    },
+    {"contract": "swarm.chrome.control/1.0", "kind": "create_owned_window", "launch_id": "launch-fixture"},
+    {"contract": "swarm.chrome.control/1.0", "kind": "claim_prepare", "launch_id": "launch-fixture", "claim_id": "claim-fixture", "generation": 7, "window_id": 91},
+    {"contract": "swarm.chrome.control/1.0", "kind": "claim_committed", "launch_id": "launch-fixture", "claim_id": "claim-fixture", "generation": 7, "window_id": 91, "family_capability": "capability-fixture"},
+    {"contract": "swarm.chrome.control/1.0", "kind": "capability_challenge", "claim_id": "claim-fixture", "generation": 7, "challenge": "challenge-fixture"},
+    {"contract": "swarm.chrome.control/1.0", "kind": "capability_rebind", "claim_id": "claim-fixture", "generation": 7, "family_capability": "capability-fixture"},
+    {"contract": "swarm.chrome.control/1.0", "kind": "ownership_reconcile", "live_launch_ids": ["launch-fixture"], "pending": [{"claim_id": "pending-fixture", "generation": 2}], "committed": [{"claim_id": "closing-fixture", "generation": 4}], "authorized": [{"claim_id": "claim-fixture", "generation": 7}]},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_prepare", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_cancel", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "close_commit", "claim_id": "claim-fixture", "generation": 7, "close_epoch": 3},
+    {"contract": "swarm.chrome.control/1.0", "kind": "reconcile_request", "claim_id": "claim-fixture", "generation": 7, "request_ids": ["request-fixture"]},
+    {"contract": "swarm.chrome.control/1.0", "kind": "terminal_acknowledged", "claim_id": "claim-fixture", "generation": 7, "request_id": "request-fixture"}
+  ]
+}

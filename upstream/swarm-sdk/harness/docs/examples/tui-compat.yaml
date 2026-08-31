@@ -1,0 +1,38 @@
+# tui-compat.yaml — the documented-shortfall `tui-v1` compatibility preset
+# (harness/presets.go).
+#
+# `compatibility: tui-v1` expands to every capability the Swarm TUI registers
+# by default that is BOTH class-legal (not DEFER-DISCOVER) and constructible
+# on today's harness client path (in the Phase 10b BOUND set). Everything the
+# TUI does that this preset deliberately does NOT reproduce is enumerated by
+# Plan.CompatibilityShortfall(), grouped by cause
+# (defer-discover / host-binding-required / no-manifest-section) — read it
+# before assuming this preset is TUI parity.
+#
+# Two of tui-v1's expanded IDs (vault.exec, vault.add) are catalog class
+# NEVER-DEFAULT: selecting a preset does NOT silently satisfy that gate on
+# your behalf (harness/presets.go's D1), so this manifest must ALSO name them
+# under permissions.acknowledgeNeverDefault, exactly as a hand-written
+# `agent.tools` selection would have to. All five vault.* ids are additionally
+# credential-bound (see harness/catalog.go's qHostCred), so a
+# provider.credential must be declared too — this example uses an inline
+# placeholder value, never a real secret.
+apiVersion: swarm.ai/v1alpha1
+kind: Harness
+metadata:
+  name: tui-compat-example
+  description: Demonstrates the tui-v1 documented-shortfall compatibility preset.
+provider:
+  id: anthropic
+  model: claude-sonnet-4-5
+  credential:
+    inline: "example-placeholder-not-a-real-credential"
+agent:
+  systemPrompt:
+    inline: "You are a TUI-compatibility-preset agent."
+compatibility: tui-v1
+permissions:
+  approvalMode: interactive
+  acknowledgeNeverDefault:
+    - vault.exec
+    - vault.add

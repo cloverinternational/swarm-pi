@@ -1,0 +1,35 @@
+[
+  {
+    "contract": "swarm.chrome.events/1.0",
+    "kind": "event",
+    "event_id": "event-activity-1",
+    "sequence": 1,
+    "event": "human_activity",
+    "generation": 3,
+    "payload": {"activity": "keyboard", "window_handle": "window_AAAAAAAAAAAAAAAA"}
+  },
+  {
+    "contract": "swarm.chrome.rpc/1.0",
+    "kind": "response",
+    "request_id": "req-tabs",
+    "claim_id": "claim-a",
+    "generation": 3,
+    "operation": "tabs",
+    "status": "ok",
+    "terminal": "completed",
+    "result": {"tabs": []},
+    "error": null
+  },
+  {
+    "contract": "swarm.chrome.rpc/1.0",
+    "kind": "response",
+    "request_id": "req-status",
+    "claim_id": "claim-a",
+    "generation": 3,
+    "operation": "session_status",
+    "status": "ok",
+    "terminal": "completed",
+    "result": {"state": "ready"},
+    "error": null
+  }
+]

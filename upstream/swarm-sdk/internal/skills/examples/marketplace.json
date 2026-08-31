@@ -1,0 +1,131 @@
+{
+  "$schema": "https://swarm.ai/schemas/marketplace.schema.json",
+  "name": "swarm-official-plugins",
+  "description": "Official SwarmOS plugin marketplace",
+  "version": "1.0.0",
+  "owner": {
+    "name": "SwarmOS Team",
+    "email": "plugins@swarm.ai",
+    "url": "https://swarm.ai"
+  },
+  "categories": [
+    "development",
+    "productivity",
+    "testing",
+    "security",
+    "deployment",
+    "monitoring",
+    "database",
+    "design"
+  ],
+  "plugins": [
+    {
+      "name": "code-review",
+      "description": "Automated code review with security analysis and best practices",
+      "version": "1.0.0",
+      "category": "development",
+      "source": "./skills/code-review",
+      "homepage": "https://github.com/swarm-ai/skills/code-review",
+      "tags": ["review", "security", "quality", "linting"],
+      "author": "SwarmOS Team",
+      "license": "MIT",
+      "verified": true,
+      "featured": true,
+      "downloads": 15000,
+      "rating": 4.8
+    },
+    {
+      "name": "git-workflow",
+      "description": "Enhanced Git workflow with commit message generation and PR automation",
+      "version": "2.1.0",
+      "category": "productivity",
+      "source": "./skills/git-workflow",
+      "tags": ["git", "commits", "pull-requests", "workflow"],
+      "author": "SwarmOS Team",
+      "license": "MIT",
+      "verified": true,
+      "featured": true,
+      "downloads": 25000,
+      "rating": 4.9
+    },
+    {
+      "name": "test-generator",
+      "description": "AI-powered test case generation for multiple languages",
+      "version": "1.5.0",
+      "category": "testing",
+      "source": "./skills/test-generator",
+      "tags": ["testing", "unit-tests", "coverage", "automation"],
+      "author": "SwarmOS Team",
+      "license": "MIT",
+      "verified": true,
+      "downloads": 12000,
+      "rating": 4.6
+    },
+    {
+      "name": "security-scanner",
+      "description": "Comprehensive security vulnerability scanner with SAST support",
+      "version": "1.2.0",
+      "category": "security",
+      "source": "./skills/security-scanner",
+      "tags": ["security", "vulnerabilities", "sast", "audit"],
+      "author": "SwarmOS Team",
+      "license": "MIT",
+      "verified": true,
+      "featured": true,
+      "downloads": 18000,
+      "rating": 4.7
+    },
+    {
+      "name": "docker-helper",
+      "description": "Docker and container management utilities",
+      "version": "1.0.0",
+      "category": "deployment",
+      "source": "./skills/docker-helper",
+      "tags": ["docker", "containers", "kubernetes", "devops"],
+      "author": "Community",
+      "license": "Apache-2.0",
+      "verified": false,
+      "downloads": 8000,
+      "rating": 4.3
+    },
+    {
+      "name": "database-migrations",
+      "description": "Database schema migrations and management",
+      "version": "1.1.0",
+      "category": "database",
+      "source": "./skills/database-migrations",
+      "tags": ["database", "migrations", "schema", "sql"],
+      "author": "Community",
+      "license": "MIT",
+      "verified": false,
+      "downloads": 5000,
+      "rating": 4.2
+    },
+    {
+      "name": "api-documentation",
+      "description": "Auto-generate API documentation from code",
+      "version": "1.3.0",
+      "category": "development",
+      "source": "./skills/api-documentation",
+      "tags": ["api", "documentation", "openapi", "swagger"],
+      "author": "SwarmOS Team",
+      "license": "MIT",
+      "verified": true,
+      "downloads": 11000,
+      "rating": 4.5
+    },
+    {
+      "name": "performance-profiler",
+      "description": "Code performance analysis and optimization suggestions",
+      "version": "1.0.0",
+      "category": "monitoring",
+      "source": "./skills/performance-profiler",
+      "tags": ["performance", "profiling", "optimization", "metrics"],
+      "author": "Community",
+      "license": "MIT",
+      "verified": false,
+      "downloads": 3000,
+      "rating": 4.0
+    }
+  ]
+}

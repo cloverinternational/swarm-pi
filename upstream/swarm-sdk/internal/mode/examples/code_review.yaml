@@ -1,0 +1,167 @@
+# Code Review Mode - Multi-Stage Workflow
+# This demonstrates a complete multi-agent workflow with dependencies and transitions.
+
+name: "code_review"
+description: "Multi-agent code review workflow with planning, implementation, and review stages"
+version: "1.0.0"
+
+config:
+  max_duration: "30m"
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 3
+  timeout_behavior: "partial"
+
+steering:
+  type: "hybrid"
+  llm_meta_agent:
+    name: "meta-reviewer"
+    provider: "anthropic"
+    model: "claude-sonnet-4"
+    system_prompt: "You coordinate the code review process and make decisions about workflow transitions."
+  rules:
+    - id: "consensus_failed"
+      condition: "group.consensus_failed"
+      action: "retry_with_more_context"
+      priority: 10
+    - id: "quality_check"
+      condition: "group.confidence < 0.7"
+      action: "escalate_to_human"
+      priority: 5
+
+groups:
+  - name: "planning"
+    execution: "parallel"
+    timeout: "5m"
+    description: "Multiple agents analyze the code change request"
+    
+    completion:
+      type: "consensus"
+      threshold: 0.7
+      min_agents: 2
+    
+    agents:
+      - name: "architect"
+        provider: "openai"
+        model: "gpt-4"
+        system_prompt: "You are a software architect. Analyze the code change from an architectural perspective."
+        tools: ["file_read", "grep", "glob"]
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.3
+      
+      - name: "reviewer"
+        provider: "anthropic"
+        model: "claude-sonnet-4"
+        system_prompt: "You are a code reviewer. Focus on code quality, maintainability, and potential issues."
+        tools: ["file_read", "grep"]
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.3
+      
+      - name: "planner"
+        provider: "openai"
+        model: "gpt-4o-mini"
+        system_prompt: "You are a technical planner. Create a step-by-step implementation plan."
+        tools: ["file_read", "grep"]
+        capabilities:
+          max_tokens: 2000
+          temperature: 0.5
+
+  - name: "research"
+    execution: "parallel"
+    depends_on: ["planning"]
+    timeout: "5m"
+    description: "Fast agents gather relevant code snippets and context"
+    
+    completion:
+      type: "all"
+    
+    agents:
+      - name: "grepper1"
+        provider: "openai"
+        model: "gpt-4o-mini"
+        system_prompt: "You are a fast code search agent. Use grep to find relevant code."
+        tools: ["grep", "glob", "file_read"]
+        capabilities:
+          max_tokens: 1000
+          temperature: 0.0
+      
+      - name: "grepper2"
+        provider: "openai"
+        model: "gpt-4o-mini"
+        system_prompt: "You are a fast code search agent. Focus on finding test files and examples."
+        tools: ["grep", "file_read"]
+        capabilities:
+          max_tokens: 1000
+          temperature: 0.0
+
+  - name: "implementation"
+    execution: "sequential"
+    depends_on: ["research"]
+    timeout: "15m"
+    description: "Implement the code changes based on the plan"
+    
+    completion:
+      type: "all"
+    
+    agents:
+      - name: "implementer"
+        provider: "anthropic"
+        model: "claude-sonnet-4"
+        system_prompt: "You are a software engineer. Implement the code changes following the plan."
+        tools: ["file_read", "file_write", "file_create", "bash"]
+        context_sources:
+          - "groups.planning.output"
+          - "groups.research.output"
+        capabilities:
+          max_tokens: 8000
+          temperature: 0.2
+
+  - name: "review"
+    execution: "parallel"
+    depends_on: ["implementation"]
+    timeout: "5m"
+    description: "Multiple reviewers validate the implementation"
+    
+    completion:
+      type: "consensus"
+      threshold: 0.8
+      max_failures: 1
+    
+    agents:
+      - name: "code_reviewer"
+        provider: "openai"
+        model: "gpt-4"
+        system_prompt: "You are a code reviewer. Verify the implementation follows best practices."
+        tools: ["file_read", "diff"]
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.3
+      
+      - name: "security_reviewer"
+        provider: "anthropic"
+        model: "claude-sonnet-4"
+        system_prompt: "You are a security expert. Check for security vulnerabilities."
+        tools: ["file_read", "grep"]
+        capabilities:
+          max_tokens: 4000
+          temperature: 0.2
+
+transitions:
+  - from: "planning"
+    to: "research"
+    condition: "consensus_reached"
+  
+  - from: "research"
+    to: "implementation"
+    condition: "all_completed"
+  
+  - from: "implementation"
+    to: "review"
+    condition: "implementation_complete"
+  
+  - from: "implementation"
+    to: "planning"
+    condition: "validation_failed"
+    max_retries: 2

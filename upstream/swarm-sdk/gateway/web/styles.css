@@ -1,0 +1,284 @@
+:root {
+  --bg: #0b0f17;
+  --bg-elev: #131a26;
+  --bg-elev2: #1b2433;
+  --border: #26313f;
+  --fg: #e8edf4;
+  --fg-dim: #93a1b3;
+  --accent: #4f8cff;
+  --accent-2: #7c5cff;
+  --user: #234a7d;
+  --assistant: #1b2433;
+  --tool: #14202e;
+  --danger: #ff5c6c;
+  --ok: #34d399;
+  --warn: #f5b74e;
+  --radius: 14px;
+  --tap: 44px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.45 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+#app { height: 100dvh; display: flex; flex-direction: column; }
+.view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.hidden { display: none !important; }
+
+/* Top bar */
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(var(--safe-t) + 10px) calc(var(--safe-r) + 12px) 10px calc(var(--safe-l) + 12px);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 5;
+}
+.title { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+.title .dot { color: var(--accent); }
+.icon-btn {
+  min-width: var(--tap); min-height: var(--tap);
+  border: none; background: transparent; color: var(--fg);
+  font-size: 22px; border-radius: 10px; cursor: pointer;
+}
+.icon-btn:active { background: var(--bg-elev2); }
+
+.session-bar .session-meta { flex: 1; min-width: 0; }
+.session-meta .line1 { display: flex; align-items: baseline; gap: 8px; font-weight: 600; }
+.session-meta .line1 #s-peer { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-meta .line1 .tokens { font-weight: 400; color: var(--fg-dim); font-size: 12px; }
+.session-meta .line2 { display: flex; gap: 8px; align-items: center; margin-top: 2px; color: var(--fg-dim); font-size: 13px; }
+.tap { cursor: pointer; }
+#s-model.tap {
+  color: var(--accent); min-width: 0; flex: 0 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Four 44px buttons + meta don't fit a 360px phone — session-bar icons can be
+   a touch narrower and still comfortably tappable. */
+.session-bar .icon-btn { min-width: 38px; }
+.mode {
+  text-transform: uppercase; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  padding: 3px 8px; border-radius: 999px; background: var(--accent-2); color: #fff;
+}
+.tokens { margin-left: auto; white-space: nowrap; flex: none; }
+.tokens.ctx-warn { color: var(--warn); font-weight: 600; }
+
+/* Scroll areas */
+.scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.chat { padding: 14px 12px 8px; display: flex; flex-direction: column; gap: 10px; }
+
+/* Peer list */
+#peer-list { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.peer-group {
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 14px 4px 2px;
+}
+.peer-card {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px; min-height: var(--tap);
+}
+.peer-card { position: relative; padding-right: 34px; }
+.peer-card::after {
+  content: "›"; position: absolute; right: 14px; top: 50%;
+  transform: translateY(-50%); color: var(--fg-dim); font-size: 22px;
+}
+.peer-card:active { background: var(--bg-elev2); }
+.peer-card.connecting { opacity: .55; pointer-events: none; }
+.peer-card.connecting .pname::after {
+  content: " — connecting…"; color: var(--fg-dim);
+  font-weight: 400; font-size: 13px;
+}
+.badge.last { color: var(--accent); }
+.peer-card .pname { font-weight: 700; font-size: 16px; }
+.peer-card .pmeta { color: var(--fg-dim); font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; }
+.badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-elev2); }
+.badge.status-running, .badge.status-online, .badge.status-idle,
+.badge.status-active, .badge.status-ready { color: var(--ok); }
+.badge.status-busy, .badge.status-working { color: var(--warn); }
+.badge.status-offline, .badge.status-stopped, .badge.status-error { color: var(--danger); }
+.empty { color: var(--fg-dim); text-align: center; padding: 40px 20px; }
+.empty h3 { color: var(--fg); }
+
+/* Bubbles */
+.bubble {
+  max-width: 86%; padding: 10px 12px; border-radius: var(--radius);
+  white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere;
+}
+.bubble.user { align-self: flex-end; background: var(--user); border-bottom-right-radius: 4px; }
+.bubble.assistant { align-self: flex-start; background: var(--assistant); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.bubble.assistant.streaming::after { content: "▊"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Rendered markdown inside assistant bubbles (renderRich): fenced code blocks
+   scroll horizontally instead of wrapping, inline code + bold are set off. */
+.bubble pre.code {
+  margin: 8px 0 4px; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  overflow-x: auto; white-space: pre; -webkit-overflow-scrolling: touch;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.45;
+}
+.bubble pre.code code { white-space: pre; background: none; padding: 0; font: inherit; }
+.bubble code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
+  background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px;
+}
+.bubble ul, .bubble ol { margin: 4px 0; padding-left: 22px; }
+.bubble li { margin: 2px 0; }
+.bubble blockquote { margin: 6px 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--border); color: var(--fg-dim); }
+.bubble .md-table { margin: 8px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bubble .md-table table { border-collapse: collapse; font-size: 13px; }
+.bubble .md-table th, .bubble .md-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; white-space: nowrap; }
+.bubble .md-table th { background: var(--bg); font-weight: 600; }
+.bubble .md-h { display: block; font-size: 1.05em; font-weight: 700; margin: 10px 0 2px; color: var(--fg); }
+.bubble .md-h:first-child, .bubble > :first-child { margin-top: 0; }
+.bubble > :last-child { margin-bottom: 0; }
+
+/* Tool chips */
+.tool-chip {
+  align-self: flex-start; max-width: 92%; min-width: 0;
+  background: var(--tool); border: 1px solid var(--border);
+  border-radius: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+}
+/* Consecutive tool calls read as one work run — tighten the gap between them
+   (the flex gap alone made every chip float apart like a separate message). */
+.tool-chip + .tool-chip { margin-top: -6px; }
+.tool-chip summary {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; cursor: pointer; list-style: none; min-width: 0;
+}
+.tool-chip summary::-webkit-details-marker { display: none; }
+.tool-chip summary::before { content: "▸"; color: var(--fg-dim); flex: none; }
+.tool-chip[open] summary::before { content: "▾"; color: var(--fg-dim); }
+.tc-name { color: var(--warn); font-weight: 600; flex: none; }
+.tc-hint {
+  color: var(--fg-dim); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tc-status { flex: none; font-size: 10px; min-width: 10px; text-align: center; }
+.tc-status.ok { color: var(--ok); }
+.tc-status.err { color: var(--danger); }
+.tc-status.pending { color: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .2; } }
+.tool-chip pre { margin: 0; padding: 0 10px 10px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-dim); }
+.tool-chip pre.tool-result { border-top: 1px solid var(--border); padding-top: 8px; color: var(--fg); max-height: 40vh; overflow: auto; }
+.tool-chip pre.tool-result.err { color: var(--danger); }
+
+/* Thinking chip — extended reasoning, dim + collapsed so it never competes with
+   the answer. Kept visually distinct from tool chips (no warn accent). */
+.think-chip {
+  align-self: flex-start; max-width: 92%;
+  background: transparent; border: 1px dashed var(--border); border-radius: 10px;
+  font-size: 12px; opacity: .85;
+}
+.think-chip summary { padding: 6px 10px; cursor: pointer; color: var(--fg-dim); list-style: none; font-style: italic; }
+.think-chip summary::-webkit-details-marker { display: none; }
+.think-chip summary::before { content: "▸ "; }
+.think-chip[open] summary::before { content: "▾ "; }
+.think-chip pre.think-body {
+  margin: 0; padding: 0 10px 8px; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--fg-dim); font-family: inherit; max-height: 40vh; overflow: auto;
+}
+
+/* Transient sub-agent activity line (shown while a delegated sub-agent runs). */
+.subagent-bar {
+  align-self: flex-start; max-width: 92%;
+  color: var(--accent-2); font-size: 12.5px; font-style: italic;
+  padding: 4px 10px; border-left: 2px solid var(--accent-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.sys-notice { align-self: center; color: var(--fg-dim); font-size: 12px; font-style: italic; }
+
+/* Notice + composer */
+.notice-bar { padding: 6px 12px; background: var(--bg-elev2); color: var(--warn); font-size: 12px; text-align: center; }
+.composer {
+  display: flex; gap: 8px; align-items: flex-end;
+  padding: 8px calc(var(--safe-r) + 10px) calc(var(--safe-b) + 8px) calc(var(--safe-l) + 10px);
+  background: var(--bg-elev); border-top: 1px solid var(--border);
+}
+#input {
+  flex: 1; resize: none; max-height: 140px;
+  background: var(--bg-elev2); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 11px 12px; font: inherit; outline: none;
+  /* 16px minimum: anything smaller makes iOS Safari ZOOM the page on focus,
+     which is exactly the "everything jumps around when I type" complaint. */
+  font-size: 16px;
+}
+#input:focus { border-color: var(--accent); }
+.send-btn {
+  min-width: var(--tap); min-height: var(--tap); border: none; border-radius: 12px;
+  background: var(--accent); color: #fff; font-size: 18px; cursor: pointer;
+}
+.send-btn:disabled { background: var(--border); color: var(--fg-dim); }
+.send-btn.stop { background: var(--danger); }
+
+/* Sheet */
+.sheet { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; z-index: 20; }
+.sheet-card {
+  width: 100%; background: var(--bg-elev); border-top-left-radius: 18px; border-top-right-radius: 18px;
+  padding: 18px 16px calc(var(--safe-b) + 18px); border-top: 1px solid var(--border);
+}
+.sheet-title { font-weight: 700; font-size: 17px; margin-bottom: 10px; }
+.sheet-body { max-height: 40vh; overflow: auto; background: var(--bg); padding: 10px; border-radius: 10px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+.sheet-actions { display: flex; gap: 10px; margin-top: 14px; }
+#model-input {
+  width: 100%; box-sizing: border-box; min-height: var(--tap);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text); font: inherit; padding: 0 14px;
+}
+#model-input:focus { outline: none; border-color: var(--accent); }
+.btn { flex: 1; min-height: var(--tap); border: none; border-radius: 12px; font: inherit; font-weight: 700; cursor: pointer; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.danger { background: var(--bg-elev2); color: var(--danger); border: 1px solid var(--danger); }
+
+/* Toast */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--safe-b) + 80px); z-index: 30;
+  background: var(--bg-elev2); color: var(--fg); border: 1px solid var(--border);
+  padding: 10px 16px; border-radius: 12px; max-width: 90%; box-shadow: 0 6px 24px rgba(0,0,0,.5);
+}
+.toast.err { border-color: var(--danger); color: var(--danger); }
+/* Conversations sheet */
+.convos-list { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.convo-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 8px; background: var(--bg); min-height: var(--tap);
+}
+.convo-body { flex: 1; min-width: 0; cursor: pointer; padding: 3px 0; }
+.convo-body:active { opacity: .7; }
+.convo-row.active { border-color: var(--accent); }
+.convo-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.convo-meta { color: var(--fg-dim); font-size: 12px; margin-top: 3px; }
+.convo-del {
+  flex: none; min-width: var(--tap); min-height: var(--tap);
+  border: none; background: transparent; color: var(--fg-dim);
+  font-size: 16px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.convo-del.confirm { background: var(--danger); color: #fff; font-size: 13px; font-weight: 600; padding: 0 10px; }
+.convos-more { color: var(--fg-dim); font-size: 12px; text-align: center; padding: 8px 0 2px; }
+
+/* Logs sheet */
+.logs-card { max-height: 80vh; display: flex; flex-direction: column; }
+.logs-body {
+  flex: 1; overflow-y: auto; font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-all;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; margin: 8px 0;
+  max-height: 55vh; color: var(--fg-dim);
+}
+.sheet-title { display: flex; align-items: center; justify-content: space-between; }

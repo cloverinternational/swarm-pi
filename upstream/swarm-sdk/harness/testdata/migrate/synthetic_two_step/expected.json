@@ -1,0 +1,6 @@
+{
+  "apiVersion": "swarm.ai/v1alpha1",
+  "kind": "Harness",
+  "metadata": { "name": "synthetic-fixture" },
+  "renamedField": "legacy-value"
+}

@@ -1,0 +1,82 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Write|Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${SWARM_PLUGIN_ROOT}/scripts/security/scan-secrets.sh",
+          "timeout": 30
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "prompt",
+          "prompt": "Evaluate if this bash command is safe for production. Check for: destructive operations (rm -rf, drop database), missing safeguards (no backups), potential security issues (hardcoded secrets, exposed ports). Return 'allow' if safe, 'deny' with reason if dangerous.",
+          "timeout": 20
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Write|Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${SWARM_PLUGIN_ROOT}/scripts/quality/lint-check.sh",
+          "timeout": 30
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${SWARM_PLUGIN_ROOT}/scripts/workflow/log-command.sh",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "prompt",
+          "prompt": "Before stopping, verify task completion: 1) All tests pass 2) Build succeeds 3) User questions answered 4) No pending tasks. Return 'approve' to stop or 'block' with reason to continue working.",
+          "timeout": 30
+        }
+      ]
+    }
+  ],
+  "SessionStart": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${SWARM_PLUGIN_ROOT}/scripts/setup/validate-env.sh",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "Notification": [
+    {
+      "matcher": "*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${SWARM_PLUGIN_ROOT}/scripts/notify/log-notification.sh",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}

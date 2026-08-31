@@ -1,0 +1,48 @@
+# Development/Edge Release Workflow for SwarmOS TUI
+name: dev-release
+description: "Development release - builds and publishes from current branch as prerelease"
+version: "1.0"
+
+lint:
+  enabled: false
+
+commit:
+  group: false
+  verbose: false
+  one_liner: true
+
+push:
+  remote: origin
+  force: false
+
+# Custom scripts
+scripts:
+  quick:
+    description: "Quick dev release from current branch (build + upload)"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh dev"
+
+  build:
+    description: "Build dev binary locally (no upload)"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh build"
+
+  list:
+    description: "List available dev/edge releases"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh list"
+
+  clean:
+    description: "Remove old edge releases"
+    steps:
+      - type: custom
+        command: "./scripts/release.sh clean"
+
+env:
+  GO111MODULE: "on"
+
+variables:
+  project: "swarm-tui"

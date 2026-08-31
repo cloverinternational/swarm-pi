@@ -1,0 +1,31 @@
+# minimal.yaml — the smallest valid harness manifest.
+#
+# apiVersion/kind/metadata.name/provider.id/provider.model/agent.systemPrompt
+# are the only fields REQUIRED by harness.Compile (see harness/plan.go's
+# compileDocument and SCHEMA.md). Tool selection here uses the `minimal`
+# compatibility preset (harness/presets.go) instead of a hand-written
+# `agent.tools` list: it expands to exactly the five capability IDs every
+# Swarm root already registers unconditionally — forge.read,
+# forge.apply_patch, forge.unified_grep, forge.undo, forge.semantic_rename
+# (see harness/presets.go's minimalPresetIDs). Note `compatibility:` and
+# `agent.tools` are mutually exclusive — set one or the other, never both.
+#
+# This manifest COMPILES (harness.Compile succeeds — see
+# harness/supplychain_test.go's TestDocsExamplesCompile), but it declares no
+# provider.credential, so constructing a live client from it
+# (client.WithHarnessPlan) still needs a real credential supplied some other
+# way before that client can actually call a model.
+apiVersion: swarm.ai/v1alpha1
+kind: Harness
+metadata:
+  name: minimal-example
+  description: The smallest valid harness manifest, using the `minimal` compatibility preset.
+provider:
+  id: anthropic
+  model: claude-sonnet-4-5
+agent:
+  systemPrompt:
+    inline: "You are a minimal harness-driven agent."
+compatibility: minimal
+permissions:
+  approvalMode: interactive

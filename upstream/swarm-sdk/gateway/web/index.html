@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0b0f17">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Swarm Mobile</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- PEER PICKER -->
+    <section id="peer-view" class="view">
+      <header class="topbar">
+        <div class="title">Swarm<span class="dot">.</span></div>
+        <button id="refresh-peers" class="icon-btn" aria-label="Refresh peers">⟳</button>
+      </header>
+      <div id="peer-list" class="scroll"></div>
+    </section>
+
+    <!-- SESSION / CHAT -->
+    <section id="session-view" class="view hidden">
+      <header class="topbar session-bar">
+        <button id="back-btn" class="icon-btn" aria-label="Back">‹</button>
+        <div class="session-meta">
+          <div class="line1"><span id="s-peer">—</span><span id="s-tokens" class="tokens">0 tok</span></div>
+          <div class="line2">
+            <span id="s-mode" class="mode tap">mode</span>
+            <span id="s-model" class="tap">—</span>
+          </div>
+        </div>
+        <button id="convos-btn" class="icon-btn" aria-label="Conversations" title="Conversations">☰</button>
+        <button id="logs-btn" class="icon-btn" aria-label="Daemon logs" title="Daemon logs">⊟</button>
+        <button id="refresh-msgs" class="icon-btn" aria-label="Reload">⟳</button>
+      </header>
+      <div id="chat" class="scroll chat"></div>
+      <div id="notice-bar" class="notice-bar hidden"></div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Message…" autocomplete="off"
+                  enterkeyhint="send" autocapitalize="sentences"></textarea>
+        <button id="send" type="submit" class="send-btn" aria-label="Send">➤</button>
+      </form>
+    </section>
+
+    <!-- LOGS SHEET -->
+    <div id="logs-sheet" class="sheet hidden">
+      <div class="sheet-card logs-card">
+        <div class="sheet-title">
+          Daemon Logs
+          <button id="logs-close" class="icon-btn" aria-label="Close logs">✕</button>
+        </div>
+        <pre id="logs-body" class="sheet-body logs-body">Loading…</pre>
+        <div class="sheet-actions">
+          <button id="logs-refresh" class="btn">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONVERSATIONS SHEET -->
+    <div id="convos-sheet" class="sheet hidden">
+      <div class="sheet-card logs-card">
+        <div class="sheet-title">
+          Conversations
+          <button id="convos-close" class="icon-btn" aria-label="Close">✕</button>
+        </div>
+        <button id="convos-new" class="btn primary" style="margin-bottom:10px">＋ New chat</button>
+        <div id="convos-list" class="convos-list">Loading…</div>
+      </div>
+    </div>
+
+    <!-- APPROVAL SHEET -->
+    <div id="approval-sheet" class="sheet hidden">
+      <div class="sheet-card">
+        <div class="sheet-title">Approval requested</div>
+        <pre id="approval-body" class="sheet-body"></pre>
+        <div class="sheet-actions">
+          <button id="approve-deny" class="btn danger">Deny</button>
+          <button id="approve-allow" class="btn primary">Approve</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="model-sheet" class="sheet hidden">
+      <div class="sheet-card">
+        <div class="sheet-title">Set model</div>
+        <input id="model-input" type="text" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="e.g. claude-sonnet-4-6" />
+        <div class="sheet-actions">
+          <button id="model-cancel" class="btn">Cancel</button>
+          <button id="model-set" class="btn primary">Set</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

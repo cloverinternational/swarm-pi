@@ -1,0 +1,10 @@
+id: test-local-workflow
+name: Local Test Workflow
+description: A test workflow from the local project directory
+version: "1.0"
+groups:
+  - id: local-group
+    name: Local Group
+    agents:
+      - role: implementer
+        task: "Echo hello from local"

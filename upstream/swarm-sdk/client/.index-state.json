@@ -1,0 +1,11 @@
+{
+  "generated_at": "0001-01-01T00:00:00Z",
+  "mode": "full",
+  "root_path": "/home/clover/mono-main/swarm-sdk/client",
+  "dir_hashes": {
+    "/": "9acfacedb54a3df74baa4ef261b084af26b27d82d4703b413036d06f70d01d3a"
+  },
+  "node_summaries": {
+    "/": "This package provides a Client type for the Swarm SDK that wraps access to agents, logging, tracing, storage, and conversation management via configurable Option functions such as WithProvider, WithAPIKey, and WithWorkspace."
+  }
+}

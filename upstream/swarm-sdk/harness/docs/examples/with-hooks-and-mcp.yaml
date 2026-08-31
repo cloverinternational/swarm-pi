@@ -1,0 +1,55 @@
+# with-hooks-and-mcp.yaml — the worked example SECURITY.md points to.
+#
+# Declares ONE `type: command` hook and ONE `type: stdio` MCP server — the
+# two genuine local-code-execution surfaces this harness schema can express
+# (see SECURITY.md's first section before pointing this manifest at an
+# untrusted source). For THIS exact plan:
+#
+#   plan, _ := harness.Compile("with-hooks-and-mcp.yaml")
+#   plan.HasExecutableSupplyChain() // == true
+#   report := plan.ExecutableSupplyChain()
+#   // report.Hooks has 1 entry (id "log-tool-calls", kind "command")
+#   // report.MCP   has 1 entry (id "local-fs-server", command "/usr/bin/env")
+#
+# The hook's `command` text is NEVER retained on the redacted plan surface —
+# only its content hash (HookSpec.CommandHash / SupplyChainHookEntry.CommandHash)
+# is. The MCP server's command/args ARE shown plainly by design: they are
+# operational identifiers, not credentials (see McpServerSpec's doc comment
+# in harness/mcp.go).
+#
+# The stdio entry's command is an ABSOLUTE PATH (/usr/bin/env), which
+# satisfies the PINNING RULE (harness/mcp.go's isPinnedStdioCommand) without
+# needing `unsafeDevMode: true`.
+apiVersion: swarm.ai/v1alpha1
+kind: Harness
+metadata:
+  name: hooks-and-mcp-example
+  description: >-
+    A type=command hook plus a type=stdio MCP server — the two local-code-execution
+    surfaces documented in SECURITY.md.
+provider:
+  id: anthropic
+  model: claude-sonnet-4-5
+agent:
+  systemPrompt:
+    inline: "You are an agent with a command hook and a stdio MCP server."
+  tools: []
+permissions:
+  approvalMode: interactive
+hooks:
+  - id: log-tool-calls
+    event: tool.before
+    scope: global
+    type: command
+    command: "echo tool call >> /tmp/harness-example-hook.log"
+    environment:
+      - PATH
+mcp:
+  - id: local-fs-server
+    type: stdio
+    command: /usr/bin/env
+    args:
+      - node
+      - /opt/mcp-servers/filesystem/index.js
+    environment:
+      - PATH

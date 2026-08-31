@@ -1,0 +1,4 @@
+{
+  "from": "swarm.ai/v0unknown-fixture-only",
+  "wantErrorCode": "harness.migrate.noPath"
+}

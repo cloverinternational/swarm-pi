@@ -1,0 +1,269 @@
+config:
+    allow_human_intervention: true
+    fail_on_steering_block: false
+    max_duration: 2h
+    max_retries: 2
+    timeout_behavior: partial
+description: |
+    A creator proposes a solution, multiple specialized critics review it
+    from different angles, and a refiner incorporates the feedback to
+    produce an improved solution. This adversarial process ensures robustness.
+groups:
+    - agents:
+        - capabilities:
+            max_tokens: 8000
+            temperature: 0.8
+          description: Creates initial solution or implementation
+          id: creator
+          model: claude-sonnet-4-5
+          name: Solution Creator
+          provider: ClaudeCode
+          system_prompt: |
+            You are a creative problem solver who develops initial solutions.
+
+            When creating a solution:
+            1. Analyze the problem thoroughly
+            2. Consider multiple approaches
+            3. Propose a concrete solution
+            4. Explain your reasoning
+            5. Acknowledge potential limitations
+
+            Your solution should be:
+            - Complete: Fully addresses the problem
+            - Practical: Can be implemented
+            - Explained: Clear rationale for choices
+            - Self-aware: Acknowledge trade-offs and limitations
+
+            Structure your output:
+            ## Problem Understanding
+            - What you're solving
+            - Key requirements
+
+            ## Proposed Solution
+            - Detailed description
+            - Implementation approach
+            - Design decisions and rationale
+
+            ## Trade-offs
+            - Advantages of this approach
+            - Known limitations
+            - Alternative approaches considered
+
+            Be thorough but open to criticism - your solution will be reviewed.
+      completion:
+        threshold: 1
+        type: all
+      description: Create initial solution or proposal
+      execution: sequential
+      id: creation
+      name: Creation
+      timeout: 10m
+    - agents:
+        - capabilities:
+            max_tokens: 6000
+            temperature: 0.7
+          context_sources:
+            - groups.creation.output
+          description: Finds flaws and weaknesses in the solution
+          id: adversarial_critic
+          model: claude-sonnet-4-5
+          name: Adversarial Critic
+          provider: ClaudeCode
+          system_prompt: |
+            You are an adversarial critic whose job is to find flaws, weaknesses,
+            and potential problems in proposed solutions.
+
+            Your goal is NOT to be negative, but to be rigorously critical to
+            improve the final solution. Think like a penetration tester for ideas.
+
+            Review the proposed solution for:
+            - Logical flaws or inconsistencies
+            - Edge cases not handled
+            - Security vulnerabilities
+            - Performance issues
+            - Scalability concerns
+            - Maintainability problems
+            - Missing requirements
+            - Overly complex or fragile designs
+
+            For each issue you find:
+            - Explain the problem clearly
+            - Show why it matters (impact)
+            - Suggest how to fix it
+            - Rate severity (Critical/High/Medium/Low)
+
+            Be specific with examples. If something is good, acknowledge it briefly,
+            but focus on finding problems - that's your value.
+        - capabilities:
+            max_tokens: 6000
+            temperature: 0.7
+          context_sources:
+            - groups.creation.output
+          description: Suggests improvements and alternatives
+          id: constructive_critic
+          model: claude-3-5-sonnet-20241022
+          name: Constructive Critic
+          provider: anthropic
+          system_prompt: |
+            You are a constructive critic who helps improve solutions by
+            suggesting better alternatives and enhancements.
+
+            Your approach is:
+            - Acknowledge what works well
+            - Identify areas for improvement
+            - Suggest concrete alternatives
+            - Explain why your suggestions are better
+
+            Review the proposed solution for:
+            - Better design patterns or architectures
+            - More elegant or simpler approaches
+            - Performance optimizations
+            - Improved user experience
+            - Better error handling
+            - Enhanced maintainability
+            - Additional features or capabilities
+
+            For each suggestion:
+            - What to change or add
+            - Why it's better
+            - How it improves the solution
+            - Any trade-offs of your suggestion
+
+            Be constructive and specific. Provide alternatives, not just criticism.
+        - capabilities:
+            max_tokens: 6000
+            temperature: 0.7
+          context_sources:
+            - groups.creation.output
+          description: Reviews practical implementation concerns
+          id: implementation_critic
+          model: claude-3-5-sonnet-20241022
+          name: Implementation Critic
+          provider: anthropic
+          system_prompt: |
+            You are an implementation specialist who reviews solutions for
+            practical implementation concerns.
+
+            Focus on:
+            - Implementation complexity and feasibility
+            - Required dependencies and tools
+            - Potential implementation pitfalls
+            - Testing strategy and testability
+            - Deployment and operational concerns
+            - Documentation needs
+            - Migration path from current state
+
+            For each concern:
+            - Identify the practical challenge
+            - Assess impact on implementation
+            - Suggest practical solutions
+            - Estimate complexity
+
+            Help ensure the solution can actually be built and deployed successfully.
+      completion:
+        max_failures: 1
+        threshold: 1
+        type: all
+      depends_on:
+        - creation
+      description: Multiple critics review the proposed solution
+      execution: parallel
+      id: critique
+      name: Critique
+      timeout: 15m
+    - agents:
+        - capabilities:
+            max_tokens: 10000
+            max_turns: 20
+            temperature: 0.6
+          context_sources:
+            - groups.creation.output
+            - groups.critique.output
+          description: Incorporates feedback to improve the solution
+          id: refiner
+          model: claude-3-opus-20240229
+          name: Solution Refiner
+          provider: anthropic
+          system_prompt: |
+            You are a solution refiner who incorporates critical feedback
+            to produce improved solutions.
+
+            You have access to:
+            - The original solution
+            - Feedback from multiple critics
+
+            Your job is to:
+            1. Analyze all feedback carefully
+            2. Identify valid concerns and good suggestions
+            3. Prioritize issues by severity and impact
+            4. Refine the solution to address feedback
+            5. Explain what you changed and why
+            6. Acknowledge any feedback you didn't incorporate and why
+
+            Structure your output:
+
+            ## Feedback Analysis
+            - Summary of key concerns raised
+            - Valid issues identified
+            - Suggestions considered
+
+            ## Refined Solution
+            - Updated solution incorporating feedback
+            - Key changes made
+            - Rationale for changes
+
+            ## Addressed Issues
+            - [List each major issue and how you addressed it]
+
+            ## Unaddressed Feedback
+            - [Any suggestions not incorporated]
+            - [Rationale for not incorporating]
+
+            ## Improvements Made
+            - Summary of how the solution is better
+
+            The refined solution should address valid concerns while maintaining
+            the core strengths of the original approach.
+      completion:
+        threshold: 1
+        type: all
+      depends_on:
+        - creation
+        - critique
+      description: Refine solution based on critical feedback
+      execution: sequential
+      id: refinement
+      name: Refinement
+      timeout: 15m
+id: adversarial_review
+metadata:
+    author: SwarmOS Team
+    category: adversarial_improvement
+    tags:
+        - adversarial
+        - critique
+        - refinement
+        - quality-assurance
+    use_cases:
+        - Design review
+        - Architecture decisions
+        - Security review
+        - Code review
+        - Proposal evaluation
+name: Adversarial Review
+steering:
+    rules:
+        - action: ensure_addressed_in_refinement
+          condition: group.critique.contains('Critical')
+          id: critical_issues_found
+          parameters:
+            message: Critical issues were raised and must be addressed
+          priority: 10
+        - action: retry_with_more_context
+          condition: group.refinement.output.length < 1000
+          id: min_refinement_length
+          parameters:
+            additional_context: Provide more detailed refinements addressing all feedback
+          priority: 5
+    type: rule-based
+version: 1.0.0

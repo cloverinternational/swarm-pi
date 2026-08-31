@@ -1,0 +1,434 @@
+# Built-in Provider Profiles for OpenAI-Compatible APIs
+# These profiles define known providers with their quirks and features
+
+[profiles.openai]
+name = "openai"
+display_name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+compatible_with = "openai"
+quirk_adapter = ""  # No adapter needed (reference implementation)
+
+[profiles.openai.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.openai.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true
+audio = false
+reasoning_effort = true
+verbosity = true
+custom_tools = true
+max_tokens_param = "auto"  # Auto-detect based on model
+system_prompt_style = "message"
+
+[profiles.openai.models]
+prefix = ""
+format = "{model}"
+supports_discovery = true
+
+# ============================================================================
+# Z.AI GLM Coding Plan - GLM-4.6, GLM-4.5, GLM-4.5-air
+# ============================================================================
+
+[profiles.glm]
+name = "glm"
+display_name = "Z.AI GLM Coding Plan"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+compatible_with = "openai"
+quirk_adapter = ""  # Uses passthrough (standard OpenAI protocol)
+
+[profiles.glm.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.glm.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = false  # Not documented for coding API
+audio = false
+reasoning_effort = false  # Not mentioned in docs
+verbosity = false  # Not mentioned in docs
+custom_tools = false  # Standard function calling only
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.glm.models]
+prefix = ""
+format = "{model}"
+supports_discovery = false  # Known models only
+# Known models: GLM-4.6 (standard), GLM-4.5 (previous), GLM-4.5-air (lightweight)
+
+[profiles.glm.notes]
+description = "Z.AI GLM Coding Plan optimized for code generation, debugging, and analysis"
+requires_upgrade = "Cursor requires model names in uppercase (GLM-4.6)"
+api_endpoint = "Must use https://api.z.ai/api/coding/paas/v4 (not general API)"
+
+# ============================================================================
+# Z.AI Vision Models - GLM-5V-Turbo, GLM-4.6V, GLM-4.5V
+# ============================================================================
+[profiles.glm-vision]
+name = "glm-vision"
+display_name = "Z.AI Vision Models"
+base_url = "https://api.z.ai/api/paas/v4"  # General API (supports vision!)
+compatible_with = "openai"
+quirk_adapter = ""  # Standard OpenAI protocol
+
+[profiles.glm-vision.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.glm-vision.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true  # Vision enabled for multimodal analysis
+audio = false
+reasoning_effort = true  # GLM-5V supports thinking mode
+verbosity = false
+custom_tools = true
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.glm-vision.models]
+prefix = ""
+format = "{model}"
+supports_discovery = false
+# Vision models: glm-5v-turbo (best), glm-4.6v, glm-4.5v
+
+[profiles.glm-vision.notes]
+description = "Z.AI vision models for image analysis, design-to-code, and multimodal tasks"
+api_endpoint = "Must use https://api.z.ai/api/paas/v4 (general API, not coding API)"
+pricing = "GLM-5V-Turbo: $1.20/M input, $4/M output"
+context_window = "200K tokens, 128K max output"
+
+# ============================================================================
+# Cerebras - OpenAI-compatible fast inference
+# ============================================================================
+
+[profiles.cerebras]
+name = "cerebras"
+display_name = "Cerebras"
+base_url = "https://api.cerebras.ai/v1"
+compatible_with = "openai"
+quirk_adapter = ""  # Standard OpenAI protocol
+
+[profiles.cerebras.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.cerebras.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = false
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.cerebras.models]
+prefix = ""
+format = "{model}"
+supports_discovery = false  # Explicit model names required
+
+# ============================================================================
+# OpenRouter - Multi-provider aggregator
+# ============================================================================
+
+[profiles.openrouter]
+name = "openrouter"
+display_name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+compatible_with = "openai"
+quirk_adapter = "openrouter"
+
+[profiles.openrouter.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[[profiles.openrouter.auth.extra_headers]]
+name = "HTTP-Referer"
+value = "{app_url}"
+required = false
+
+[[profiles.openrouter.auth.extra_headers]]
+name = "X-Title"
+value = "{app_name}"
+required = false
+
+[profiles.openrouter.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true  # Depends on model
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.openrouter.models]
+prefix = ""
+format = "{provider}/{model}"  # e.g., "openai/gpt-4", "anthropic/claude-3"
+supports_discovery = true
+
+[profiles.openrouter.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+# ============================================================================
+# Azure OpenAI - Microsoft's OpenAI service
+# ============================================================================
+
+[profiles.azure]
+name = "azure-openai"
+display_name = "Azure OpenAI Service"
+base_url = "https://{resource_name}.openai.azure.com"
+compatible_with = "openai"
+quirk_adapter = "azure"
+
+[profiles.azure.auth]
+type = "api-key"
+header_name = "api-key"
+header_format = "{api_key}"
+
+[profiles.azure.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true  # Depends on deployment
+audio = false
+reasoning_effort = false  # Not yet available on Azure
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.azure.models]
+prefix = ""
+format = "deployment/{deployment_name}"
+supports_discovery = false  # Requires deployment configuration
+
+[profiles.azure.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+# ============================================================================
+# Groq - Ultra-fast inference
+# ============================================================================
+
+[profiles.groq]
+name = "groq"
+display_name = "Groq"
+base_url = "https://api.groq.com/openai/v1"
+compatible_with = "openai"
+quirk_adapter = ""
+
+[profiles.groq.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.groq.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = false  # Not supported
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.groq.models]
+prefix = ""
+format = "{model}"
+supports_discovery = true
+
+[profiles.groq.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+# ============================================================================
+# Together AI - Open source models
+# ============================================================================
+
+[profiles.together]
+name = "together-ai"
+display_name = "Together AI"
+base_url = "https://api.together.xyz/v1"
+compatible_with = "openai"
+quirk_adapter = ""
+
+[profiles.together.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.together.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true  # Select models
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.together.models]
+prefix = ""
+format = "{provider}/{model}"
+supports_discovery = true
+
+[profiles.together.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+# ============================================================================
+# Fireworks AI - Fast inference platform
+# ============================================================================
+
+[profiles.fireworks]
+name = "fireworks"
+display_name = "Fireworks AI"
+base_url = "https://api.fireworks.ai/inference/v1"
+compatible_with = "openai"
+quirk_adapter = ""
+
+[profiles.fireworks.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.fireworks.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true  # Select models
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.fireworks.models]
+prefix = ""
+format = "{model}"
+supports_discovery = true
+
+[profiles.fireworks.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+# ============================================================================
+# Perplexity AI - Search-augmented models
+# ============================================================================
+
+[profiles.perplexity]
+name = "perplexity"
+display_name = "Perplexity AI"
+base_url = "https://api.perplexity.ai"
+compatible_with = "openai"
+quirk_adapter = ""
+
+[profiles.perplexity.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.perplexity.features]
+chat_completion = true
+streaming = true
+function_calling = false  # Not supported
+vision = false
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.perplexity.models]
+prefix = ""
+format = "{model}"
+supports_discovery = false
+
+[profiles.perplexity.transforms]
+remove_params = ["reasoning_effort", "verbosity", "tools"]  # No function calling
+# ============================================================================
+# DeepSeek - Powerful reasoning and coding models
+# ============================================================================
+[profiles.deepseek]
+name = "deepseek"
+display_name = "DeepSeek"
+base_url = "https://api.deepseek.com/v1"
+compatible_with = "openai"
+quirk_adapter = ""
+[profiles.deepseek.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+[profiles.deepseek.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = false
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+[profiles.deepseek.models]
+prefix = ""
+format = "{model}"
+supports_discovery = false
+# Known models: deepseek-chat, deepseek-coder, deepseek-reasoner
+[profiles.deepseek.transforms]
+remove_params = ["reasoning_effort", "verbosity"]
+
+#============================================================================
+# Wafer.ai - OpenAI-compatible gateway
+#============================================================================
+[profiles.wafer]
+name = "wafer"
+display_name = "Wafer.ai"
+base_url = "https://pass.wafer.ai/v1"
+compatible_with = "openai"
+quirk_adapter = ""
+
+[profiles.wafer.auth]
+type = "bearer"
+header_name = "Authorization"
+header_format = "Bearer {api_key}"
+
+[profiles.wafer.features]
+chat_completion = true
+streaming = true
+function_calling = true
+vision = true
+audio = false
+reasoning_effort = false
+verbosity = false
+custom_tools = false
+max_tokens_param = "max_tokens"
+system_prompt_style = "message"
+
+[profiles.wafer.models]
+prefix = ""
+format = "{model}"
+supports_discovery = true
+
+[profiles.wafer.transforms]
+remove_params = ["reasoning_effort", "verbosity"]

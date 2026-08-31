@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swarm TUI — Settings Screens Reference</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1118; --bg2: #151b24; --bg3: #1e2535; --bg4: #252d3d;
+    --primary: #6e64e8; --accent: #39d2c0; --text: #e2e8f0;
+    --dim: #8892a4; --muted: #556070; --border: #2a3347;
+    --success: #2ecc71; --warn: #f0a500; --error: #e74c3c;
+    --tag-bg: #1e2535; --code-bg: #131820;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.65; }
+  .page-wrap { max-width: 1280px; margin: 0 auto; padding: 2rem 2.5rem; }
+
+  /* ---- COVER ---- */
+  .cover { text-align: center; padding: 6rem 2rem 4rem; border-bottom: 1px solid var(--border); margin-bottom: 3rem; }
+  .cover h1 { font-size: 3.2rem; color: var(--primary); letter-spacing: -1px; }
+  .cover .subtitle { font-size: 1.25rem; color: var(--accent); margin-top: 0.5rem; }
+  .cover .meta { color: var(--dim); margin-top: 1.5rem; font-size: 0.9rem; }
+
+  /* ---- TOC ---- */
+  .toc { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 2rem; margin-bottom: 3rem; }
+  .toc h2 { color: var(--accent); margin-bottom: 1.2rem; font-size: 1.2rem; text-transform: uppercase;
+    letter-spacing: 2px; }
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.4rem 2rem; }
+  .toc-grid a { color: var(--primary); text-decoration: none; font-size: 0.92rem; }
+  .toc-grid a:hover { color: var(--accent); }
+  .toc-group { margin-bottom: 1rem; }
+  .toc-group-title { color: var(--warn); font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 0.4rem; }
+
+  /* ---- SECTIONS ---- */
+  .section { margin-bottom: 4rem; border-top: 2px solid var(--border); padding-top: 2.5rem; }
+  h2.section-title { font-size: 2rem; color: var(--primary); margin-bottom: 0.3rem; }
+  .section-group-badge { display: inline-block; background: var(--bg3); color: var(--accent);
+    font-size: 0.75rem; padding: 2px 10px; border-radius: 99px; margin-bottom: 1rem;
+    text-transform: uppercase; letter-spacing: 1px; }
+  .section-desc { color: var(--dim); margin-bottom: 1.5rem; font-size: 0.97rem; }
+
+  h3 { color: var(--accent); font-size: 1.15rem; margin: 2rem 0 0.8rem; }
+  h4 { color: var(--warn); font-size: 0.95rem; margin: 1.4rem 0 0.5rem; text-transform: uppercase;
+    letter-spacing: 1px; }
+
+  /* ---- TABLES ---- */
+  .tbl-wrap { overflow-x: auto; margin: 1rem 0 1.5rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th { background: var(--bg3); color: var(--accent); text-align: left; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); font-weight: 600; }
+  td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: #0d1017; }
+  code { background: var(--code-bg); color: var(--accent); padding: 1px 6px; border-radius: 4px;
+    font-size: 0.85em; font-family: 'JetBrains Mono', 'Cascadia Code', monospace; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.76rem;
+    font-weight: 600; margin: 1px 2px; }
+  .tag-toggle { background: #1a3a2a; color: var(--success); }
+  .tag-text { background: #1a2a3a; color: #7ec8e3; }
+  .tag-number { background: #2a2a1a; color: var(--warn); }
+  .tag-cycle { background: #2a1a3a; color: #c792ea; }
+  .tag-button { background: #3a1a1a; color: var(--error); }
+  .tag-list { background: #1a2a1a; color: #a8e6a3; }
+  .tag-slider { background: #2a1a2a; color: #e8a0c8; }
+
+  /* ---- MERMAID ---- */
+  .diagram-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.5rem; margin: 1.5rem 0; overflow-x: auto; }
+  .diagram-title { color: var(--dim); font-size: 0.8rem; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 1rem; }
+  .mermaid { text-align: center; }
+
+  /* ---- CALLOUT ---- */
+  .callout { border-left: 3px solid var(--primary); background: var(--bg3); padding: 0.8rem 1.2rem;
+    border-radius: 0 6px 6px 0; margin: 1rem 0; font-size: 0.9rem; color: var(--dim); }
+  .callout strong { color: var(--text); }
+
+  /* ---- STATE PILLS ---- */
+  .states { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
+  .state-pill { background: var(--bg3); border: 1px solid var(--primary); color: var(--primary);
+    padding: 3px 12px; border-radius: 99px; font-size: 0.82rem; font-family: monospace; }
+  .state-pill.active { background: var(--primary); color: white; }
+
+  /* ---- KB TABLE ---- */
+  kbd { background: var(--bg4); border: 1px solid var(--muted); border-radius: 4px; padding: 1px 7px;
+    font-size: 0.82rem; font-family: monospace; color: var(--text); white-space: nowrap; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<!-- COVER -->
+<div class="cover">
+  <h1>Swarm TUI</h1>
+  <div class="subtitle">Settings Screens — Complete Reference</div>
+  <div class="meta">22 Sections &nbsp;·&nbsp; All Fields, Key Bindings &amp; Navigation Flows &nbsp;·&nbsp; 2026-03-14</div>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <div class="toc-grid">
+    <div class="toc-group">
+      <div class="toc-group-title">AI Config</div>
+      <a href="#sec-profiles">Profiles</a><br>
+      <a href="#sec-agents">Agents</a><br>
+      <a href="#sec-model">Model</a><br>
+      <a href="#sec-systemprompt">System Prompts</a><br>
+      <a href="#sec-compaction">Compaction</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Tools &amp; Integrations</div>
+      <a href="#sec-mcp">Tools and MCP</a><br>
+      <a href="#sec-hooks">Hooks</a><br>
+      <a href="#sec-skills">Skills</a><br>
+      <a href="#sec-plugins">Plugins</a><br>
+      <a href="#sec-context">Context Sources</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Appearance</div>
+      <a href="#sec-display">Display</a><br>
+      <a href="#sec-theme">Theme &amp; Background</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Security &amp; Auth</div>
+      <a href="#sec-security">Security</a><br>
+      <a href="#sec-auth">Authentication</a><br>
+      <a href="#sec-cloud">Cloud</a><br>
+      <a href="#sec-proxies">Proxies</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Performance</div>
+      <a href="#sec-cache">Cache Statistics</a><br>
+      <a href="#sec-reliability">Reliability</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Advanced</div>
+      <a href="#sec-voice">Voice Input</a><br>
+      <a href="#sec-general">General</a><br>
+      <a href="#sec-bundles">Config Bundles</a><br>
+      <a href="#sec-advanced">Advanced</a>
+    </div>
+    <div class="toc-group">
+      <div class="toc-group-title">Architecture</div>
+      <a href="#arch-overview">Overview &amp; Layout</a><br>
+      <a href="#arch-topology">Full Navigation Topology</a><br>
+      <a href="#arch-focus">Focus Model</a>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- ARCHITECTURE -->
+<!-- ================================================================ -->
+<div class="section" id="arch-overview">
+  <h2 class="section-title">Architecture Overview</h2>
+  <div class="section-desc">The settings panel is a two-pane TUI embedded inside the Home screen. It is activated via <kbd>Ctrl+S</kbd> from chat, or by clicking the Settings tab.</div>
+
+  <h3>Two-Pane Layout</h3>
+  <div class="callout">
+    <strong>Wide mode (≥80 cols):</strong> Left sidebar (25%, min 20, max 40 cols) shows grouped section list. Right content panel shows the active section. A 2-row hint bar runs across the bottom.<br><br>
+    <strong>Narrow mode (&lt;80 cols):</strong> Single pane with a section selector at the top.
+  </div>
+
+  <h3>Focus Model</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>State</th><th>Value</th><th>Description</th></tr>
+    <tr><td><code>FocusSidebar</code></td><td>0</td><td>Sidebar has keyboard focus — navigate sections with ↑/↓</td></tr>
+    <tr><td><code>FocusContent</code></td><td>1</td><td>Content panel has keyboard focus — interact with section items</td></tr>
+  </table></div>
+
+  <div class="diagram-wrap">
+    <div class="diagram-title">Focus Transitions</div>
+    <div class="mermaid">
+flowchart LR
+    A([Sidebar Focus]) -- "Enter / l / Tab" --> B([Content Focus])
+    B -- "Shift+Tab / Esc" --> A
+    A -- "Esc (clean)" --> C([Exit Settings])
+    A -- "Esc (dirty)" --> D([Exit Modal])
+    D -- "Save & Exit" --> C
+    D -- "Exit Without Saving" --> C
+    D -- "Cancel" --> A
+    </div>
+  </div>
+
+  <h3>Sidebar Groups</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>Group</th><th>Sections</th></tr>
+    <tr><td>AI Config</td><td>Profiles, Agents, Model, System Prompts, Compaction</td></tr>
+    <tr><td>Tools &amp; Integrations</td><td>Tools and MCP, Hooks, Skills, Plugins, Context Sources</td></tr>
+    <tr><td>Appearance</td><td>Display, Theme &amp; Background</td></tr>
+    <tr><td>Security &amp; Auth</td><td>Security, Authentication, Cloud, Proxies</td></tr>
+    <tr><td>Performance</td><td>Cache Statistics, Reliability</td></tr>
+    <tr><td>Advanced</td><td>Voice Input, General, Config Bundles, Advanced</td></tr>
+  </table></div>
+
+  <h3>Sidebar Key Bindings (all sections)</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><kbd>↑</kbd> <kbd>k</kbd></td><td>Navigate section up</td></tr>
+    <tr><td><kbd>↓</kbd> <kbd>j</kbd></td><td>Navigate section down</td></tr>
+    <tr><td><kbd>Enter</kbd> <kbd>l</kbd></td><td>Enter content panel for selected section</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>Enter content panel</td></tr>
+    <tr><td><kbd>Shift+Tab</kbd></td><td>Exit settings (go to previous Home tab)</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Activate sidebar search filter</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Clear search (if active); else exit settings</td></tr>
+    <tr><td><kbd>q</kbd></td><td>Exit settings → New Chat tab (when not editing text)</td></tr>
+  </table></div>
+</div>
+
+<!-- ================================================================ -->
+<!-- FULL TOPOLOGY -->
+<!-- ================================================================ -->
+<div class="section" id="arch-topology">
+  <h2 class="section-title">Full Navigation Topology</h2>
+  <div class="section-desc">Every screen, sub-screen and state reachable from the settings panel.</div>
+  <div class="diagram-wrap">
+    <div class="diagram-title">Top-Level Section Map</div>
+    <div class="mermaid">
+flowchart TD
+    ENTRY([Settings Entry]) --> SIDEBAR[Sidebar]
+    SIDEBAR --> G1[AI Config Group]
+    SIDEBAR --> G2[Tools & Integrations Group]
+    SIDEBAR --> G3[Appearance Group]
+    SIDEBAR --> G4[Security & Auth Group]
+    SIDEBAR --> G5[Performance Group]
+    SIDEBAR --> G6[Advanced Group]
+
+    G1 --> S_PROFILES[Profiles]
+    G1 --> S_AGENTS[Agents]
+    G1 --> S_MODEL[Model]
+    G1 --> S_SP[System Prompts]
+    G1 --> S_COMPACT[Compaction]
+
+    G2 --> S_MCP[Tools and MCP]
+    G2 --> S_HOOKS[Hooks]
+    G2 --> S_SKILLS[Skills]
+    G2 --> S_PLUGINS[Plugins]
+    G2 --> S_CTX[Context Sources]
+
+    G3 --> S_DISPLAY[Display]
+    G3 --> S_THEME[Theme & Background]
+
+    G4 --> S_SEC[Security]
+    G4 --> S_AUTH[Authentication]
+    G4 --> S_CLOUD[Cloud]
+    G4 --> S_PROXY[Proxies]
+
+    G5 --> S_CACHE[Cache Statistics]
+    G5 --> S_REL[Reliability]
+
+    G6 --> S_VOICE[Voice Input]
+    G6 --> S_GEN[General]
+    G6 --> S_BUNDLES[Config Bundles]
+    G6 --> S_ADV[Advanced]
+    </div>
+  </div>
+</div>

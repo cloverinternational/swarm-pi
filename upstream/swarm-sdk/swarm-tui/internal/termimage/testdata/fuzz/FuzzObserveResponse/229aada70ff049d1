@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\x1b_Gi=33;OK\x1b\\")

@@ -1,0 +1,29 @@
+# Simple Mode - Single Sequential Group
+# This is the most basic mode configuration with one group executing sequentially.
+
+name: "simple_mode"
+description: "A simple single-group mode for basic tasks"
+version: "1.0.0"
+
+config:
+  max_duration: "5m"
+  allow_human_intervention: true
+  fail_on_steering_block: false
+  max_retries: 2
+  timeout_behavior: "partial"
+
+groups:
+  - name: "main"
+    execution: "sequential"
+    timeout: "3m"
+    
+    completion:
+      type: "all"
+      threshold: 1.0
+    
+    agents:
+      - name: "worker"
+        provider: "openai"
+        model: "gpt-4"
+        system_prompt: "You are a helpful assistant."
+        tools: ["file_read", "grep"]

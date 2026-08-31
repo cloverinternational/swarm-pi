@@ -1,0 +1,48 @@
+# Adversarial Mode - Debate-Based Decision Making
+# This mode uses adversarial execution where agents debate until consensus.
+
+name: "adversarial_analysis"
+description: "Two agents debate a topic until reaching consensus"
+version: "1.0.0"
+
+config:
+  max_duration: "15m"
+  allow_human_intervention: true
+  max_retries: 5
+
+groups:
+  - name: "debate"
+    execution: "adversarial"
+    timeout: "12m"
+    
+    completion:
+      type: "consensus"
+      threshold: 0.8
+    
+    agents:
+      - name: "proponent"
+        provider: "openai"
+        model: "gpt-4"
+        system_prompt: "You argue FOR the proposed solution. Build the strongest case possible."
+        tools: ["file_read", "grep"]
+        capabilities:
+          max_tokens: 3000
+          temperature: 0.7
+      
+      - name: "opponent"
+        provider: "anthropic"
+        model: "claude-sonnet-4"
+        system_prompt: "You argue AGAINST the proposed solution. Find flaws and weaknesses."
+        tools: ["file_read", "grep"]
+        capabilities:
+          max_tokens: 3000
+          temperature: 0.7
+      
+      - name: "moderator"
+        provider: "openai"
+        model: "gpt-4"
+        system_prompt: "You are a neutral moderator. Evaluate both arguments and guide toward consensus."
+        tools: ["file_read"]
+        capabilities:
+          max_tokens: 2000
+          temperature: 0.3

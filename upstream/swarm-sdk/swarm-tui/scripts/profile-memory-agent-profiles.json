@@ -1,0 +1,45 @@
+{
+  "default_profile": "fake-profile",
+  "profiles": [
+    {
+      "id": "fake-profile",
+      "name": "Deterministic profiling",
+      "description": "Routes every agent role to the local profiling provider.",
+      "is_default": true,
+      "roles": {
+        "main": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "steering": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "background": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "sub_agent": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "inference": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "long_context": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "compaction": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        },
+        "vision": {
+          "chain": {"primary": {"provider": "fake-profile", "model": "fake-profile-model"}},
+          "enabled": true
+        }
+      }
+    }
+  ]
+}

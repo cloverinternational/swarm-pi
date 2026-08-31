@@ -1,0 +1,11 @@
+apiVersion: swarm.ai/v1alpha1
+kind: Harness
+metadata:
+  name: zero-tools
+provider:
+  id: anthropic
+  model: claude-x
+agent:
+  systemPrompt:
+    inline: "Zero active tools."
+  tools: []
