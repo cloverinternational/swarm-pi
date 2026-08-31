@@ -16,6 +16,7 @@ export interface HookPi {
 }
 interface HookState {
   turns: number; toolCalls: number; lastNudgeTurn: number; maintenanceAt: number;
+  maintenanceAtByTask: Record<string, number>;
   hadError: boolean; skillCalls: number; lastSkillReview: number; audit: AuditRecord[];
   focusTaskId?: string; completedCalls: string[]; nudgeBudget: number;
 }
@@ -40,8 +41,10 @@ const failed = (e: HookEvent) => e.isError === true || e.error != null ||
 const text = (x: unknown) => typeof x === "string" ? x : "";
 
 function readOnlyBash(command: string): boolean {
-  return /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show|branch)|cat|head|tail|sed|awk|wc|which|type|echo|printf)\b/i.test(command.trim()) &&
-    !/[|;&]>/.test(command);
+  // Do not parse shell syntax: reject control, expansion, grouping, globbing,
+  // and redirection syntax rather than risk allowing a write through the gate.
+  if (/[;&|<>`$(){}[\]\\\r\n*?]/.test(command)) return false;
+  return /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show|branch)|cat|head|tail|sed|awk|wc|which|type|echo|printf)\b/i.test(command.trim());
 }
 function exempt(name: string, args: any): boolean {
   const n = normalize(name);
@@ -53,12 +56,13 @@ function stateFrom(entries: readonly unknown[]): HookState {
   const found = [...entries].reverse().find((e: any) => e?.type === "pi-swarm-task-hooks");
   const d = (found as any)?.data;
   return d ? { turns: d.turns ?? 0, toolCalls: d.toolCalls ?? 0, lastNudgeTurn: d.lastNudgeTurn ?? 0,
-    maintenanceAt: d.maintenanceAt ?? 0, hadError: !!d.hadError, skillCalls: d.skillCalls ?? 0,
+    maintenanceAt: d.maintenanceAt ?? 0, maintenanceAtByTask: d.maintenanceAtByTask && typeof d.maintenanceAtByTask === "object" ? { ...d.maintenanceAtByTask } : {},
+    hadError: !!d.hadError, skillCalls: d.skillCalls ?? 0,
     lastSkillReview: d.lastSkillReview ?? 0, audit: Array.isArray(d.audit) ? d.audit.slice(-200) : [],
     focusTaskId: typeof d.focusTaskId === "string" ? d.focusTaskId : undefined,
     completedCalls: Array.isArray(d.completedCalls) ? d.completedCalls.slice(-500) : [],
     nudgeBudget: typeof d.nudgeBudget === "number" ? Math.max(0, d.nudgeBudget) : 1 } :
-    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [], nudgeBudget: 1 };
+    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, maintenanceAtByTask: {}, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [], nudgeBudget: 1 };
 }
 function summary(name: string, args: any): string {
   if (!args || typeof args !== "object") return name;
@@ -184,7 +188,12 @@ export class TaskHooksCoordinator {
     // cadence. Completion de-duplication is done before reaching this method.
     if (!TASK_TOOLS.has(n) && !PLAN_TOOLS.has(n)) this.state.toolCalls++;
     if (isFailure) this.state.hadError = true;
-    if (n === "skill" || n === "skillmanage") { this.state.skillCalls++; this.state.lastSkillReview = this.state.toolCalls; }
+    // Failed or partial skill calls do not count as successful reusable-skill
+    // usage and must not make the next review appear complete.
+    if ((n === "skill" || n === "skillmanage") && !isFailure) {
+      this.state.skillCalls++;
+      this.state.lastSkillReview = this.state.toolCalls;
+    }
     // Keep routine bookkeeping out of the audit, but retain anomalous
     // TaskManage terminal results so partial/failed Pi payloads are visible.
     if (!IGNORED_AUDIT.has(n) || (n === "taskmanage" && isFailure)) {
@@ -225,8 +234,9 @@ export class TaskHooksCoordinator {
     const focus = this.focus();
     const focusId = focus?.id;
     if (focusId !== this.state.focusTaskId) {
+      if (this.state.focusTaskId) this.state.maintenanceAtByTask[this.state.focusTaskId] = this.state.maintenanceAt;
       this.state.focusTaskId = focusId;
-      this.state.maintenanceAt = this.state.toolCalls;
+      this.state.maintenanceAt = focusId ? (this.state.maintenanceAtByTask[focusId] ?? this.state.toolCalls) : this.state.toolCalls;
       this.persist();
     }
     if (this.tasks().length === 0 && this.state.toolCalls >= this.config.nudgeToolThreshold &&
@@ -238,13 +248,15 @@ export class TaskHooksCoordinator {
       this.persist(); return this.message("Multi-step work detected with no tasks; consider TaskManage.");
     }
     if (focus && this.state.toolCalls - this.state.maintenanceAt >= this.config.maintenanceToolThreshold) {
-      this.state.maintenanceAt = this.state.toolCalls; this.persist();
+      this.state.maintenanceAt = this.state.toolCalls;
+      this.state.maintenanceAtByTask[focus.id] = this.state.maintenanceAt;
+      this.persist();
       const open = this.tasks().filter(t => t.status === "pending" && t.dependsOn.some(id =>
         this.tasks().some(d => d.id === id && d.status !== "completed"))).slice(0, 3);
       const blockers = open.length ? ` Open blockers: ${open.map(t => `#${t.id} ${t.subject}`).join(", ")}.` : "";
       return this.message(`You've used ${this.state.toolCalls} tools on ${focus.subject}. Check whether scope expanded and mark it completed when done.${blockers}`);
     }
-    if (this.state.toolCalls - this.state.lastSkillReview >= 10 && this.state.toolCalls > 0) {
+    if (this.state.skillCalls > 0 && this.state.toolCalls - this.state.lastSkillReview >= 10) {
       this.state.lastSkillReview = this.state.toolCalls; this.persist();
       return this.message("Review reusable learning: patch an existing skill or record a no-mutation review.");
     }

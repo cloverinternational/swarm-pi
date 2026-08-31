@@ -19,6 +19,13 @@ describe("TaskManage hooks coordinator", () => {
     m.execute({ operations: [{ key: "a", op: "create", subject: "work", status: "in_progress" }] });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toBeUndefined();
   });
+  it("only bypasses genuinely simple read-only bash commands", () => {
+    const h = new TaskHooksCoordinator(new TaskManager(), pi(), { enforcementMode: "block" });
+    expect(h.on(event("tool_call", { toolName: "bash", input: { command: "echo hello" } }))).toBeUndefined();
+    for (const command of ["echo x > file", "pwd && rm -rf .", "pwd; rm file", "echo $(rm file)", "pwd | tee file", "echo `rm file`", "(pwd)"]) {
+      expect(h.on(event("tool_call", { toolName: "bash", input: { command } }))).toMatchObject({ block: true });
+    }
+  });
   it("guides task lifecycle and records redacted outcomes", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
     const createInput = { operations: [{ key: "a", op: "create", subject: "work" }] };
@@ -94,6 +101,38 @@ describe("TaskManage hooks coordinator", () => {
     expect(h.on(event("turn_end"))?.message).toContain("a");
     m.execute({ operations: [{ key: "f", op: "update", taskId: "2", status: "in_progress" }] });
     expect(h.on(event("turn_end"))).toBeUndefined();
+  });
+
+  it("keeps a separate maintenance baseline when switching away and back", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { maintenanceToolThreshold: 2 });
+    m.execute({ operations: [{ key: "a", op: "create", subject: "a", status: "in_progress" }, { key: "b", op: "create", subject: "b" }] });
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    h.on(event("turn_end")); // establish task a's baseline at one tool
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined(); // threshold is two tools after baseline
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))?.message).toContain("a");
+    m.execute({ operations: [{ key: "b", op: "update", taskId: "2", status: "in_progress" }] });
+    expect(h.on(event("turn_end"))).toBeUndefined();
+    m.execute({ operations: [{ key: "a", op: "update", taskId: "1", status: "in_progress" }] });
+    expect(h.on(event("turn_end"))).toBeUndefined(); // a resumes its own baseline
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined();
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))?.message).toContain("a");
+  });
+
+  it("advances skill review bookkeeping only on success and nudges once overdue", () => {
+    const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
+    h.on(event("tool_result", { toolName: "skill", input: { name: "failed" }, error: "nope" }));
+    for (let i = 0; i < 10; i++) h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined(); // no successful skill usage yet
+    h.on(event("tool_result", { toolName: "skill", input: { name: "useful" }, result: {} }));
+    for (let i = 0; i < 9; i++) h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))).toBeUndefined();
+    h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }));
+    expect(h.on(event("turn_end"))?.message).toContain("Review reusable learning");
+    expect(h.on(event("turn_end"))).toBeUndefined(); // bounded until another interval elapses
   });
 
   it("shares the empty-task nudge budget across coordinators in one session", () => {
