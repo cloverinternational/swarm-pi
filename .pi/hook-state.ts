@@ -34,9 +34,13 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
   if (!shared.state.visible || !shared.pi) return record;
   const callId = info.toolCallId, isPost = event === "tool_result" || event === "tool_execution_end";
   if (isPost && callId) { if (terminalByCall.has(String(callId))) return record; terminalByCall.add(String(callId)); }
-  if (event === "tool_call" || isPost) {
-    const phase = isPost ? "POST-TOOL" : "PRE-TOOL", suffix = outcome === "blocked" ? ` · BLOCKED${reason ? `: ${reason}` : ""}` : outcome === "failed" ? " · FAILED" : "";
-    shared.pi.sendMessage?.({ customType: "swarm-hook-event", content: `[${phase}] ${group} · ${info.tool ?? "tool"}${suffix}`, display: true, details: { ...record, phase } }, { triggerTurn: false });
+  // Successful hook events are routine telemetry and must not become chat
+  // messages. Only exceptional outcomes deserve a compact, transient footer
+  // status; the complete event history remains available through /hooks.
+  if ((outcome === "blocked" || outcome === "failed") && (event === "tool_call" || isPost)) {
+    const phase = isPost ? "post" : "pre";
+    const suffix = reason ? ` · ${reason}` : "";
+    shared.pi.setStatus?.("swarm-hooks", `${phase} ${group} · ${info.tool ?? "tool"} · ${outcome}${suffix}`);
   }
   return record;
 }
