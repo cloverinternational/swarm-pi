@@ -39,7 +39,9 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
   if (event === "tool_call" || isPost) {
     const phase = isPost ? "post" : "pre";
     const marker = outcome === "blocked" ? "!" : outcome === "failed" ? "×" : "✓";
-    const suffix = outcome === "blocked" || outcome === "failed" ? ` · ${outcome.toUpperCase()}${reason ? `: ${reason}` : ""}` : "";
+    const suffix = outcome === "blocked" || outcome === "failed"
+      ? ` · ${outcome}: ${reason ?? "no reason provided"}`
+      : ` · ${isPost ? "completed" : "allowed"}`;
     shared.pi.sendMessage?.({
       customType: "swarm-hook-event",
       content: `${marker} [${phase}-hook] ${group} · ${info.tool ?? "tool"}${suffix}`,
