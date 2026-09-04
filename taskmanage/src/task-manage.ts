@@ -24,7 +24,11 @@ export interface Params { operations: Operation[]; mode?: Mode }
 export interface Failure { code: string; message: string; retryable: boolean }
 export interface Result { key: string; op: Operation["op"]; status: "succeeded" | "failed" | "skipped"; data?: unknown; error?: Failure }
 export interface Batch { status: "succeeded" | "partial" | "failed"; results: Result[] }
-export interface JournalEntry { type: "pi-swarm-task-state"; data: State }
+export interface OperationEvent {
+  type: "pi-swarm-task-operation";
+  data: { mode: Mode; status: Batch["status"]; results: Result[]; at: string };
+}
+export type JournalEntry = { type: "pi-swarm-task-state"; data: State } | OperationEvent;
 interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
@@ -128,12 +132,15 @@ export const taskManageRenderers = {
 
 export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
-  constructor(private readonly persist?: (entry: JournalEntry) => void) {}
+  constructor(
+    private readonly persist?: (entry: JournalEntry) => void,
+    private readonly emitOperation?: (event: OperationEvent) => void,
+  ) {}
   snapshot(): State { return clone(this.state); }
   restore(state: State): void { this.state = clone(state); }
   rehydrate(entries: readonly JournalEntry[]): void {
     const last = [...entries].reverse().find(e => e.type === "pi-swarm-task-state");
-    if (last) this.restore(last.data);
+    if (last?.type === "pi-swarm-task-state") this.restore(last.data);
   }
   private commit(): void { this.persist?.({ type: "pi-swarm-task-state", data: this.snapshot() }); }
   private find(id: string): Task | undefined { return this.state.tasks.find(t => t.id === id); }
@@ -222,7 +229,9 @@ export class TaskManager {
     return undefined;
   }
   execute(params: Params, signal?: AbortSignal): Batch {
-    const ops = params?.operations;
+    if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
+      return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
+    const ops = params.operations;
     if (!Array.isArray(ops) || !ops.length || ops.length > 50) return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "operations must contain 1..50 operations") }] };
     if (params.mode && params.mode !== "sequential" && params.mode !== "atomic") return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unsupported mode") }] };
     const seen = new Map<string, "create"|"update"|"get"|"list">();
@@ -268,7 +277,11 @@ export class TaskManager {
     }
     const status = params.mode === "atomic" && stopped ? "failed" :
       stopped ? (results.some(r => r.status === "succeeded") ? "partial" : "failed") : "succeeded";
-    return { status, results };
+    const batch = { status, results } as Batch;
+    this.emitOperation?.({ type: "pi-swarm-task-operation", data: {
+      mode: params.mode ?? "sequential", status, results: clone(results), at: new Date().toISOString(),
+    } });
+    return batch;
   }
   private run(op: Operation, local: Record<string,string>): Result {
     const target = (r?: Ref) => this.resolve(r, local);
@@ -426,7 +439,10 @@ export class TaskManager {
 }
 
 export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]}})=>void): void }, presentation = taskManageRenderers): TaskManager {
-  const manager = new TaskManager(entry => pi.appendEntry(entry.type, entry.data));
+  const manager = new TaskManager(
+    entry => pi.appendEntry(entry.type, entry.data),
+    event => pi.appendEntry(event.type, event.data),
+  );
   pi.on("session_start", (_event, ctx) => manager.rehydrate((ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]));
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
