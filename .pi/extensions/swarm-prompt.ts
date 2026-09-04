@@ -109,7 +109,9 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   pi.on("before_agent_start", (event) => {
     if (event.systemPrompt.includes(forgeMarker)) return;
     const assembly = assembleForgePrompt(event.systemPrompt, { cwd: event.systemPromptOptions?.cwd, ...event.swarmPrompt });
-    return { systemPrompt: assembly.prompt, promptProvenance: assembly.provenance, promptHash: assembly.hash };
+    // before_agent_start only accepts systemPrompt/message. Keep provenance
+    // internal to the assembly result instead of returning fields Pi ignores.
+    return { systemPrompt: assembly.prompt };
   });
 }
 export default function swarmPromptExtension(pi: PromptExtensionAPI): void { registerSwarmPrompt(pi); }

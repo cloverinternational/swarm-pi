@@ -3,6 +3,14 @@ import { constants } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 
+/** Minimal Pi Component shape, kept local so the adapter stays standalone-testable. */
+class ForgeText {
+  constructor(private text: string) {}
+  setText(text: string) { this.text = text; }
+  invalidate() {}
+  render(_width: number): string[] { return this.text ? this.text.split("\n") : []; }
+}
+
 /** Forge-compatible, workspace-scoped tool adapters. Deliberately independent of Pi internals. */
 export interface ForgeToolResult { content: [{ type: "text"; text: string }]; details: Record<string, unknown>; isError?: boolean }
 const ok = (text: string, details: Record<string, unknown> = {}): ForgeToolResult => ({ content: [{ type: "text", text }], details });
@@ -35,13 +43,26 @@ function tool(name: string, description: string, parameters: unknown, execute: (
   return {
     name, label: name, description, parameters,
     execute: async (_id: string, p: any, signal: AbortSignal) => { try { return await execute(p, signal); } catch (e) { return resultError(e, signal); } },
-    renderCall: (args: any) => `${name} ${String(args?.path ?? args?.command ?? args?.pattern ?? "")}`.trim(),
-    renderResult: (result: ForgeToolResult) => result.isError ? result.content[0].text : "",
+    renderCall: (args: any, theme: any) => {
+      const target = String(args?.path ?? args?.command ?? args?.pattern ?? "").trim();
+      const title = theme?.fg ? theme.fg("toolTitle", theme.bold(name)) : name;
+      const detail = target && theme?.fg ? theme.fg("muted", ` ${target}`) : target ? ` ${target}` : "";
+      return new ForgeText(`${title}${detail}`);
+    },
+    renderResult: (result: ForgeToolResult, options: { isPartial?: boolean }, theme: any) => {
+      if (options?.isPartial) return new ForgeText(theme?.fg ? theme.fg("warning", "Processing…") : "Processing…");
+      const text = result.isError ? result.content[0].text : "✓ Done";
+      const color = result.isError ? "error" : "success";
+      return new ForgeText(theme?.fg ? theme.fg(color, text) : text);
+    },
   };
 }
 
 export default function forgeToolsExtension(pi: any) {
-  const workspace = resolve(pi.getCwd?.() ?? process.cwd());
+  // Pi's ExtensionAPI does not expose getCwd(); project extensions are loaded
+  // with the project as the process working directory. Keep the optional shim
+  // for standalone hosts and tests that explicitly provide a workspace.
+  const workspace = resolve(typeof pi.getCwd === "function" ? pi.getCwd() : process.cwd());
   const within = (p: string) => pathInWorkspace(workspace, p);
   const registered = new Map<string, any>();
   const register = (definition: any) => { registered.set(definition.name, definition); pi.registerTool(definition); };
