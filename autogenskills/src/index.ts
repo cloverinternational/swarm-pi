@@ -95,7 +95,15 @@ export class AutoSkillManager {
     } else this.state.errors++;
     const skillName = input?.name ?? input?.skill ?? input?.skill_name;
     if (success && toolName && /^(skill|skillmanage|swarmskill)$/i.test(toolName)) {
-      if (typeof skillName === "string" && this.state.skills[skillName]) this.state.skills[skillName].uses++;
+      // SwarmSkill may come from the general loader rather than autogen's
+      // registry. Create metadata before recording usage so observer hooks are
+      // never able to crash on an unregistered skill.
+      if (typeof skillName === "string") {
+        const entry = this.state.skills[skillName] ?? { version: "unknown", uses: 0 };
+        entry.uses = (entry.uses ?? 0) + 1;
+        entry.lastUsed = now();
+        this.state.skills[skillName] = entry;
+      }
       this.state.skilled = true;
       this.state.budgetCalls = 0;
       this.state.nudgeIgnores = 0;
