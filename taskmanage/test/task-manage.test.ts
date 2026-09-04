@@ -234,6 +234,21 @@ describe("TaskManage", () => {
     expect(result.results.map(r=>r.status)).toEqual(["failed","skipped"]);
     expect(m.snapshot().tasks).toHaveLength(0);
   });
+  it("supports upstream low/medium/high priorities and exposes them in task DTOs", () => {
+    const m = new TaskManager();
+    const created = m.execute({operations:[{key:"urgent",op:"create",subject:"Urgent",priority:"high"}]});
+    expect(created.results[0].data).toMatchObject({task:{id:"1",status:"pending"}});
+    expect(m.execute({operations:[{key:"get",op:"get",taskId:"1"}]}).results[0].data).toMatchObject({task:{priority:"high"}});
+    expect(m.execute({operations:[{key:"lower",op:"update",taskId:"1",priority:"low"}]}).results[0].data).toMatchObject({task:{priority:"low"}});
+    expect(m.execute({operations:[{key:"invalid",op:"update",taskId:"1",priority:"critical" as any}]}).results[0].error?.code).toBe("validation_failed");
+  });
+
+  it("rehydrates legacy tasks without a priority as upstream medium", () => {
+    const m = new TaskManager();
+    m.rehydrate([{type:"pi-swarm-task-state",data:{nextId:2,keys:{},tasks:[{id:"1",subject:"legacy",status:"pending",active:false,dependsOn:[],notes:[],createdAt:"x",updatedAt:"x"} as any]}}]);
+    expect(m.execute({operations:[{key:"get",op:"get",taskId:"1"}]}).results[0].data).toMatchObject({task:{priority:"medium"}});
+  });
+
   it("matches upstream key, lifecycle, deletion, metadata, inference, and DTO contracts", () => {
     const m = new TaskManager();
     const created = m.execute({operations:[{key:"build",op:"create",subject:"Investigate API",metadata:{keep:1,remove:2}}]});
