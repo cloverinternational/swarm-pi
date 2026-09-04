@@ -87,10 +87,13 @@ export class AutoSkillManager {
   }
   list(): Skill[] { if (!existsSync(this.config.dir)) return []; return readdirSync(this.config.dir, { withFileTypes: true }).filter((e) => e.isDirectory() && safeName(e.name) && existsSync(this.file(e.name))).map((e) => this.parse(e.name)); }
   observeTool(success: boolean, toolName?: string, input?: any) {
+    // The SDK charges the budget at before-execute time, including calls that
+    // later fail. Pi exposes the result here, so charge every observed
+    // non-exempt attempt and persist failures as well.
+    this.state.toolCalls++;
+    const normalized = String(toolName ?? "").toLowerCase();
+    if (!/skill|task|plan|askuser|approval|pushagent|submitfeedback|read|grep|find|ls|search|browser|fetch/.test(normalized)) this.state.budgetCalls++;
     if (success) {
-      this.state.toolCalls++;
-      const normalized = String(toolName ?? "").toLowerCase();
-      if (!/skill|task|plan|askuser|approval|pushagent|submitfeedback|read|grep|find|ls|search|browser|fetch/.test(normalized)) this.state.budgetCalls++;
       if (this.state.errors > this.state.resolved) this.state.resolved++;
     } else this.state.errors++;
     const skillName = input?.name ?? input?.skill ?? input?.skill_name;
@@ -109,7 +112,7 @@ export class AutoSkillManager {
       this.state.nudgeIgnores = 0;
       this.state.reviewRequired = false;
       this.commit();
-    } else if (success) this.commit();
+    } else this.commit();
   }
   budgetStatus() { const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; return { used: this.state.budgetCalls, budget, skilled: this.state.skilled, reviewRequired: this.state.reviewRequired, nudgeIgnores: this.state.nudgeIgnores, maxNudgeIgnores: this.config.maxNudgeIgnores }; }
   budgetWidgetLines() { const s = this.budgetStatus(); const state = s.reviewRequired ? "REVIEW REQUIRED" : s.skilled ? "working" : "onboarding"; return [`Autogen skill budget: ${s.used}/${s.budget} · ${state}${s.reviewRequired ? " · use SkillManage review or Skill" : ""}`]; }
