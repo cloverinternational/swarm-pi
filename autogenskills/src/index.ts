@@ -108,23 +108,32 @@ export class AutoSkillManager {
       this.state.budgetCalls = 0;
       this.state.nudgeIgnores = 0;
       this.state.reviewRequired = false;
-      this.state.skills[skillName].lastUsed = now();
       this.commit();
     } else if (success) this.commit();
   }
   budgetStatus() { const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; return { used: this.state.budgetCalls, budget, skilled: this.state.skilled, reviewRequired: this.state.reviewRequired, nudgeIgnores: this.state.nudgeIgnores, maxNudgeIgnores: this.config.maxNudgeIgnores }; }
   budgetWidgetLines() { const s = this.budgetStatus(); const state = s.reviewRequired ? "REVIEW REQUIRED" : s.skilled ? "working" : "onboarding"; return [`Autogen skill budget: ${s.used}/${s.budget} · ${state}${s.reviewRequired ? " · use SkillManage review or Skill" : ""}`]; }
-  gateTool(toolName: string, input: any = {}): { block: true; reason: string } | undefined {
+  gateTool(toolName: string, input: any = {}): { block?: true; message?: string; reason?: string } | undefined {
     if (this.config.mode !== "auto") return;
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (!n || /skill|skillmanage|task|plan|askuser|approval|pushagent|submitfeedback|read|grep|find|ls|search|browser|fetch/.test(n)) return;
+    if (!n || /^(skill|skillmanage|swarmskill|taskmanage|taskcreate|taskupdate|tasklist|taskget|todowrite|todoread|todo|enterplanmode|exitplanmode|plan|planmode|askuserquestion|requestapproval|pushagentupdate|submitfeedback|read|grep|find|glob|ls|listdir|lsp|websearch|webfetch|browser|xsearch|xaiwebsearch|fetch)$/.test(n)) return;
     if (n === "bash" && typeof input?.command === "string" && /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show)|cat|head|tail|wc|which|type|echo|printf)(\s|$)/i.test(input.command.trim())) return;
     const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget;
     if (this.state.reviewRequired) return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
-    if (this.state.budgetCalls >= budget && !this.state.skilled) return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };
-    if (this.state.budgetCalls >= budget && this.state.skilled && this.state.nudgeIgnores > this.config.maxNudgeIgnores) {
-      this.state.reviewRequired = true; this.commit();
-      return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
+    // Swarm's onboarding tier is a hard gate as soon as the budget is spent.
+    if (!this.state.skilled && this.state.budgetCalls >= budget) return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };
+    if (this.state.skilled && this.state.budgetCalls >= budget) {
+      // Working-tier overage is advisory for exactly maxNudgeIgnores attempts,
+      // then escalates to a hard block. This is the pre-tool equivalent of
+      // Swarm's BudgetEnforcementHook and makes the gate effective even when
+      // no turn_end event is emitted (for example in parallel/agent loops).
+      this.state.nudgeIgnores++;
+      if (this.state.nudgeIgnores > this.config.maxNudgeIgnores) {
+        this.state.reviewRequired = true; this.commit();
+        return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
+      }
+      this.commit();
+      return { message: `Skill review recommended: working budget ${budget} exceeded (${this.state.nudgeIgnores}/${this.config.maxNudgeIgnores} grace attempts remain).` };
     }
     return;
   }
