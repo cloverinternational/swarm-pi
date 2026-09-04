@@ -30,8 +30,11 @@ export interface OperationEvent {
   type: "pi-swarm-task-operation";
   data: { mode: Mode; status: Batch["status"]; results: Result[]; at: string };
 }
-export type JournalEntry = { type: "pi-swarm-task-state"; data: State } | OperationEvent;
-interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
+import { replayLatest, snapshot, type VersionedSnapshot } from "./persistence.js";
+
+export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
+export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
+export interface TaskMetrics { mutations: number; reads: number; failures: number; lastRevision: number }
 
 const fail = (code: string, message: string, retryable = false): Failure => ({ code, message, retryable });
 const clone = <T>(x: T): T => structuredClone(x);
@@ -134,26 +137,41 @@ export const taskManageRenderers = {
 
 export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
+  private revision = 0;
+  private stats: TaskMetrics = { mutations: 0, reads: 0, failures: 0, lastRevision: 0 };
   constructor(
     private readonly persist?: (entry: JournalEntry) => void,
     private readonly emitOperation?: (event: OperationEvent) => void,
   ) {}
   snapshot(): State { return clone(this.state); }
+  metrics(): TaskMetrics { return { ...this.stats }; }
   restore(state: State): void {
     const restored = clone(state);
-    // Older journal entries predate the upstream TodoPriority field. Normalize
-    // them at the persistence boundary so every task has the same invariant as
-    // a newly-created task (the upstream default is medium).
+    // Legacy journals may contain malformed or pre-priority state. Normalize
+    // at the persistence boundary instead of allowing replay to crash.
+    if (!restored || !Array.isArray(restored.tasks) || typeof restored.nextId !== "number" || !restored.keys || typeof restored.keys !== "object") {
+      this.state = { nextId: 1, tasks: [], keys: {} };
+      return;
+    }
     for (const task of restored.tasks) {
       if (!PRIORITIES.includes(task.priority)) task.priority = "medium";
     }
     this.state = restored;
   }
   rehydrate(entries: readonly JournalEntry[]): void {
-    const last = [...entries].reverse().find(e => e.type === "pi-swarm-task-state");
-    if (last?.type === "pi-swarm-task-state") this.restore(last.data);
+    const replayed = replayLatest<State>(entries, "pi-swarm-task-state", (value) => value as State);
+    if (replayed) {
+      this.restore(replayed.state);
+      this.revision = replayed.revision;
+      this.stats.lastRevision = this.revision;
+    }
   }
-  private commit(): void { this.persist?.({ type: "pi-swarm-task-state", data: this.snapshot() }); }
+  private commit(): void {
+    this.revision++;
+    this.stats.mutations++;
+    this.stats.lastRevision = this.revision;
+    this.persist?.({ type: "pi-swarm-task-state", data: snapshot(this.snapshot(), this.revision) });
+  }
   private find(id: string): Task | undefined { return this.state.tasks.find(t => t.id === id); }
   private resolve(ref: Ref | undefined, local: Record<string, string>): string | Failure {
     if (typeof ref === "string") return ref;
@@ -244,6 +262,7 @@ export class TaskManager {
     if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
       return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
     const ops = params.operations;
+    if (Array.isArray(ops)) this.stats.reads += ops.filter(op => op?.op === "get" || op?.op === "list").length;
     if (!Array.isArray(ops) || !ops.length || ops.length > 50) return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "operations must contain 1..50 operations") }] };
     if (params.mode && params.mode !== "sequential" && params.mode !== "atomic") return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unsupported mode") }] };
     const seen = new Map<string, "create"|"update"|"get"|"list">();
@@ -289,6 +308,7 @@ export class TaskManager {
     }
     const status = params.mode === "atomic" && stopped ? "failed" :
       stopped ? (results.some(r => r.status === "succeeded") ? "partial" : "failed") : "succeeded";
+    this.stats.failures += results.filter(result => result.status === "failed").length;
     const batch = { status, results } as Batch;
     this.emitOperation?.({ type: "pi-swarm-task-operation", data: {
       mode: params.mode ?? "sequential", status, results: clone(results), at: new Date().toISOString(),
