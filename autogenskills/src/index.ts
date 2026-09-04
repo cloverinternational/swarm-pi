@@ -45,7 +45,7 @@ export class AutoSkillManager {
     const home = process.env.HOME ?? process.cwd();
     const mode = config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never";
     if (!["never", "manual", "auto"].includes(mode)) throw new Error(`invalid autogen mode: ${mode}`);
-    this.config = { mode, dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"), toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1, nudgeInterval: Math.max(1, config.nudgeInterval ?? 15), minInstructionsLength: config.minInstructionsLength ?? 200, toolCallBudget: config.toolCallBudget ?? 15, workingBudget: config.workingBudget ?? 90, maxNudgeIgnores: config.maxNudgeIgnores ?? 3, staleAfterDays: config.staleAfterDays ?? 30, archiveAfterDays: config.archiveAfterDays ?? 90, reviewHook: config.reviewHook };
+    this.config = { mode, dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"), toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1, nudgeInterval: Math.max(1, config.nudgeInterval ?? 15), minInstructionsLength: config.minInstructionsLength ?? 200, toolCallBudget: config.toolCallBudget ?? 5, workingBudget: config.workingBudget ?? 90, maxNudgeIgnores: config.maxNudgeIgnores ?? 3, staleAfterDays: config.staleAfterDays ?? 30, archiveAfterDays: config.archiveAfterDays ?? 90, reviewHook: config.reviewHook };
   }
   snapshot(): State { return clone(this.state); }
   restore(state: State) { this.state = { ...defaultState(), ...clone(state), skills: { ...(state.skills ?? {}) }, nudges: state.nudges ?? 0, nudgeIgnores: state.nudgeIgnores ?? 0, mutations: state.mutations ?? 0 }; }
