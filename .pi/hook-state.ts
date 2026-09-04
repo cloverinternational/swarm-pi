@@ -31,7 +31,11 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
   const info = eventInfo(payload), record: HookRecord = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, group, event, at: new Date().toISOString(), enabled: isHookEnabled(group), outcome, ...info, ...(reason ? { reason } : {}) };
   shared.state.recent.push(record); shared.state.recent = shared.state.recent.slice(-200);
   shared.state.counts[outcome]++;
-  if (!shared.state.visible || !shared.pi) return record;
+  // Successful hook observations are internal telemetry in Swarm. Only show
+  // actionable outcomes in the normal Pi transcript; retain every record in
+  // durable state for /hooks and diagnostics. This prevents routine lines such
+  // as "read · allowed" and "bash · completed" from becoming chat noise.
+  if ((outcome === "executed" && eventInfo(payload).tool) || !shared.state.visible || !shared.pi) return record;
   const callId = info.toolCallId, isPost = event === "tool_result" || event === "tool_execution_end";
   if (isPost && callId) { if (terminalByCall.has(String(callId))) return record; terminalByCall.add(String(callId)); }
   // Hook events are part of the normal execution stream. Render them as the
