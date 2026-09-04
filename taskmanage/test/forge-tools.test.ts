@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import forgeToolsExtension from "./forge-tools.ts";
+import forgeToolsExtension from "../../.pi/extensions/forge-tools.ts";
 
 describe("Forge tool adapters", () => {
   async function tools() {
