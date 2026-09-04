@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import extension, { registerTaskManageExtension } from "../../.pi/extensions/taskmanage.ts";
 import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
 import thinkingExtension from "../../.pi/extensions/swarm-thinking.ts";
-import { taskManageSchema } from "../src/index.js";
+import { taskManageSchema, InteractionBroker } from "../src/index.js";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -31,7 +31,7 @@ describe("root Pi TaskManage extension", () => {
 
     extension(runtime.pi);
 
-    expect(runtime.tools).toHaveLength(1);
+    expect(runtime.tools).toHaveLength(5);
     expect(runtime.tools[0]).toMatchObject({
       name: "TaskManage",
       parameters: taskManageSchema,
@@ -43,6 +43,21 @@ describe("root Pi TaskManage extension", () => {
     expect(runtime.handlers.get("tool_call")).toHaveLength(1);
     expect(runtime.handlers.get("tool_result")).toHaveLength(1);
     expect(runtime.handlers.get("turn_end")).toHaveLength(1);
+  });
+
+  it("validates questions, denies headless approvals, and emits updates", async () => {
+    const sent: any[] = [];
+    const broker = new InteractionBroker({ sendMessage: (message) => sent.push(message) }, { headless: true });
+    await expect(broker.ask({ question: "Choose", kind: "single" })).rejects.toThrow("choices");
+    expect(await broker.approve({ title: "Deploy" })).toMatchObject({ approved: false, status: "headless" });
+    expect(broker.update({ message: "Working", progress: 0.5 })).toMatchObject({ message: "Working" });
+    expect(sent[0]).toMatchObject({ customType: "swarm-agent-update" });
+  });
+
+  it("times out unanswered questions and approvals", async () => {
+    const broker = new InteractionBroker({ ui: { input: async () => new Promise<string>(() => {}) , confirm: async () => new Promise<boolean>(() => {}) } }, { timeoutMs: 10 });
+    expect(await broker.ask({ question: "Wait" })).toMatchObject({ status: "timed_out" });
+    expect(await broker.approve({ title: "Wait" })).toMatchObject({ approved: false, status: "timed_out" });
   });
 
   it("shares one manager and persists task state through session entries", async () => {

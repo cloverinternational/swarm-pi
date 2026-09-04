@@ -2,6 +2,7 @@ import {
   registerTaskHooks,
   registerTaskManage,
   type HookConfig,
+  registerInteractionTools,
 } from "../../taskmanage/src/index.ts";
 
 /**
@@ -22,7 +23,7 @@ export interface TaskManageExtensionAPI {
   ): void;
 }
 
-export interface TaskManageExtensionOptions extends HookConfig {}
+export interface TaskManageExtensionOptions extends HookConfig { headless?: boolean; interactionTimeoutMs?: number; }
 
 /**
  * Register the canonical TaskManage tool and its lifecycle coordinator.
@@ -37,7 +38,8 @@ export function registerTaskManageExtension(
 ) {
   const manager = registerTaskManage(pi);
   const hooks = registerTaskHooks(pi, manager, options);
-  return { manager, hooks };
+  const interactions = registerInteractionTools(pi as any, { headless: options?.headless, timeoutMs: options?.interactionTimeoutMs });
+  return { manager, hooks, interactions };
 }
 
 export default function taskManageExtension(pi: TaskManageExtensionAPI): void {
