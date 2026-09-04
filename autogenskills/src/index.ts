@@ -12,6 +12,14 @@ interface State { skills: Record<string, { version: string; uses: number; lastUs
 const HISTORY_FORMAT = 1;
 const SUPPORT_ROOTS = new Set(["references", "templates", "scripts", "assets"]);
 
+export const skillSchema = {
+  type: "object", additionalProperties: false, required: ["skill"],
+  properties: {
+    skill: { type: "string", pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 64 },
+    args: { type: "string" },
+  },
+} as const;
+
 export const skillManageSchema = {
   type: "object", additionalProperties: false, required: ["action"],
   properties: {
@@ -31,7 +39,7 @@ export class AutoSkillManager {
   readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength">>;
   constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
     const home = process.env.HOME ?? process.cwd();
-    this.config = { mode: config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never", dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"), toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1, nudgeInterval: config.nudgeInterval ?? 15, minInstructionsLength: config.minInstructionsLength ?? 200 };
+    this.config = { mode: config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "auto", dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"), toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1, nudgeInterval: config.nudgeInterval ?? 15, minInstructionsLength: config.minInstructionsLength ?? 200 };
   }
   snapshot(): State { return clone(this.state); }
   restore(state: State) { this.state = clone(state); }
@@ -68,7 +76,28 @@ export class AutoSkillManager {
     throw new Error(`unknown action ${action}`);
   }
   list(): Skill[] { if (!existsSync(this.config.dir)) return []; return readdirSync(this.config.dir, { withFileTypes: true }).filter((e) => e.isDirectory() && safeName(e.name) && existsSync(this.file(e.name))).map((e) => this.parse(e.name)); }
-  observeTool(success: boolean, toolName?: string, input?: any) { if (success) this.state.toolCalls++; else this.state.errors++; if (success && toolName && /^(skill|skillmanage)$/i.test(toolName) && input?.name && this.state.skills[input.name]) { this.state.skills[input.name].uses++; this.state.skills[input.name].lastUsed = now(); this.commit(); } }
+  observeTool(success: boolean, toolName?: string, input?: any) {
+    if (success) {
+      this.state.toolCalls++;
+      if (this.state.errors > this.state.resolved) this.state.resolved++;
+    } else this.state.errors++;
+    const skillName = input?.name ?? input?.skill ?? input?.skill_name;
+    if (success && toolName && /^(skill|skillmanage)$/i.test(toolName) && typeof skillName === "string" && this.state.skills[skillName]) {
+      this.state.skills[skillName].uses++;
+      this.state.skills[skillName].lastUsed = now();
+      this.commit();
+    } else if (success) this.commit();
+  }
+  invokeSkill(name: string, args = "") {
+    if (!safeName(name)) throw new Error("skill must match lowercase skill identifier syntax");
+    const skill = this.parse(name);
+    let content = skill.instructions;
+    if (args) content = content.replaceAll("{{arg}}", args);
+    const existing = this.state.skills[name] ?? { uses: 0 };
+    this.state.skills[name] = { ...existing, version: skill.version, uses: existing.uses + 1, lastUsed: now() };
+    this.commit();
+    return { skill: name, version: skill.version, path: skill.path, instructions: content };
+  }
   observeTurn(): string | undefined { this.state.turns++; if (this.config.mode !== "auto" || this.state.turns <= 1 || this.state.turns - this.state.lastNudgeTurn < this.config.nudgeInterval || (this.state.toolCalls < this.config.toolCallThreshold && this.state.resolved < this.config.errorResolutionThreshold)) return; this.state.lastNudgeTurn = this.state.turns; this.commit(); return `Review reusable learning class-first: patch an existing skill or add a support file before creating one. Existing skills: ${this.list().map(s=>s.name).join(", ") || "none"}. A no-mutation review is valid.`; }
 }
 
@@ -76,8 +105,19 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
   const manager = new AutoSkillManager(config, (entry) => pi.appendEntry(entry.type, entry.data));
   const register = (event: string, handler: any) => { const globalRegister = (globalThis as any).__piSwarmRegisterHook; return typeof globalRegister === "function" ? globalRegister(pi, "autogenskills", event, handler) : pi.on(event, handler); };
   register("session_start", (_e: any, ctx: any) => manager.rehydrate(ctx.sessionManager?.getEntries?.() ?? []));
+  register("before_agent_start", (e: any) => {
+    if (manager.config.mode === "never") return;
+    const skills = manager.list();
+    const index = skills.length ? skills.map(s => `- ${s.name} (v${s.version}): ${s.description}`).join("\n") : "(none)";
+    const guidance = `## Swarm Skills\nBefore complex work, check the available skills. Use the Skill tool to invoke a matching skill before other tools.\nAvailable autogenerated skills:\n${index}\nUse SkillManage(action=\"view\") for full instructions and SkillManage(action=\"review\") when nothing reusable was learned.`;
+    return { systemPrompt: `${e.systemPrompt ?? ""}\n\n${guidance}` };
+  });
   register("tool_result", (e: any) => manager.observeTool(!e.isError && !e.error && !e.result?.isError, e.toolName ?? e.tool_name, e.input ?? e.params));
   register("turn_end", (_e: any, ctx: any) => { const nudge = manager.observeTurn(); if (nudge) ctx.ui?.notify(nudge, "info"); });
+  pi.registerTool({ name: "Skill", label: "Invoke skill", description: "Invoke a matching reusable skill before performing the task. The skill instructions are returned for you to follow.", parameters: skillSchema, async execute(_id: string, params: any) {
+    try { return { content: [{ type: "text", text: JSON.stringify(manager.invokeSkill(params.skill, params.args ?? "")) }], details: {} }; }
+    catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; }
+  } });
   pi.registerTool({ name: "SkillManage", label: "Manage autogenerated skills", description: "Create, review, patch, inspect, and archive reusable autogenerated skill packages. Prefer patching an existing umbrella; never overwrite skills.", parameters: skillManageSchema, async execute(_id: string, params: any) { try { return { content: [{ type: "text", text: JSON.stringify(manager.execute(params)) }], details: {} }; } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; } } });
   return manager;
 }

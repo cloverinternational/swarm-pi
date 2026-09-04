@@ -23,8 +23,8 @@ const schema = {
 
 export default function exaSearchExtension(pi: any) {
   pi.registerTool({
-    name: "exa_search", label: "Exa Search",
-    description: "Search the web using Exa AI. Requires EXA_API_KEY. Returns concise highlights and source URLs.",
+    name: "websearch", label: "Web Search (Exa)",
+    description: "Search the web using Exa AI, matching Swarm's websearch tool. Requires EXA_API_KEY or ~/.swarmos/credentials.json providers.Exa.api_key. Returns concise highlights and source URLs.",
     parameters: schema,
     async execute(_id: string, params: any, signal: AbortSignal) {
       const key = exaKey();

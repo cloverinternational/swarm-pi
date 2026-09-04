@@ -10,6 +10,6 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
 
 export default function autogenskillsExtension(pi: any) {
   registerAutoSkillsExtension(pi, {
-    mode: (process.env.SWARM_AUTOGEN_MODE as Config["mode"]) ?? "never",
+    mode: (process.env.SWARM_AUTOGEN_MODE as Config["mode"]) ?? "auto",
   });
 }
