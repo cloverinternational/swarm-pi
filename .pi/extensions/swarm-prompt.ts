@@ -66,7 +66,9 @@ export function resolveWorkspace(cwd = process.cwd()): WorkspaceContext {
 }
 
 function workspaceBlock(workspace: WorkspaceContext): string {
-  return ["<system_information>", `<operating_system>${workspace.os}</operating_system>`, `<current_working_directory>${workspace.cwd}</current_working_directory>`, `<default_shell>${workspace.shell}</default_shell>`, `<home_directory>${workspace.home}</home_directory>`, `<workspace_extensions>${workspace.extensions.join(", ")}</workspace_extensions>`, "</system_information>"].join("\n");
+  // Keep the human-readable legacy line while retaining the structured Forge
+  // fields used by newer consumers.
+  return [`Current working directory: ${workspace.cwd}`, "<system_information>", `<operating_system>${workspace.os}</operating_system>`, `<current_working_directory>${workspace.cwd}</current_working_directory>`, `<default_shell>${workspace.shell}</default_shell>`, `<home_directory>${workspace.home}</home_directory>`, `<workspace_extensions>${workspace.extensions.join(", ")}</workspace_extensions>`, "</system_information>"].join("\n");
 }
 function conventionalFiles(root: string, names: string[], max: number): ContextFile[] {
   return names.flatMap((name) => { const path = safeRef(root, name); if (!path || !existsSync(path)) return []; try { const content = readFileSync(path, "utf8"); return [{ path: name, content: content.slice(0, max) }]; } catch { return []; } });
