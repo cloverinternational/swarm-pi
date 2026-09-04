@@ -1,6 +1,8 @@
 export const CATEGORIES = ["researching", "planning", "acting", "verifying", "debugging", "documenting"] as const;
+export const PRIORITIES = ["low", "medium", "high"] as const;
 export const NOTE_TYPES = ["decision", "blocker", "learning", "milestone", "question", "observation", "other"] as const;
 export type Category = typeof CATEGORIES[number];
+export type Priority = typeof PRIORITIES[number];
 export type Status = "pending" | "in_progress" | "completed" | "deleted";
 export type NoteType = typeof NOTE_TYPES[number];
 export type Mode = "sequential" | "atomic";
@@ -9,14 +11,14 @@ export type Ref = string | { ref: string; field?: "taskId" };
 export interface AuditEvent { action: "created" | "updated"; at: string }
 export interface TaskNote { text: string; type: NoteType; at: string }
 export interface Task {
-  id: string; subject: string; description?: string; activeForm?: string; category?: Category;
+  id: string; subject: string; description?: string; activeForm?: string; category?: Category; priority: Priority;
   metadata?: Record<string, unknown>; parentTaskId?: string; owner_id?: string; status: Status;
   active?: boolean; dependsOn: string[]; notes: string[]; createdAt: string; updatedAt: string;
   typed_notes?: TaskNote[]; audit_events?: AuditEvent[];
 }
 export interface Operation {
   key: string; op: "create" | "update" | "get" | "list"; taskId?: Ref; subject?: string;
-  description?: string; activeForm?: string; category?: Category; metadata?: Record<string, unknown>;
+  description?: string; activeForm?: string; category?: Category; priority?: Priority; metadata?: Record<string, unknown>;
   parentTaskId?: Ref; owner_id?: string; status?: Status; active?: boolean; limit?: number; offset?: number;
   addBlocks?: Ref[]; addBlockedBy?: Ref[]; addNote?: string; noteType?: NoteType; include_audit?: boolean;
 }
@@ -43,7 +45,7 @@ export const taskManageSchema = {
         taskId: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] },
         parentTaskId: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] },
         subject: { type: "string" }, description: { type: "string" }, activeForm: { type: "string" },
-        category: { type: "string", enum: CATEGORIES }, metadata: { type: "object" }, owner_id: { type: "string" },
+        category: { type: "string", enum: CATEGORIES }, priority: { type: "string", enum: PRIORITIES }, metadata: { type: "object" }, owner_id: { type: "string" },
         status: { type: "string", enum: ["pending", "in_progress", "completed", "deleted"] }, active: { type: "boolean" },
         limit: { type: "integer", minimum: 1, maximum: 500 }, offset: { type: "integer", minimum: 0 },
         addBlocks: { type: "array", items: { oneOf: [{ type: "string" }, { type: "object", required: ["ref"], additionalProperties: false, properties: { ref: { type: "string" }, field: { type: "string", enum: ["taskId"] } } }] } },
@@ -130,7 +132,16 @@ export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
   constructor(private readonly persist?: (entry: JournalEntry) => void) {}
   snapshot(): State { return clone(this.state); }
-  restore(state: State): void { this.state = clone(state); }
+  restore(state: State): void {
+    const restored = clone(state);
+    // Older journal entries predate the upstream TodoPriority field. Normalize
+    // them at the persistence boundary so every task has the same invariant as
+    // a newly-created task (the upstream default is medium).
+    for (const task of restored.tasks) {
+      if (!PRIORITIES.includes(task.priority)) task.priority = "medium";
+    }
+    this.state = restored;
+  }
   rehydrate(entries: readonly JournalEntry[]): void {
     const last = [...entries].reverse().find(e => e.type === "pi-swarm-task-state");
     if (last) this.restore(last.data);
@@ -160,8 +171,8 @@ export class TaskManager {
     if (!isObj(op) || typeof op.key !== "string" || !op.key || !["create","update","get","list"].includes(op.op))
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
     const allowed: Record<Operation["op"], string[]> = {
-      create: ["key","op","subject","description","activeForm","category","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy"],
-      update: ["key","op","taskId","subject","description","activeForm","category","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
+      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy"],
+      update: ["key","op","taskId","subject","description","activeForm","category","priority","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
       get: ["key","op","taskId","include_audit"],
       list: ["key","op","subject","category","status","active","limit","offset"],
     };
@@ -177,7 +188,7 @@ export class TaskManager {
         return fail("validation_failed", `operation ${op.key}: ${field} must contain only task IDs or {ref, field:"taskId"} references`);
       }
     }
-    const stringFields = ["subject", "description", "activeForm", "owner_id", "addNote", "noteType", "category", "status"] as const;
+    const stringFields = ["subject", "description", "activeForm", "owner_id", "addNote", "noteType", "category", "priority", "status"] as const;
     for (const field of stringFields) {
       if ((op as Record<string, unknown>)[field] !== undefined && typeof (op as Record<string, unknown>)[field] !== "string")
         return fail("validation_failed", `operation ${op.key}: ${field} must be a string`);
@@ -192,6 +203,7 @@ export class TaskManager {
     if (op.active === true && (op.op === "create" || op.status !== undefined) && op.status !== "in_progress")
       return fail("validation_failed", `operation ${op.key}: active task must be in_progress`);
     if (op.category !== undefined && !CATEGORIES.includes(op.category)) return fail("validation_failed", `operation ${op.key}: invalid category ${op.category}`);
+    if (op.priority !== undefined && !PRIORITIES.includes(op.priority)) return fail("validation_failed", `operation ${op.key}: invalid priority ${op.priority}`);
     if (op.status !== undefined && !["pending","in_progress","completed","deleted"].includes(op.status)) return fail("validation_failed", `operation ${op.key}: invalid status ${op.status}`);
     if (op.noteType !== undefined && !NOTE_TYPES.includes(op.noteType)) return fail("validation_failed", `operation ${op.key}: invalid noteType ${op.noteType}`);
     if (op.limit !== undefined && (!Number.isInteger(op.limit) || op.limit < 1 || op.limit > 500)) return fail("validation_failed", `operation ${op.key}: limit must be 1..500`);
@@ -291,7 +303,7 @@ export class TaskManager {
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
-      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
+      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
       this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
@@ -349,7 +361,7 @@ export class TaskManager {
     }
     const mergedMetadata: Record<string, unknown> | undefined = op.metadata === undefined ? task.metadata : { ...(task.metadata ?? {}), ...clone(op.metadata) };
     if (op.metadata) for (const [key, value] of Object.entries(op.metadata)) if (value === null) delete (mergedMetadata as Record<string, unknown>)[key];
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
       // Explicit false is applied after the focus transition.
@@ -376,6 +388,7 @@ export class TaskManager {
     if (op.description !== undefined) ack.description = task.description;
     if (op.activeForm !== undefined) ack.active_form = task.activeForm;
     if (op.category !== undefined) ack.category = task.category;
+    if (op.priority !== undefined) ack.priority = task.priority;
     if (op.metadata !== undefined) ack.metadata = task.metadata;
     if ((op.addBlocks?.length ?? 0) > 0) ack.blocks = this.blockedBy(task.id);
     if ((op.addBlockedBy?.length ?? 0) > 0) ack.depends_on = [...task.dependsOn];
@@ -386,6 +399,7 @@ export class TaskManager {
     const result: Record<string, unknown> = {...this.createAck(task)};
     if (task.activeForm) result.active_form = task.activeForm;
     if (task.category) result.category = task.category;
+    if (task.priority) result.priority = task.priority;
     if (task.dependsOn.length) result.depends_on = [...task.dependsOn];
     const blocks = this.blockedBy(task.id); if (blocks.length) result.blocks = blocks;
     if (task.owner_id) result.owner_id = task.owner_id;
@@ -395,7 +409,7 @@ export class TaskManager {
   private outputTask(task: Task, includeAudit = false): Record<string, unknown> {
     const result: Record<string, unknown> = {
       id: task.id, content: task.subject, status: task.status,
-      priority: "medium",
+      priority: task.priority,
       ...(task.active ? {active: true} : {}),
       ...(task.description !== undefined ? {description: task.description} : {}),
       ...(task.activeForm !== undefined ? {active_form: task.activeForm} : {}),
