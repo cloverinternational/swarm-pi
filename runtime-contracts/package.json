@@ -1,0 +1,7 @@
+{
+  "name": "@pi-swarm/runtime-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run test" },
+  "devDependencies": { "typescript": "^5.9.0", "vitest": "^3.2.0" }
+}
