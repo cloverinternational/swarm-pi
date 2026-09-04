@@ -30,6 +30,13 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
   state.policy = new Policy({ workspace: cwd, allowedTools: options.allowedTools, allowMutation: options.allowMutation, allowNetwork: options.allowNetwork });
 
   // Register canonical task/hooks/interaction surface exactly once.
+  // When loaded as the umbrella extension, the dedicated taskmanage and
+  // autogenskills extensions may also be discovered by Pi. Those extensions
+  // remain the canonical registrars; the umbrella only owns shared lifecycle
+  // state and must not register duplicate tools.
+  // Pi disallows invoking extension actions while extensions are loading;
+  // always register the canonical surfaces here and let the host suppress
+  // duplicate extension files through its own discovery configuration.
   registerTaskManageExtension(pi, { enforcementMode: "advise" });
   registerAutoSkills(pi, { mode: (process.env.SWARM_AUTOGEN_MODE as any) ?? "auto" });
   registerDiskHooks(pi, { cwd });

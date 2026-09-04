@@ -32,14 +32,21 @@ export interface TaskManageExtensionOptions extends HookConfig { headless?: bool
  * shared by both registrations. Pi reloads create a new instance; the
  * session_start handler rehydrates it from the replacement session manager.
  */
+const taskRuntimeByPi = new WeakMap<object, { manager: any; hooks: any; interactions: any }>();
 export function registerTaskManageExtension(
   pi: TaskManageExtensionAPI,
   options?: TaskManageExtensionOptions,
 ) {
+  const owner = pi as object;
+  const existing = taskRuntimeByPi.get(owner);
+  if (existing) return existing;
   const manager = registerTaskManage(pi);
   const hooks = registerTaskHooks(pi, manager, options);
   const interactions = registerInteractionTools(pi as any, { headless: options?.headless, timeoutMs: options?.interactionTimeoutMs });
-  return { manager, hooks, interactions };
+  const result = { manager, hooks, interactions };
+  (globalThis as any).__piSwarmTaskManageRegistered = true;
+  taskRuntimeByPi.set(owner, result);
+  return result;
 }
 
 export default function taskManageExtension(pi: TaskManageExtensionAPI): void {
