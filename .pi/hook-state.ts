@@ -58,10 +58,15 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
   shared.state.counts.registered++;
   pi.on(event, async (payload: any, ctx: any) => {
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
-    recordHook(group, event, payload, "executed");
     try {
       const result = await handler(payload, ctx);
-      if (result?.block === true) recordHook(group, event, payload, "blocked", result.reason ?? "blocked by hook");
+      recordHook(
+        group,
+        event,
+        payload,
+        result?.block === true ? "blocked" : "executed",
+        result?.block === true ? result.reason ?? "blocked by hook" : undefined,
+      );
       persistHookState(pi);
       return result;
     } catch (error) {
