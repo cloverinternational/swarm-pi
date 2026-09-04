@@ -3,6 +3,16 @@ import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } 
 
 const create = (key:string, subject=key) => ({key,op:"create" as const,subject});
 describe("TaskManage", () => {
+  it("rejects unknown batch fields and emits an auditable operation event", () => {
+    const events: any[] = [];
+    const m = new TaskManager(undefined, event => events.push(event));
+    expect(m.execute({operations: [create("a")], extra: true} as any).results[0].error?.code).toBe("validation_failed");
+    const result = m.execute({operations: [create("a")]});
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({type: "pi-swarm-task-operation", data: {mode: "sequential", status: "succeeded"}});
+    expect(events[0].data.results[0].data.task.id).toBe("1");
+  });
+
   it("commits sequential prefix and prevents atomic key leakage", () => {
     const m=new TaskManager(); expect(m.execute({operations:[create("a"),{key:"bad",op:"get",taskId:"404"},create("c")]}).status).toBe("partial");
     expect(m.execute({mode:"atomic",operations:[create("leaked"),{key:"x",op:"get",taskId:"404"}]}).status).toBe("failed");
