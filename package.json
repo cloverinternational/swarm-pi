@@ -1,0 +1,12 @@
+{
+  "name": "@pi-swarm/integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:packages",
+    "build:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core; do npm --prefix $d run build || exit $?; done",
+    "test": "npm run test:packages",
+    "test:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core; do npm --prefix $d test || exit $?; done",
+    "dogfood": "npm run build && npm test"
+  }
+}
