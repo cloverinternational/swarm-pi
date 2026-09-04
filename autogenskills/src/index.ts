@@ -6,13 +6,13 @@ export type Mode = "never" | "manual" | "auto";
 export type TriggerReason = "manual" | "tool_call_threshold" | "error_resolution" | "llm_nudge";
 export type CuratorState = "active" | "stale" | "archived" | "pinned" | "consolidated";
 export interface Config { mode?: Mode; dir?: string; toolCallThreshold?: number; errorResolutionThreshold?: number; nudgeInterval?: number; minInstructionsLength?: number; toolCallBudget?: number; workingBudget?: number; maxNudgeIgnores?: number; staleAfterDays?: number; archiveAfterDays?: number; reviewHook?: ReviewHook; }
-export interface Metrics { turns: number; toolCalls: number; errors: number; resolved: number; nudges: number; nudgeIgnores: number; reviews: number; mutations: number; }
+export interface Metrics { turns: number; toolCalls: number; errors: number; resolved: number; nudges: number; nudgeIgnores: number; reviews: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; }
 export interface ReviewHook { (event: { action: string; name?: string; revision?: string; reason?: string }): void }
 export interface Skill { name: string; description: string; instructions: string; tags: string[]; category?: string; version: string; path: string; updatedAt: string; }
 export interface SkillEntry { type: "pi-swarm-autogen-state"; data: State; }
 export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; }
-export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; }
-export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0 });
+export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; }
+export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0, skilled: false, budgetCalls: 0, reviewRequired: false });
 const HISTORY_FORMAT = 1;
 const SUPPORT_ROOTS = new Set(["references", "templates", "scripts", "assets"]);
 
@@ -49,7 +49,7 @@ export class AutoSkillManager {
   }
   snapshot(): State { return clone(this.state); }
   restore(state: State) { this.state = { ...defaultState(), ...clone(state), skills: { ...(state.skills ?? {}) }, nudges: state.nudges ?? 0, nudgeIgnores: state.nudgeIgnores ?? 0, mutations: state.mutations ?? 0 }; }
-  metrics(): Metrics { return { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations }; }
+  metrics(): Metrics { return { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations, skilled: this.state.skilled, budgetCalls: this.state.budgetCalls, reviewRequired: this.state.reviewRequired }; }
   rehydrate(entries: readonly unknown[]) { const e = [...entries].reverse().find((x: any) => x?.type === "pi-swarm-autogen-state") as SkillEntry | undefined; if (e?.data) this.restore(e.data); }
   private commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
   private dir(name: string) { return join(this.config.dir, name); }
@@ -67,13 +67,13 @@ export class AutoSkillManager {
   private saveRevision(name: string, action: string, parent?: string) { const rev = this.snapshotRevision(name, action, parent); const root = join(this.config.dir, ".history", "revisions", name); mkdirSync(root, { recursive: true, mode: 0o755 }); try { writeFileSync(join(root, `${rev.id}.json`), JSON.stringify({ format: HISTORY_FORMAT, ...rev }, null, 2) + "\n", { flag: "wx", mode: 0o444 }); } catch (e: any) { if (e?.code !== "EEXIST") throw e; } mkdirSync(join(this.config.dir, ".history", "heads"), { recursive: true }); writeFileSync(join(this.config.dir, ".history", "heads", name), rev.id + "\n"); return rev; }
   private write(skill: Skill, action: string) { mkdirSync(this.dir(skill.name), { recursive: true, mode: 0o755 }); const parent = this.state.skills[skill.name]?.hash; const body = this.body(skill); const tmp = `${this.file(skill.name)}.${process.pid}.tmp`; writeFileSync(tmp, body, { mode: 0o644 }); renameSync(tmp, this.file(skill.name)); const rev = this.saveRevision(skill.name, action, parent); const old = this.state.skills[skill.name]; this.state.skills[skill.name] = { ...(old ?? { uses: 0 }), version: skill.version, hash: rev.id, lastUsed: now(), curatorState: old?.pinned ? "pinned" : "active", pinned: old?.pinned ?? false }; this.state.mutations++; this.config.reviewHook?.({ action, name: skill.name, revision: rev.id }); }
   private assertEnabled() { if (this.config.mode === "never") throw new Error("autogenerated skills are disabled (mode=never)"); }
-  private assertMutationAllowed(action: string) { if (this.config.mode !== "auto") return; const budget = Object.keys(this.state.skills).length ? this.config.workingBudget : this.config.toolCallBudget; if (this.state.toolCalls >= budget && this.state.reviews === 0) throw new Error(`autogen mutation budget exceeded (${budget}); review first`); }
+  private assertMutationAllowed(action: string) { if (this.config.mode !== "auto") return; if (action === "review") return; const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; if (this.state.reviewRequired) throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")"); if (this.state.budgetCalls >= budget) { if (!this.state.skilled) throw new Error(`autogen onboarding budget exceeded (${budget}); create or use a skill`); if (this.state.nudgeIgnores >= this.config.maxNudgeIgnores) { this.state.reviewRequired = true; throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")"); } } }
   execute(input: any): any {
     this.assertEnabled(); const action = input?.action;
     if (action === "list") return { skills: this.list() };
     if (!safeName(input?.name) && !["review", "metrics"].includes(action)) throw new Error("name must match lowercase skill identifier syntax");
-    if (action === "review") { this.state.reviews++; const reason = input.review_reason ?? "no reusable learning"; this.config.reviewHook?.({ action, reason }); this.commit(); return { reviewed: true, reason }; }
-    if (action === "metrics") return { metrics: { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations } };
+    if (action === "review") { this.state.reviews++; this.state.reviewRequired = false; this.state.nudgeIgnores = 0; const reason = input.review_reason ?? "no reusable learning"; this.config.reviewHook?.({ action, reason }); this.commit(); return { reviewed: true, reason }; }
+    if (action === "metrics") return { metrics: this.metrics() };
     const name = input.name as string;
     if (action === "pin" || action === "unpin") { const skill = this.parse(name); const old = this.state.skills[name] ?? { version: skill.version, uses: 0 }; old.pinned = action === "pin"; old.curatorState = old.pinned ? "pinned" : "active"; this.state.skills[name] = old; this.config.reviewHook?.({ action, name, revision: old.hash }); this.commit(); return { name, pinned: old.pinned, state: old.curatorState }; }
     if (action === "create") { this.assertMutationAllowed(action); if (existsSync(this.file(name))) throw new Error(`skill ${name} already exists; view and patch it instead`); if (!input.description || !input.instructions) throw new Error("description and instructions are required"); if (input.instructions.length < this.config.minInstructionsLength) throw new Error(`instructions must contain at least ${this.config.minInstructionsLength} characters`); const s: Skill = { name, description: input.description, instructions: input.instructions, tags: String(input.tags ?? "").split(",").map((x:string)=>x.trim()).filter(Boolean), category: input.category, version: "1.0.0", path: this.dir(name), updatedAt: now() }; this.write(s, "create"); this.commit(); return { skill: s, revision: this.state.skills[name].hash }; }
@@ -89,14 +89,34 @@ export class AutoSkillManager {
   observeTool(success: boolean, toolName?: string, input?: any) {
     if (success) {
       this.state.toolCalls++;
+      const normalized = String(toolName ?? "").toLowerCase();
+      if (!/skill|task|plan|askuser|approval|pushagent|submitfeedback|read|grep|find|ls|search|browser|fetch/.test(normalized)) this.state.budgetCalls++;
       if (this.state.errors > this.state.resolved) this.state.resolved++;
     } else this.state.errors++;
     const skillName = input?.name ?? input?.skill ?? input?.skill_name;
-    if (success && toolName && /^(skill|skillmanage)$/i.test(toolName) && typeof skillName === "string" && this.state.skills[skillName]) {
-      this.state.skills[skillName].uses++;
+    if (success && toolName && /^(skill|skillmanage|swarmskill)$/i.test(toolName)) {
+      if (typeof skillName === "string" && this.state.skills[skillName]) this.state.skills[skillName].uses++;
+      this.state.skilled = true;
+      this.state.budgetCalls = 0;
+      this.state.nudgeIgnores = 0;
+      this.state.reviewRequired = false;
       this.state.skills[skillName].lastUsed = now();
       this.commit();
     } else if (success) this.commit();
+  }
+  gateTool(toolName: string, input: any = {}): { block: true; reason: string } | undefined {
+    if (this.config.mode !== "auto") return;
+    const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!n || /skill|skillmanage|task|plan|askuser|approval|pushagent|submitfeedback|read|grep|find|ls|search|browser|fetch/.test(n)) return;
+    if (n === "bash" && typeof input?.command === "string" && /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show)|cat|head|tail|wc|which|type|echo|printf)(\s|$)/i.test(input.command.trim())) return;
+    const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget;
+    if (this.state.reviewRequired) return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
+    if (this.state.budgetCalls >= budget && !this.state.skilled) return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };
+    if (this.state.budgetCalls >= budget && this.state.skilled && this.state.nudgeIgnores > this.config.maxNudgeIgnores) {
+      this.state.reviewRequired = true; this.commit();
+      return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
+    }
+    return;
   }
   invokeSkill(name: string, args = "") {
     if (!safeName(name)) throw new Error("skill must match lowercase skill identifier syntax");
@@ -108,13 +128,14 @@ export class AutoSkillManager {
     this.commit();
     return { skill: name, version: skill.version, path: skill.path, instructions: content };
   }
-  observeTurn(): string | undefined { this.state.turns++; if (this.config.mode !== "auto" || this.state.turns <= 1 || this.state.turns - this.state.lastNudgeTurn < this.config.nudgeInterval || (this.state.toolCalls < this.config.toolCallThreshold && this.state.resolved < this.config.errorResolutionThreshold)) return; const budget = this.state.skills && Object.keys(this.state.skills).length ? this.config.workingBudget : this.config.toolCallBudget; if (this.state.toolCalls > budget && this.state.nudgeIgnores >= this.config.maxNudgeIgnores) return "Autogen review required before more mutations (budget exceeded)."; this.state.lastNudgeTurn = this.state.turns; this.state.nudges++; this.state.nudgeIgnores++; this.commit(); return `Review reusable learning class-first: patch an existing skill or add a support file before creating one. Existing skills: ${this.list().map(s=>s.name).join(", ") || "none"}. A no-mutation review is valid.`; }
+  observeTurn(): string | undefined { this.state.turns++; if (this.config.mode !== "auto" || this.state.turns <= 1 || this.state.turns - this.state.lastNudgeTurn < this.config.nudgeInterval || (this.state.toolCalls < this.config.toolCallThreshold && this.state.resolved < this.config.errorResolutionThreshold)) return; const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; if (this.state.budgetCalls >= budget) { this.state.nudgeIgnores++; if (this.state.skilled && this.state.nudgeIgnores > this.config.maxNudgeIgnores) this.state.reviewRequired = true; if (!this.state.skilled) return "Skill required before continuing: create or invoke a reusable skill."; } this.state.lastNudgeTurn = this.state.turns; this.state.nudges++; this.commit(); return this.state.reviewRequired ? "Autogen review required before mutation. Call SkillManage(action=\"review\") or use a reusable skill." : `Review reusable learning class-first: patch an existing skill or add a support file before creating one. Existing skills: ${this.list().map(s=>s.name).join(", ") || "none"}. A no-mutation review is valid.`; }
 }
 
 export function registerAutoSkills(pi: any, config: Config = {}) {
   const manager = new AutoSkillManager(config, (entry) => pi.appendEntry(entry.type, entry.data));
   const register = (event: string, handler: any) => { const globalRegister = (globalThis as any).__piSwarmRegisterHook; return typeof globalRegister === "function" ? globalRegister(pi, "autogenskills", event, handler) : pi.on(event, handler); };
   register("session_start", (_e: any, ctx: any) => manager.rehydrate(ctx.sessionManager?.getEntries?.() ?? []));
+  register("tool_call", (e: any) => manager.gateTool(e.toolName ?? e.tool_name, e.input ?? e.params));
   register("before_agent_start", (e: any) => {
     if (manager.config.mode === "never") return;
     const skills = manager.list();

@@ -5,6 +5,7 @@ import { Scheduler } from "../../schedule/src/index.ts";
 import { AgentManager, registerAgents } from "../../agents/src/index.ts";
 import { MCPManager } from "../../mcp/src/index.ts";
 import { registerTaskManageExtension } from "./taskmanage.ts";
+import { registerAutoSkills } from "../../autogenskills/src/index.ts";
 import { registerSwarmPrompt } from "./swarm-prompt.ts";
 import { registerSwarmSkills } from "./swarm-skills.ts";
 import { registerDiskHooks } from "./swarm-disk-hooks.ts";
@@ -30,6 +31,7 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
 
   // Register canonical task/hooks/interaction surface exactly once.
   registerTaskManageExtension(pi, { enforcementMode: "advise" });
+  registerAutoSkills(pi, { mode: (process.env.SWARM_AUTOGEN_MODE as any) ?? "auto" });
   registerDiskHooks(pi, { cwd });
 
   state.scheduler = new Scheduler({ workDir: cwd, sink: async prompt => {
