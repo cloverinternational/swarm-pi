@@ -1,10 +1,12 @@
-export type HookGroup = "taskmanage" | "autogenskills" | "swarm-prompt" | "disk-hooks";
+import { addHookObservation } from "./hook-observations.ts";
+
+export type HookGroup = "taskmanage" | "autogenskills" | "swarm-prompt" | "disk-hooks" | "annoyance";
 export type HookOutcome = "executed" | "blocked" | "failed" | "skipped";
 export interface HookRecord { id: string; group: HookGroup; event: string; at: string; enabled: boolean; outcome: HookOutcome; tool?: string; toolCallId?: string; reason?: string; output?: string; }
 interface State { enabled: Record<string, boolean>; visible: boolean; recent: HookRecord[]; counts: { registered: number; executed: number; blocked: number; failed: number; skipped: number }; }
 
 const KEY = Symbol.for("pi-swarm-hook-state");
-type Shared = { state: State; pi?: any };
+type Shared = { state: State; pi?: any; present?: (data: any) => void };
 const root = globalThis as typeof globalThis & { [KEY]?: Shared };
 const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
 // Pi /reload can retain Symbol.for state from an older extension module. Normalize
@@ -22,18 +24,22 @@ normalizeState();
 
 export function hookState() { normalizeState(); return shared.state; }
 export function setHookPi(pi: any) { shared.pi = pi; }
+export function setHookPresenter(present?: (data: any) => void) { shared.present = present; }
 export function isHookEnabled(group: string) { normalizeState(); return shared.state.enabled[group] !== false; }
 export function toggleHook(group: string, enabled?: boolean) { shared.state.enabled[group] = enabled ?? !isHookEnabled(group); return isHookEnabled(group); }
 export function setHookVisibility(visible?: boolean) { shared.state.visible = visible ?? !shared.state.visible; return shared.state.visible; }
-const terminalByCall = new Set<string>();
+export function hookRowsVisible() { return shared.state.visible; }
+// Terminal events are delivered once per hook group. Deduplicate the two Pi
+// terminal notifications without suppressing the post row for later groups.
 function eventInfo(payload: any) { return { tool: payload?.toolName ?? payload?.tool_name, toolCallId: payload?.toolCallId ?? payload?.tool_call_id }; }
 // Pi's hook rows name the hook, not the host adapter or tool. These are the
 // stable names used by the Swarm TUI; adapters may provide hookName explicitly.
 function displayHookName(group: HookGroup, event: string, payload: any): string {
   if (typeof payload?.hookName === "string" && payload.hookName.trim()) return payload.hookName.trim();
   if (group === "autogenskills") return "autogenskills-budget-enforcement";
-  if (group === "taskmanage") return event === "tool_call" ? "task-enforcement-hook" : "task-maintenance-reminder-hook";
+  if (group === "taskmanage") return payload?.hookName ?? (event === "tool_call" ? "task-enforcement-hook" : "task-maintenance-reminder-hook");
   if (group === "swarm-prompt") return "swarm-prompt";
+  if (group === "annoyance") return "annoyance-nudge";
   return group;
 }
 export function recordHook(group: HookGroup, event: string, payload?: any, outcome: HookOutcome = "executed", reason?: string, output?: string) {
@@ -46,24 +52,19 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
   // as "read · allowed" and "bash · completed" from becoming chat noise.
   // Keep tool pre/post observations visible when requested; lifecycle and
   // prompt hooks remain telemetry-only unless they block or fail.
-  if (!shared.state.visible || !shared.pi) return record;
-  // Only tool-bound hook executions have a visible Swarm row. Lifecycle and
-  // prompt hooks remain internal telemetry unless they fail/block.
-  const callId = info.toolCallId, isPost = event === "tool_result" || event === "tool_execution_end";
-  if (isPost && callId) { if (terminalByCall.has(String(callId))) return record; terminalByCall.add(String(callId)); }
-  // Hook events are part of the normal execution stream. Render them as the
-  // same compact one-line rows as Swarm's TUI, never as full chat prose.
-  if ((event === "tool_call" || isPost) && info.tool) {
-    const phase = isPost ? "post" : "pre";
-    const marker = outcome === "blocked" ? "!" : outcome === "failed" ? "×" : "✓";
-    const data = { ...record, hookName: displayHookName(group, event, payload), phase };
-    // Custom messages render at the exact event position. The context
-    // listener removes them before every provider request, so they remain
-    // visible in the TUI but never become LLM context.
-    shared.pi.sendMessage?.({ customType: "swarm-hook-event", content: `${marker} [${phase}-hook] ${data.hookName}`, display: true, details: data }, { triggerTurn: false });
+  // Publish tool-bound observations to the renderer data plane. This is
+  // independent of visibility because the native tool renderer owns display.
+  const callId = info.toolCallId;
+  const toolName = info.tool;
+  const isPost = event === "tool_result";
+  if (callId && toolName && (event === "tool_call" || isPost)) {
+    addHookObservation({ hookName: displayHookName(group, event, payload), phase: isPost ? "after" : "before", outcome, toolCallId: String(callId), toolName: String(toolName), output, reason, at: record.at });
   }
+  // Rendering is owned by the per-tool renderer bridge. Never emit a queued
+  // message here: queued messages cannot occupy the tool's visual slot.
   return record;
 }
+
 (globalThis as any).__piSwarmRegisterHook = registerHook;
 
 export function registerHook(pi: any, group: HookGroup, event: string, handler: any) {
@@ -73,10 +74,11 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
     try {
       const result = await handler(payload, ctx);
+      const hookPayload = result?.hookName ? { ...payload, hookName: result.hookName } : payload;
       recordHook(
         group,
         event,
-        payload,
+        hookPayload,
         result?.block === true ? "blocked" : "executed",
         result?.block === true ? result.reason ?? "blocked by hook" : undefined,
         result?.hookOutput,
@@ -93,10 +95,22 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
       // would become a synthetic model message.
       if (event === "before_agent_start") {
         if (result?.systemPrompt === undefined && result?.message === undefined) return undefined;
-        return { ...(result?.systemPrompt !== undefined ? { systemPrompt: result.systemPrompt } : {}), ...(result?.message !== undefined ? { message: result.message } : {}) };
+        // Pi requires before_agent_start.message to be a CustomMessage, not a
+        // plain string. Convert coordinator guidance at this adapter boundary;
+        // keeping the coordinator host-agnostic preserves its unit-test API.
+        const message = typeof result?.message === "string"
+          ? { customType: "swarm-task-hook", content: result.message, display: false }
+          : result?.message;
+        return { ...(result?.systemPrompt !== undefined ? { systemPrompt: result.systemPrompt } : {}), ...(message !== undefined ? { message } : {}) };
       }
       if (event === "tool_result" && result && (result.content !== undefined || result.details !== undefined || result.isError !== undefined)) {
         return { ...(result.content !== undefined ? { content: result.content } : {}), ...(result.details !== undefined ? { details: result.details } : {}), ...(result.isError !== undefined ? { isError: result.isError } : {}) };
+      }
+      // Pi discards return values from ordinary lifecycle events such as
+      // turn_end. ContinueWithMessage-style nudges are intentional model
+      // context, so queue them explicitly as hidden custom messages.
+      if (event === "turn_end" && typeof result?.message === "string" && result.message.trim()) {
+        pi.sendMessage?.({ customType: "swarm-hook-nudge", content: result.message, display: false }, { triggerTurn: false });
       }
       return undefined;
     } catch (error) {
@@ -105,7 +119,7 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
   });
 }
 export function hookGroups() {
-  return ["taskmanage", "autogenskills", "swarm-prompt", "disk-hooks"] as const;
+  return ["taskmanage", "autogenskills", "swarm-prompt", "disk-hooks", "annoyance"] as const;
 }
 export function renderHookLines() {
   const s = shared.state;
@@ -123,7 +137,6 @@ export function restoreHookState(entries: readonly any[]) {
   shared.state.visible = true;
   shared.state.recent = [];
   shared.state.counts = { registered, executed: 0, blocked: 0, failed: 0, skipped: 0 };
-  terminalByCall.clear();
   const e = [...entries].reverse().find(x => x?.type === "pi-swarm-hook-state" || x?.type === "custom" && x?.customType === "pi-swarm-hook-state")?.data;
   if (e) { shared.state.enabled = { ...(e.enabled ?? {}) }; if (typeof e.visible === "boolean") shared.state.visible = e.visible; if (Array.isArray(e.recent)) shared.state.recent = e.recent.slice(-200); if (e.counts && typeof e.counts === "object") shared.state.counts = { ...shared.state.counts, ...e.counts, registered: Math.max(registered, Number(e.counts.registered) || 0) }; }
 }
