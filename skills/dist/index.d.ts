@@ -23,6 +23,7 @@ export interface SkillLoaderOptions {
     cliPaths?: string[];
     closed?: boolean;
     allowedNames?: string[];
+    allowedSkills?: string[];
 }
 export interface SkillLoadResult {
     skills: LoadedSkill[];
@@ -33,6 +34,8 @@ export interface SkillLoadResult {
         precedence: number;
     }>;
 }
+/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+export declare function generateAvailableSkillsXML(skills: LoadedSkill[]): string;
 declare const parseFrontmatter: (raw: string) => {
     fields: Record<string, string>;
     body: string;
@@ -42,6 +45,7 @@ export declare class SkillLoader {
     private readonly options;
     private watchers;
     constructor(options?: SkillLoaderOptions);
+    configure(policy: Pick<SkillLoaderOptions, "closed" | "allowedNames">): void;
     paths(): Array<{
         path: string;
         source: SkillSource;

@@ -627,6 +627,7 @@ func (a *App) convertSDKConversation(sdkConv *conversation.Conversation, current
 		Model:           lastModel,
 		ModelsUsed:      modelsUsed,
 		CostUSD:         sdkConv.TotalCostUSD,
+		WallTime:        sdkConv.WallTime,
 		ForkedFrom:      forkedFrom,
 		ForkPoint:       forkPoint,
 		CompactedFrom:   compactedFrom,

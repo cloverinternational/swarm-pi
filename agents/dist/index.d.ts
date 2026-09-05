@@ -1,3 +1,5 @@
+export * from "./general-agent-adapter.js";
+export * from "./worker-daemon.js";
 export type AgentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface Profile {
     name: string;
@@ -14,6 +16,7 @@ export interface Preset extends Profile {
 export interface AgentSpec {
     id?: string;
     parentId?: string;
+    parentSessionId?: string;
     sessionId?: string;
     task: string;
     provider?: string;
@@ -22,6 +25,7 @@ export interface AgentSpec {
     preset?: string;
     capabilities?: string[];
     worktree?: string | boolean;
+    background?: boolean;
 }
 export interface AgentResult {
     id: string;
@@ -40,6 +44,17 @@ export interface BackgroundHandle {
     cancel(): boolean;
     steer(instruction: string): boolean;
 }
+export type AgentCompletionSink = (result: AgentResult) => void | Promise<void>;
+export interface AgentCompletionEvent {
+    readonly type: "agent.completed";
+    readonly agentId: string;
+    readonly parentId?: string;
+    readonly parentSessionId?: string;
+    readonly sessionId: string;
+    readonly background: boolean;
+    readonly result: AgentResult;
+}
+export type AgentEventSink = (event: AgentCompletionEvent) => void | Promise<void>;
 export interface RunnerContext {
     signal: AbortSignal;
     spec: Required<Pick<AgentSpec, "id" | "task">> & AgentSpec;
@@ -62,14 +77,18 @@ export declare class AgentManager {
     private readonly queue;
     private readonly profiles;
     private readonly presets;
+    private readonly eventSinks;
     constructor(options?: {
         runner?: Runner;
         cwd?: string;
         concurrency?: number;
         profiles?: Profile[];
         presets?: Record<string, Preset>;
+        onComplete?: AgentCompletionSink;
+        eventSink?: AgentEventSink;
     });
     addProfile(profile: Profile): void;
+    addEventSink(sink: AgentEventSink): () => void;
     addPreset(name: string, preset: Preset): void;
     profile(name: string): Profile | undefined;
     private resolve;
@@ -82,4 +101,5 @@ export declare class AgentManager {
     list(): AgentResult[];
     onComplete(id: string, listener: (result: AgentResult) => void): () => void;
 }
-export declare function registerAgents(pi: any, manager?: AgentManager): AgentManager;
+export declare function registerAgents(pi: any, manager?: AgentManager, parentSessionId?: string): AgentManager;
+export * from "./absurd-control-plane.js";

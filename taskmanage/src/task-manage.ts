@@ -8,7 +8,15 @@ export type NoteType = typeof NOTE_TYPES[number];
 export type Mode = "sequential" | "atomic";
 export type Ref = string | { ref: string; field?: "taskId" };
 
-export interface AuditEvent { action: "created" | "updated"; at: string }
+export interface AuditEvent {
+  action: "created" | "updated" | "tool";
+  at: string;
+  actor?: string;
+  summary?: string;
+  tool?: string;
+  toolCallId?: string;
+  outcome?: "success" | "failure";
+}
 export interface TaskNote { text: string; type: NoteType; at: string }
 export interface Task {
   id: string; subject: string; description?: string; activeForm?: string; category?: Category; priority: Priority;
@@ -70,7 +78,10 @@ type RenderTheme = {
   dim?: (text: string) => string;
 };
 type RenderContext = { isError?: boolean; isPartial?: boolean; expanded?: boolean };
-type RenderComponent = { render(width: number): string[] };
+type RenderComponent = {
+  render(width: number): string[];
+  invalidate(): void;
+};
 
 const style = (theme: RenderTheme, color: string, value: string) =>
   theme.fg ? theme.fg(color, value) : value;
@@ -106,6 +117,7 @@ const truncate = (value: string, width: number) => {
 };
 const component = (lines: string[] | ((width: number) => string[])): RenderComponent => ({
   render: (width: number) => typeof lines === "function" ? lines(width) : lines,
+  invalidate: () => {},
 });
 
 type RenderTask = {
@@ -247,18 +259,70 @@ export class TaskManager {
   ) {}
   snapshot(): State { return clone(this.state); }
   metrics(): TaskMetrics { return { ...this.stats }; }
+  /** Append a compact, already-sanitized tool observation to the focused task. */
+  appendActiveAuditEvent(event: Omit<AuditEvent, "action" | "at"> & { at?: string }): boolean {
+    const task = this.state.tasks.find(candidate => candidate.status === "in_progress" && candidate.active);
+    if (!task) return false;
+    const at = event.at ?? new Date().toISOString();
+    (task.audit_events ??= []).push({ action: "tool", at, ...event });
+    task.updatedAt = at;
+    this.commit();
+    return true;
+  }
   restore(state: State): void {
     const restored = clone(state);
-    // Legacy journals may contain malformed or pre-priority state. Normalize
-    // at the persistence boundary instead of allowing replay to crash.
-    if (!restored || !Array.isArray(restored.tasks) || typeof restored.nextId !== "number" || !restored.keys || typeof restored.keys !== "object") {
+    // Journals are untrusted compatibility data. Normalize the complete graph
+    // at the persistence boundary so an old/corrupt snapshot cannot create an
+    // impossible focus state or make later mutations fail unexpectedly.
+    if (!restored || !Array.isArray(restored.tasks) || !Number.isFinite(restored.nextId) ||
+      !isObj(restored.keys)) {
       this.state = { nextId: 1, tasks: [], keys: {} };
       return;
     }
-    for (const task of restored.tasks) {
-      if (!PRIORITIES.includes(task.priority)) task.priority = "medium";
+    const tasks = restored.tasks.filter(task => isObj(task) && typeof task.id === "string" &&
+      task.id.trim() && typeof task.subject === "string" && task.subject.trim()).map(task => {
+      const normalized = task as Task;
+      normalized.subject = normalized.subject.trim();
+      normalized.status = ["pending", "in_progress", "completed", "deleted"].includes(normalized.status as string)
+        ? normalized.status : "pending";
+      normalized.priority = PRIORITIES.includes(normalized.priority) ? normalized.priority : "medium";
+      normalized.category = CATEGORIES.includes(normalized.category as Category) ? normalized.category : "acting";
+      normalized.dependsOn = Array.isArray(normalized.dependsOn) ? [...new Set(normalized.dependsOn.filter(id => typeof id === "string" && id !== normalized.id))] : [];
+      normalized.notes = Array.isArray(normalized.notes) ? normalized.notes.filter(note => typeof note === "string") : [];
+      normalized.active = normalized.status === "in_progress" && normalized.active === true;
+      if (normalized.parentTaskId === normalized.id || typeof normalized.parentTaskId !== "string") delete normalized.parentTaskId;
+      normalized.audit_events = Array.isArray(normalized.audit_events) ? normalized.audit_events.filter(event =>
+        isObj(event) && typeof event.at === "string" && typeof event.action === "string") as AuditEvent[] : [];
+      normalized.typed_notes = Array.isArray(normalized.typed_notes) ? normalized.typed_notes : [];
+      return normalized;
+    });
+    const ids = new Set(tasks.map(task => task.id));
+    for (const task of tasks) {
+      task.dependsOn = task.dependsOn.filter(id => ids.has(id));
+      if (task.parentTaskId && !ids.has(task.parentTaskId)) delete task.parentTaskId;
     }
-    this.state = restored;
+    // Break malformed parent cycles deterministically by removing the edge
+    // from the first task that closes a cycle.
+    for (const task of tasks) {
+      const seen = new Set<string>();
+      let current: Task | undefined = task;
+      while (current?.parentTaskId) {
+        if (seen.has(current.id)) { delete task.parentTaskId; break; }
+        seen.add(current.id);
+        current = tasks.find(candidate => candidate.id === current!.parentTaskId);
+      }
+    }
+    // Focus is singular. Preserve the first valid active task and clear all
+    // later focus flags, matching FocusTodo's one-task invariant.
+    let focused = false;
+    for (const task of tasks) {
+      if (task.active && !focused) focused = true;
+      else task.active = false;
+    }
+    const keys: Record<string, string> = {};
+    for (const [key, id] of Object.entries(restored.keys)) if (typeof id === "string" && ids.has(id)) keys[key] = id;
+    const maxID = tasks.reduce((max, task) => Math.max(max, Number(task.id) || 0), 0);
+    this.state = { nextId: Math.max(1, Math.floor(restored.nextId), maxID + 1), tasks, keys };
   }
   rehydrate(entries: readonly JournalEntry[]): void {
     this.state = { nextId: 1, tasks: [], keys: {} };
@@ -562,7 +626,13 @@ export class TaskManager {
     };
     if (includeAudit) {
       if (task.audit_events) result.audit_events = task.audit_events.map(event => ({
-        type: event.action, timestamp: event.at,
+        type: event.action,
+        timestamp: event.at,
+        ...(event.actor !== undefined ? { actor: event.actor } : {}),
+        ...(event.summary !== undefined ? { summary: event.summary } : {}),
+        ...(event.tool !== undefined ? { tool: event.tool } : {}),
+        ...(event.toolCallId !== undefined ? { tool_call_id: event.toolCallId } : {}),
+        ...(event.outcome !== undefined ? { outcome: event.outcome } : {}),
       }));
       if (task.typed_notes) result.typed_notes = task.typed_notes.map(note => ({
         type: note.type, content: note.text, created_at: note.at,

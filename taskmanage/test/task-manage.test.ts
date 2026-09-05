@@ -3,6 +3,21 @@ import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } 
 
 const create = (key:string, subject=key) => ({key,op:"create" as const,subject});
 describe("TaskManage", () => {
+  it("appends compact audit events to the focused task", () => {
+    const manager = new TaskManager();
+    manager.execute({ operations: [{ key: "work", op: "create", subject: "Work", status: "in_progress" }] });
+    expect(manager.appendActiveAuditEvent({ tool: "bash", toolCallId: "call-1", actor: "main", summary: "bash: pwd", outcome: "success" })).toBe(true);
+    const result = manager.execute({ operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
+    expect((result.results[0].data as any).task.audit_events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool", tool: "bash", tool_call_id: "call-1", outcome: "success" }),
+    ]));
+  });
+
+  it("does not append an audit event without a focused task", () => {
+    const manager = new TaskManager();
+    expect(manager.appendActiveAuditEvent({ tool: "bash", summary: "bash: pwd", outcome: "success" })).toBe(false);
+  });
+
   it("resets state when a new session has no task snapshot", () => {
     const entries: JournalEntry[] = [];
     const manager = new TaskManager(entry => entries.push(entry));
@@ -251,6 +266,20 @@ describe("TaskManage", () => {
     expect(m.execute({operations:[{key:"get",op:"get",taskId:"1"}]}).results[0].data).toMatchObject({task:{priority:"high"}});
     expect(m.execute({operations:[{key:"lower",op:"update",taskId:"1",priority:"low"}]}).results[0].data).toMatchObject({task:{priority:"low"}});
     expect(m.execute({operations:[{key:"invalid",op:"update",taskId:"1",priority:"critical" as any}]}).results[0].error?.code).toBe("validation_failed");
+  });
+
+  it("normalizes restored task invariants and removes invalid graph edges", () => {
+    const manager = new TaskManager();
+    manager.rehydrate([{ type: "pi-swarm-task-state", data: { nextId: 1, keys: { bad: "missing" }, tasks: [
+      { id: "1", subject: "first", status: "in_progress", active: true, priority: "bad", category: "bad", dependsOn: ["missing"], parentTaskId: "2", notes: [], createdAt: "x", updatedAt: "x" },
+      { id: "2", subject: "second", status: "pending", active: true, priority: "medium", category: "acting", dependsOn: [], parentTaskId: "1", notes: [], createdAt: "x", updatedAt: "x" },
+    ] as any } }]);
+    const tasks = manager.snapshot().tasks;
+    expect(tasks).toHaveLength(2);
+    expect(tasks.filter(task => task.active)).toHaveLength(1);
+    expect(tasks.every(task => task.active === false || task.status === "in_progress")).toBe(true);
+    expect(tasks.every(task => task.dependsOn.every(id => tasks.some(candidate => candidate.id === id)))).toBe(true);
+    expect(tasks.some(task => task.parentTaskId === task.id)).toBe(false);
   });
 
   it("rehydrates legacy tasks without a priority as upstream medium", () => {

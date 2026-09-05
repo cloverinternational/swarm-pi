@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+export * from "./general-agent-adapter.js";
+export * from "./worker-daemon.js";
 import { mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -13,11 +15,18 @@ export function createPiRunner(pi) {
         await mkdir(sessionDir, { recursive: true });
         const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}.jsonl`;
         const args = ["--mode", "text", "--print", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
+        // Child Pi sessions need an unambiguous identity marker. The child loads
+        // the same extensions as the parent, but its process-local tool contexts
+        // do not inherit the parent's in-memory agent fields.
+        const command = process.platform === "win32" ? "cmd.exe" : "env";
+        const commandArgs = process.platform === "win32"
+            ? ["/d", "/s", "/c", `set "PI_SWARM_SUBAGENT=1" && pi ${args.map(arg => `"${String(arg).replace(/"/g, '\\"')}"`).join(" ")}`]
+            : ["PI_SWARM_SUBAGENT=1", "pi", ...args];
         if (ctx.provider)
             args.unshift("--provider", ctx.provider);
         if (ctx.model)
             args.unshift("--model", ctx.model);
-        const result = await pi.exec("pi", args, { cwd: ctx.cwd, signal: ctx.signal });
+        const result = await pi.exec(command, commandArgs, { cwd: ctx.cwd, signal: ctx.signal });
         if (result?.killed || result?.code !== 0)
             throw new Error(`child pi failed (${result?.killed ? "killed" : `exit ${result?.code}`}): ${(result?.stderr ?? "").trim()}`);
         return String(result?.stdout ?? "").trim();
@@ -33,14 +42,18 @@ export class AgentManager {
     queue = [];
     profiles = new Map();
     presets = new Map();
+    eventSinks = new Set();
     constructor(options = {}) {
         this.options = options;
+        if (options.eventSink)
+            this.eventSinks.add(options.eventSink);
         for (const p of options.profiles ?? [])
             this.profiles.set(p.name, clone(p));
         for (const [name, p] of Object.entries(options.presets ?? {}))
             this.presets.set(name, { ...clone(p), name: p.name || name });
     }
     addProfile(profile) { this.profiles.set(profile.name, clone(profile)); }
+    addEventSink(sink) { this.eventSinks.add(sink); return () => this.eventSinks.delete(sink); }
     addPreset(name, preset) { this.presets.set(name, { ...clone(preset), name: preset.name || name }); }
     profile(name) { const p = this.profiles.get(name); return p && clone(p); }
     resolve(spec) {
@@ -65,8 +78,11 @@ export class AgentManager {
         const promise = new Promise(r => resolve = r);
         const entry = { spec: { ...spec, id }, abort, steering, listeners, promise, result: undefined };
         this.agents.set(id, entry);
-        const run = () => { this.active++; void this.execute(spec, sessionId, entry).then(r => { entry.result = r; resolve(r); for (const l of listeners)
-            l(clone(r)); }).finally(() => { this.active--; this.drain(); }); };
+        const run = () => { this.active++; void this.execute(entry.spec, sessionId, entry).then(r => { entry.result = r; resolve(r); for (const l of listeners)
+            l(clone(r)); const result = clone(r); if (this.options.onComplete)
+            void Promise.resolve(this.options.onComplete(result)).catch(() => undefined); if (spec.background)
+            for (const sink of this.eventSinks)
+                void Promise.resolve(sink({ type: "agent.completed", agentId: r.id, parentId: spec.parentId, parentSessionId: spec.parentSessionId, sessionId, background: true, result })).catch(() => undefined); }).finally(() => { this.active--; this.drain(); }); };
         if (this.active < Math.max(1, this.options.concurrency ?? 4))
             run();
         else
@@ -112,8 +128,22 @@ async function defaultRunner(ctx) { if (ctx.signal.aborted)
     throw new DOMException("Aborted", "AbortError"); return `[${ctx.provider ?? "default"}/${ctx.model ?? "default"}] ${ctx.task}`; }
 function timeout(promise, ms) { if (ms === undefined)
     return promise; return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("agent wait timed out")), ms))]); }
-export function registerAgents(pi, manager = new AgentManager()) {
-    pi.registerTool({ name: "Agent", label: "Run agent", description: "Start a child agent in the inherited session context.", parameters: { type: "object", required: ["task"], properties: { task: { type: "string" }, profile: { type: "string" }, provider: { type: "string" }, model: { type: "string" }, background: { type: "boolean" }, worktree: { type: "boolean" } } }, async execute(_id, input, ctx) { const parentId = ctx?.agentId ?? ctx?.sessionId; const h = manager.spawn({ ...input, parentId, sessionId: ctx?.sessionId }); const result = input.background ? { handle: h.id, sessionId: h.sessionId } : await h.wait(); return { content: [{ type: "text", text: JSON.stringify(result) }], details: result }; } });
+export function registerAgents(pi, manager = new AgentManager(), parentSessionId) {
+    const targetSessionId = parentSessionId ?? pi?.getSessionId?.() ?? pi?.sessionId;
+    manager.addEventSink(event => {
+        if (!event.background || !targetSessionId || event.parentSessionId !== targetSessionId || typeof pi?.sendUserMessage !== "function")
+            return;
+        const { result } = event;
+        const output = result.output !== undefined ? `\noutput: ${result.output}` : "";
+        const error = result.error !== undefined ? `\nerror: ${result.error}` : "";
+        pi.sendUserMessage(`[agent completed] id=${result.id} status=${result.status}${output}${error}`, { deliverAs: "followUp" });
+    });
+    const agentTool = { name: "Agent", label: "Run agent", description: "Start a child agent in the inherited session context.", parameters: { type: "object", required: ["task"], properties: { task: { type: "string" }, profile: { type: "string" }, provider: { type: "string" }, model: { type: "string" }, background: { type: "boolean" }, worktree: { type: "boolean" } } }, async execute(_id, input, ctx) { const currentSessionId = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? targetSessionId; const parentId = ctx?.agentId ?? currentSessionId; const h = manager.spawn({ ...input, parentId, parentSessionId: currentSessionId, sessionId: currentSessionId, background: Boolean(input.background) }); const result = input.background ? { handle: h.id, sessionId: h.sessionId } : await h.wait(); return { content: [{ type: "text", text: JSON.stringify(result) }], details: result }; } };
+    (pi.codemodeTools ??= []).push(agentTool);
+    pi.registerTool(agentTool);
+    const controlTool = { name: "AgentControl", label: "Control agent", description: "Wait, cancel, or steer a background agent.", parameters: { type: "object", required: ["id", "action"], properties: { id: { type: "string" }, action: { type: "string", enum: ["wait", "cancel", "steer"] }, instruction: { type: "string" }, timeoutMs: { type: "number" } } }, async execute(_id, input) { const value = input.action === "wait" ? await manager.control(input.id, "wait", undefined, input.timeoutMs) : manager.control(input.id, input.action, input.instruction); return { content: [{ type: "text", text: JSON.stringify(value) }], details: value }; } };
+    (pi.codemodeTools ??= []).push(controlTool);
     pi.registerTool({ name: "AgentControl", label: "Control agent", description: "Wait, cancel, or steer a background agent.", parameters: { type: "object", required: ["id", "action"], properties: { id: { type: "string" }, action: { type: "string", enum: ["wait", "cancel", "steer"] }, instruction: { type: "string" }, timeoutMs: { type: "number" } } }, async execute(_id, input) { const value = input.action === "wait" ? await manager.control(input.id, "wait", undefined, input.timeoutMs) : manager.control(input.id, input.action, input.instruction); return { content: [{ type: "text", text: JSON.stringify(value) }], details: value }; } });
     return manager;
 }
+export * from "./absurd-control-plane.js";

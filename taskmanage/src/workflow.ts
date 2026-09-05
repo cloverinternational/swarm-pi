@@ -9,7 +9,7 @@ export interface WorkflowGroup {
   id: string; agents: WorkflowAgent[]; dependsOn?: string[];
   strategy?: WorkflowStrategy; maxFailures?: number; timeoutMs?: number;
 }
-export interface WorkflowBudget { maxAttempts?: number; maxTokens?: number; maxCost?: number }
+export interface WorkflowBudget { maxAttempts?: number; maxTokens?: number; maxCost?: number; maxRecursionDepth?: number; maxChildren?: number }
 export interface WorkflowDefinition {
   id: string; groups: WorkflowGroup[]; budget?: WorkflowBudget;
   failurePolicy?: FailurePolicy; maxRetries?: number;
@@ -51,6 +51,7 @@ export class WorkflowEngine {
     const validation = this.validate(def);
     if (validation.length) throw new Error(validation.join("; "));
     const budget = def.budget ?? {}, policy = def.failurePolicy ?? "fail_fast";
+    if ((budget.maxRecursionDepth ?? 0) < 0 || (budget.maxChildren ?? 0) < 0) throw new Error("invalid recursion budget");
     const saved = await this.checkpoints?.load(def.id);
     const completed = new Set(saved?.completedGroups ?? []), results: Record<string, AgentResult> = clone(saved?.results ?? {});
     let attempts = saved?.attempts ?? 0, tokens = saved?.tokens ?? 0, cost = saved?.cost ?? 0;

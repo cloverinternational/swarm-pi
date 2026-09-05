@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { appendFileSync } from "node:fs";
 
 export type Mode = "never" | "manual" | "auto";
 export type TriggerReason = "manual" | "tool_call_threshold" | "error_resolution" | "llm_nudge";
@@ -14,7 +15,7 @@ export interface Config {
   staleAfterDays?: number; archiveAfterDays?: number; lockTimeoutMs?: number; reviewHook?: ReviewHook;
   previewOnly?: boolean; requireReadBeforeWrite?: boolean; curatorRunner?: CuratorRunner; curatorMinRunGapMs?: number;
   curatorIdleDelayMs?: number; curatorConsolidate?: boolean; curatorTimeoutMs?: number; curatorMaxTurns?: number;
-  protectSkill?: (name: string) => boolean; accountingExempt?: boolean;
+  protectSkill?: (name: string) => boolean; accountingExempt?: boolean; skillInvoker?: (name: string, args?: string) => any; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
 }
 export interface Metrics { turns: number; toolCalls: number; errors: number; resolved: number; nudges: number; nudgeIgnores: number; reviews: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; }
 export interface ReviewHook { (event: { action: string; name?: string; revision?: string; reason?: string }): void }
@@ -22,8 +23,8 @@ export interface Skill { name: string; description: string; instructions: string
 export interface SkillEntry { type: "pi-swarm-autogen-state"; data: State; }
 export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; }
 type StoredRevision = Revision & { blobs: Record<string, string> };
-export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean; absorbedInto?: string; archiveReason?: string }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; focusedTask?: boolean; curatorLastRun?: string; curatorLastReport?: string; }
-export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0, skilled: false, budgetCalls: 0, reviewRequired: false, focusedTask: false });
+export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean; absorbedInto?: string; archiveReason?: string }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; focusedTask?: boolean; curatorLastRun?: string; curatorLastReport?: string; skillReviewCalls?: number; }
+export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0, skilled: false, budgetCalls: 0, reviewRequired: false, focusedTask: false, skillReviewCalls: 0 });
 const HISTORY_FORMAT = 1;
 const SUPPORT_ROOTS = new Set(["references", "templates", "scripts", "assets"]);
 
@@ -47,6 +48,15 @@ export const skillManageSchema = {
 
 const safeName = (n: unknown) => typeof n === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64 && n !== "archive";
 const now = () => new Date().toISOString();
+const AUTOGEN_GUIDANCE_MARKER = "<!-- pi-swarm:autogenskills-guidance:v1 -->";
+const autogenDebug = (event: string, data: Record<string, unknown>) => {
+  if (process.env.SWARM_AUTOGEN_DEBUG === "0") return;
+  try {
+    const path = join(process.env.HOME ?? process.cwd(), ".swarm", "logs", "autogenskills.jsonl");
+    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    appendFileSync(path, JSON.stringify({ at: now(), event, ...data }) + "\n", { mode: 0o600 });
+  } catch { /* diagnostics must never affect enforcement */ }
+};
 const clone = <T>(x: T): T => structuredClone(x);
 const pathExists = (path: string) => { try { lstatSync(path); return true; } catch (error: any) { if (error?.code === "ENOENT") return false; throw error; } };
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
@@ -79,7 +89,8 @@ export class AutoSkillManager {
   private state: State = defaultState();
   private readonly viewed = new Set<string>();
   private curatorRunning?: Promise<any>;
-  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean };
+  private chargedCalls = new Set<string>();
+  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"] };
   constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
     const home = process.env.HOME ?? process.cwd();
     const mode = config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never";
@@ -96,13 +107,14 @@ export class AutoSkillManager {
       curatorIdleDelayMs: Math.max(1, config.curatorIdleDelayMs ?? 60 * 1000),
       curatorConsolidate: config.curatorConsolidate ?? false, curatorTimeoutMs: Math.max(1000, config.curatorTimeoutMs ?? 5 * 60 * 1000),
       curatorMaxTurns: Math.max(1, config.curatorMaxTurns ?? 8), reviewHook: config.reviewHook,
-      curatorRunner: config.curatorRunner, protectSkill: config.protectSkill, accountingExempt: config.accountingExempt ?? false,
+      curatorRunner: config.curatorRunner, protectSkill: config.protectSkill, accountingExempt: config.accountingExempt ?? false, budgetWidget: config.budgetWidget,
     };
     this.mergeCuratorState();
   }
   snapshot(): State { return clone(this.state); }
-  restore(state: State) { this.state = { ...defaultState(), ...clone(state), skills: { ...(state.skills ?? {}) }, nudges: state.nudges ?? 0, nudgeIgnores: state.nudgeIgnores ?? 0, mutations: state.mutations ?? 0 }; }
+  restore(state: State) { this.state = { ...defaultState(), ...clone(state), skills: { ...(state.skills ?? {}) }, nudges: state.nudges ?? 0, nudgeIgnores: state.nudgeIgnores ?? 0, mutations: state.mutations ?? 0, skillReviewCalls: state.skillReviewCalls ?? 0 }; }
   metrics(): Metrics { return { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations, skilled: this.state.skilled, budgetCalls: this.state.budgetCalls, reviewRequired: this.state.reviewRequired }; }
+  activeSkillNames(): string[] { return Object.entries(this.state.skills).filter(([, skill]) => (skill.uses ?? 0) > 0 && !skill.archived).map(([name]) => name).sort(); }
   rehydrate(entries: readonly unknown[]) { this.state = defaultState(); const e = [...entries].reverse().find((x: any) => x?.type === "pi-swarm-autogen-state" || x?.type === "custom" && x?.customType === "pi-swarm-autogen-state") as SkillEntry | undefined; if (e?.data) this.restore(e.data); this.mergeCuratorState(); }
   private commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
   private curatorStatePath() { return join(this.config.dir, ".history", "curator-state.json"); }
@@ -549,20 +561,30 @@ export class AutoSkillManager {
     throw new Error(`unknown action ${action}`);
   }
   list(): Skill[] { if (!existsSync(this.config.dir)) return []; return readdirSync(this.config.dir, { withFileTypes: true }).filter((e) => e.isDirectory() && safeName(e.name) && existsSync(this.file(e.name))).map((e) => this.parse(e.name)); }
-  observeTool(success: boolean, toolName?: string, input?: any) {
-    // The SDK charges the budget at before-execute time, including calls that
-    // later fail. Pi exposes the result here, so charge every observed
-    // non-exempt attempt and persist failures as well.
+  observeTool(success: boolean, toolName?: string, input?: any, callId?: string): string | undefined {
+    // Result phase: record completion only. Budget charging happens once in
+    // observeToolAttempt at tool_call, so failed calls and duplicate terminal
+    // events cannot distort the budget.
     this.state.toolCalls++;
+    autogenDebug("result", { tool: toolName, callId, success, toolCalls: this.state.toolCalls, budgetCalls: this.state.budgetCalls });
+    void callId;
     const normalized = String(toolName ?? "").toLowerCase();
+    const isSkill = /^(skill|skillmanage|swarmskill)$/i.test(toolName ?? "");
+    if (isSkill && success) this.state.skillReviewCalls = 0;
     const operations = Array.isArray(input?.operations) ? input.operations : [input];
     if (success && normalized.replace(/[^a-z0-9]/g, "") === "taskmanage" && operations.some((operation: any) => operation?.status === "in_progress" || operation?.active === true || operation?.focused === true)) this.state.focusedTask = true;
-    if (this.state.focusedTask && !this.isExempt(toolName, input)) this.state.budgetCalls++;
+    // Test/direct callers without a call id have no separate attempt phase;
+    // retain backwards-compatible accounting for those calls. Real Pi events
+    // carry toolCallId and are charged by observeToolAttempt only.
+    if (!callId && this.state.focusedTask && !this.isExempt(toolName, input)) this.state.budgetCalls++;
     if (success) {
       if (this.state.errors > this.state.resolved) this.state.resolved++;
     } else this.state.errors++;
     const skillName = input?.name ?? input?.skill ?? input?.skill_name;
+    // A skill tool unlocks the budget only after a successful execution.
+    // Failed Skill/SkillManage results must remain failed and leave counters intact.
     if (success && toolName && /^(skill|skillmanage|swarmskill)$/i.test(toolName)) {
+      autogenDebug("skill-reset", { tool: toolName, callId, beforeBudgetCalls: this.state.budgetCalls });
       this.withSkillLocks(["curator-state"], () => {
         this.mergeCuratorState();
         // SwarmSkill may come from the general loader rather than autogen's
@@ -583,7 +605,19 @@ export class AutoSkillManager {
         this.persistCuratorState();
         this.commit();
       });
-    } else this.commit();
+    } else {
+      if (success && !isSkill && !this.isExempt(toolName, input)) this.state.skillReviewCalls = (this.state.skillReviewCalls ?? 0) + 1;
+      this.commit();
+    }
+    // Upstream LifecycleHook emits this review guidance from the post-tool
+    // event. Return text to the Pi adapter, which patches tool_result content.
+    if (success && !isSkill && (this.state.skillReviewCalls ?? 0) > this.config.nudgeInterval) {
+      this.state.skillReviewCalls = 0;
+      this.state.nudges++;
+      this.commit();
+      return `[SKILL REVIEW] Preserve reusable learning class-first: patch a loaded skill, extend an existing umbrella, add a support file, or record a no-mutation review with SkillManage(action: "review", review_reason: "nothing reusable to save") before creating a new skill. Existing skills: ${this.list().map(skill => skill.name).join(", ") || "none"}.`;
+    }
+    return undefined;
   }
   /** Run the deterministic part of curator maintenance. It is deliberately
    * cadence-limited and never archives pinned skills. */
@@ -759,26 +793,66 @@ export class AutoSkillManager {
     return this.curatorRunning;
   }
   budgetStatus() { const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; return { used: this.state.budgetCalls, budget, skilled: this.state.skilled, reviewRequired: this.state.reviewRequired, nudgeIgnores: this.state.nudgeIgnores, maxNudgeIgnores: this.config.maxNudgeIgnores }; }
-  budgetWidgetLines() { const s = this.budgetStatus(); const state = s.reviewRequired ? "REVIEW REQUIRED" : s.skilled ? "working" : "onboarding"; return [`Autogen skill budget: ${s.used}/${s.budget} · ${state}${s.reviewRequired ? " · use SkillManage review or Skill" : ""}`]; }
+  budgetWidgetData() {
+    const s = this.budgetStatus();
+    const width = 20;
+    const ratio = s.budget > 0 ? Math.min(1, s.used / s.budget) : 0;
+    return { ...s, width, filled: Math.round(ratio * width), state: s.reviewRequired ? "REVIEW REQUIRED" : s.skilled ? "working" : "onboarding" };
+  }
+  budgetWidgetLines() {
+    const s = this.budgetWidgetData();
+    const bar = "█".repeat(s.filled) + "░".repeat(s.width - s.filled);
+    return [`Autogen ${bar} ${s.used}/${s.budget} · ${s.state}${s.reviewRequired ? " · review required" : ""}`];
+  }
+  /** Render the budget with the same theme-aware foreground colors as the Swarm TUI. */
+  budgetWidget(_tui: any, theme: { fg?: (color: string, text: string) => string; dim?: (text: string) => string }) {
+    const s = this.budgetWidgetData();
+    const filled = "█".repeat(s.filled);
+    const empty = "░".repeat(s.width - s.filled);
+    const barColor = s.reviewRequired ? "error" : "accent";
+    const stateColor = s.reviewRequired ? "error" : s.skilled ? "accent" : "warning";
+    const color = (name: string, value: string) => theme.fg ? theme.fg(name, value) : value;
+    const dim = (value: string) => theme.dim ? theme.dim(value) : value;
+    const line = `Autogen ${color(barColor, filled)}${dim(empty)} ${s.used}/${s.budget} · ${color(stateColor, s.state)}${s.reviewRequired ? ` · ${color("error", "review required")}` : ""}`;
+    return { render: () => [line], invalidate: () => {} };
+  }
   private isExempt(toolName: string | undefined, input: any) {
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (/^(skill|skillmanage|swarmskill|taskmanage|taskcreate|taskupdate|tasklist|taskget|todowrite|todoread|todo|enterplanmode|exitplanmode|plan|planmode|askuserquestion|requestapproval|pushagentupdate|submitfeedback|read|grep|find|glob|ls|listdir|lsp|websearch|webfetch|browser|xsearch|xaiwebsearch|fetch)$/.test(n)) return true;
-    return n === "bash" && typeof input?.command === "string" && /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show)|cat|head|tail|wc|which|type|echo|printf)(\s|$)/i.test(input.command.trim());
+    // Bash has no command-level exemption. Every Bash invocation counts.
   }
   gateTool(toolName: string, input: any = {}): { block?: true; message?: string; reason?: string } | undefined {
     if (this.config.mode !== "auto") return;
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!n || this.isExempt(toolName, input)) return;
-    if (n === "bash" && typeof input?.command === "string" && /^(pwd|ls|find|grep|rg|git\s+(status|log|diff|show)|cat|head|tail|wc|which|type|echo|printf)(\s|$)/i.test(input.command.trim())) return;
+    // No Bash command filter: even read-only Bash calls are budgeted.
     const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget;
     if (!this.state.focusedTask) return;
-    if (this.state.reviewRequired) return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." };
+    if (this.state.reviewRequired) { autogenDebug("gate-block", { tool: toolName, reason: "review-required", budgetCalls: this.state.budgetCalls }); return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." }; }
     // Swarm's onboarding tier is a hard gate as soon as the budget is spent.
-    if (!this.state.skilled && this.state.budgetCalls >= budget) return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };
-    // Pi's tool_call result only supports block/reason. Working-tier nudges
-    // are therefore counted and attached once from tool_result/observeTurn.
-    if (this.state.skilled && this.state.budgetCalls >= budget) return;
+    if (!this.state.skilled && this.state.budgetCalls >= budget) { autogenDebug("gate-block", { tool: toolName, reason: "onboarding-budget", budgetCalls: this.state.budgetCalls, budget }); return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` }; }
+    // Enforce both tiers at the tool_call boundary. Once the current budget is
+    // exhausted, the next non-exempt focused tool call must not execute. The
+    // old working-tier behavior returned undefined here, which allowed the
+    // counter to run from 90/90 to 98/90 while only displaying a warning.
+    if (this.state.budgetCalls >= budget) {
+      autogenDebug("gate-block", { tool: toolName, reason: this.state.skilled ? "working-budget" : "onboarding-budget", budgetCalls: this.state.budgetCalls, budget, skilled: this.state.skilled });
+      return { block: true, reason: this.state.skilled
+        ? `Autogen working budget of ${budget} non-exempt tool calls is exhausted; review or invoke a reusable skill before continuing.`
+        : `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };
+    }
     return;
+  }
+  recordSkillInvocation(name: string, version: string) {
+    return this.withSkillLocks([name, "curator-state"], () => {
+      this.mergeCuratorState();
+      const existing = this.state.skills[name] ?? { uses: 0 };
+      this.state.skills[name] = { ...existing, version, uses: (existing.uses ?? 0) + 1, lastUsed: now() };
+      if (!this.state.skills[name].pinned) { this.state.skills[name].curatorState = "active"; this.state.skills[name].archived = false; }
+      this.state.focusedTask = true; this.state.skilled = true; this.state.budgetCalls = 0;
+      this.state.nudgeIgnores = 0; this.state.reviewRequired = false;
+      this.persistCuratorState(); this.commit();
+    });
   }
   invokeSkill(name: string, args = "") {
     if (!safeName(name)) throw new Error("skill must match lowercase skill identifier syntax");
@@ -787,21 +861,24 @@ export class AutoSkillManager {
       const skill = this.parse(name);
       let content = skill.instructions;
       if (args) content = content.replaceAll("{{arg}}", args);
-      const existing = this.state.skills[name] ?? { uses: 0 };
-      this.state.skills[name] = { ...existing, version: skill.version, uses: existing.uses + 1, lastUsed: now() };
-      if (!this.state.skills[name].pinned) { this.state.skills[name].curatorState = "active"; this.state.skills[name].archived = false; }
-      this.state.focusedTask = true;
-      this.state.skilled = true;
-      this.state.budgetCalls = 0;
-      this.state.nudgeIgnores = 0;
-      this.state.reviewRequired = false;
-      this.persistCuratorState();
-      this.commit();
+      this.recordSkillInvocation(name, skill.version);
       return { skill: name, version: skill.version, path: skill.path, instructions: content };
     });
   }
+  observeToolAttempt(toolName?: string, input?: any, callId?: string) {
+    const id = callId ? String(callId) : undefined;
+    if (id && this.chargedCalls.has(id)) { autogenDebug("attempt-duplicate", { tool: toolName, callId: id }); return; }
+    if (id) { this.chargedCalls.add(id); if (this.chargedCalls.size > 1000) this.chargedCalls.delete(this.chargedCalls.values().next().value!); }
+    const exempt = this.isExempt(toolName, input);
+    const focused = !!this.state.focusedTask;
+    if (focused && !exempt) this.state.budgetCalls++;
+    autogenDebug("attempt", { tool: toolName, callId: id, focused, exempt, charged: focused && !exempt, budgetCalls: this.state.budgetCalls, budget: this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget });
+    this.commit();
+  }
   observeTurn(): string | undefined {
-    this.state.turns++; this.curate();
+    this.state.turns++;
+    autogenDebug("turn-end", { turns: this.state.turns, toolCalls: this.state.toolCalls, budgetCalls: this.state.budgetCalls, skilled: this.state.skilled });
+    this.curate();
     let message: string | undefined;
     if (this.config.mode === "auto" && this.state.turns > 1 && this.state.turns - this.state.lastNudgeTurn >= this.config.nudgeInterval &&
       (this.state.toolCalls >= this.config.toolCallThreshold || this.state.resolved >= this.config.errorResolutionThreshold)) {
@@ -856,38 +933,98 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
   }
   const curator = new CuratorOrchestrator(manager);
   const register = (event: string, handler: any) => { const globalRegister = (globalThis as any).__piSwarmRegisterHook; return typeof globalRegister === "function" ? globalRegister(pi, "autogenskills", event, handler) : pi.on(event, handler); };
-  const updateBudgetWidget = (ctx: any) => ctx?.ui?.setWidget?.("swarm-autogen-budget", manager.config.mode === "never" ? undefined : manager.budgetWidgetLines(), { placement: "belowEditor" });
+  const updateBudgetWidget = (ctx: any) => {
+    // Keep the bottom surface compact: autogen is a percentage status, not a
+    // large progress widget. Context and active skills are rendered by footer.
+    const s = manager.budgetWidgetData();
+    const percent = s.budget > 0 ? Math.min(100, Math.round((s.used / s.budget) * 100)) : 0;
+    ctx?.ui?.setStatus?.("swarm-autogen", manager.config.mode === "never" ? undefined : `Autogen ${percent}%`);
+  };
+  const installFooter = (ctx: any) => {
+    if (!ctx?.ui?.setFooter || ctx.mode !== "tui") return;
+    const unsub = ctx.sessionManager?.onBranchChange?.(() => ctx.ui.requestRender?.());
+    ctx.ui.setFooter((_tui: any, theme: any) => ({
+      dispose: unsub,
+      invalidate() {},
+      render(width: number): string[] {
+        const usage = ctx.getContextUsage?.();
+        const contextPercent = usage?.percent == null ? "?" : `${Math.round(usage.percent)}%`;
+        const contextFilled = usage?.percent == null ? 0 : Math.max(0, Math.min(10, Math.round(usage.percent / 10)));
+        const contextBar = "█".repeat(contextFilled) + "░".repeat(10 - contextFilled);
+        const names = manager.activeSkillNames();
+        const skills = names.length ? names.join(", ") : "none";
+        const dim = (value: string) => theme?.fg ? theme.fg("dim", value) : value;
+        const line = dim(`Skills: ${skills} · Context ${contextBar} ${contextPercent}`);
+        return [width > 0 && line.length > width ? line.slice(0, Math.max(0, width - 1)) + "…" : line];
+      },
+    }));
+  };
   const isSubagent = (ctx: any) => ctx?.isSubAgent || ctx?.isSubagent || ctx?.agent?.isSubAgent;
-  register("tool_call", (e: any, ctx: any) => { updateBudgetWidget(ctx); return manager.config.accountingExempt || isSubagent(ctx) ? undefined : manager.gateTool(e.toolName ?? e.tool_name, e.input ?? e.params); });
+  register("tool_call", (e: any, ctx: any) => {
+    if (manager.config.accountingExempt || isSubagent(ctx)) return;
+    const toolName = e.toolName ?? e.tool_name;
+    const input = e.input ?? e.params;
+    const result = manager.gateTool(toolName, input);
+    if (!result?.block) manager.observeToolAttempt(toolName, input, e.toolCallId ?? e.tool_call_id);
+    updateBudgetWidget(ctx);
+    return result;
+  });
   register("before_agent_start", (e: any) => {
     curator.busy();
     if (manager.config.mode === "never") return;
-    const skills = manager.list();
-    const index = skills.length ? skills.map(s => `- ${s.name} (v${s.version}): ${s.description}`).join("\n") : "(none)";
-    const guidance = `## Swarm Skills\nBefore complex work, check the available skills. Use the Skill tool to invoke a matching skill before other tools.\nAvailable autogenerated skills:\n${index}\nUse SkillManage(action=\"view\") for full instructions and SkillManage(action=\"review\") when nothing reusable was learned.`;
+    // Keep Swarm autogen separate from Pi's native skill ecosystem: expose only
+    // the explicit lifecycle contract, never the generated-skill index/body.
+    if (String(e.systemPrompt ?? "").includes(AUTOGEN_GUIDANCE_MARKER)) return;
+    const guidance = `${AUTOGEN_GUIDANCE_MARKER}\n## Swarm Autogen\nSwarm autogenerated skills are separate from Pi's native skills. Before complex work, use Skill to invoke a relevant reusable skill, or use SkillManage to list/view/review/patch skills. Prefer patching an existing skill or adding a support file; a no-mutation review is valid. Do not create a new skill unless no existing skill fits.`;
     return { systemPrompt: `${e.systemPrompt ?? ""}\n\n${guidance}` };
   });
   register("tool_result", (e: any, ctx: any) => {
     if (manager.config.accountingExempt || isSubagent(ctx)) return;
-    manager.observeTool(!e.isError && !e.error, e.toolName ?? e.tool_name, e.input ?? e.params);
-    // Lifecycle nudges are model-visible messages attached to the completed
-    // tool result, not UI-only notifications at turn_end.
-    const nudge = manager.observeTurn(); updateBudgetWidget(ctx);
-    return nudge ? { content: [...(Array.isArray(e.content) ? e.content : []), { type: "text", text: nudge }] } : undefined;
+    const toolName = e.toolName ?? e.tool_name;
+    const rawContent = Array.isArray(e.content) ? e.content.map((part: any) => part?.text ?? "").join(" ") : "";
+    const structuredSkillError = /^(skill|skillmanage|swarmskill)$/i.test(toolName ?? "") && /[\"']error[\"']\s*:/.test(rawContent);
+    const nudge = manager.observeTool(!e.isError && !e.error && !structuredSkillError, toolName, e.input ?? e.params, e.toolCallId ?? e.tool_call_id);
+    // Tool results update tool/error counters only. A Pi turn is one assistant
+    // response plus its tool batch, so turn accounting belongs exclusively to
+    // turn_end, never once per tool result.
+    // Legacy/unit adapters without call ids have no separate turn_end
+    // boundary; preserve their old nudge behavior. Pi's real events always
+    // carry ids and use turn_end below.
+    if (!e.toolCallId && !e.tool_call_id) {
+      const nudge = manager.observeTurn();
+      updateBudgetWidget(ctx);
+      return nudge ? { content: [...(Array.isArray(e.content) ? e.content : []), { type: "text", text: nudge }] } : undefined;
+    }
+    updateBudgetWidget(ctx);
+    return nudge ? { content: [...(Array.isArray(e.content) ? e.content : []), { type: "text", text: `<system-reminder>\n${nudge}\n</system-reminder>` }] } : undefined;
   });
-  register("turn_end", (_e: any, ctx: any) => { updateBudgetWidget(ctx); curator.idle(); });
+  register("turn_end", (_e: any, ctx: any) => {
+    const nudge = manager.observeTurn();
+    updateBudgetWidget(ctx);
+    curator.idle();
+    return nudge ? { message: nudge } : undefined;
+  });
   register("session_start", (_e: any, ctx: any) => {
     // getEntries() includes the whole session tree and can resurrect state
     // from a sibling branch. Only the active branch is authoritative.
     const branch = ctx.sessionManager?.getBranch?.();
     manager.rehydrate(Array.isArray(branch) ? branch : []);
     updateBudgetWidget(ctx);
+    installFooter(ctx);
     curator.idle();
   });
   register("session_shutdown", () => curator.dispose());
   pi.registerTool({ name: "Skill", label: "Invoke skill", description: "Invoke a matching reusable skill before performing the task. The skill instructions are returned for you to follow.", parameters: skillSchema, async execute(_id: string, params: any) {
-    try { return { content: [{ type: "text", text: JSON.stringify(manager.invokeSkill(params.skill, params.args ?? "")) }], details: {} }; }
-    catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; }
+    try {
+      const args = params.args ?? "";
+      const invoked = manager.config.skillInvoker ? manager.config.skillInvoker(params.skill, args) : manager.invokeSkill(params.skill, args);
+      const result = invoked instanceof Promise ? await invoked : invoked;
+      if (manager.config.skillInvoker) manager.recordSkillInvocation(params.skill, result.version ?? "unknown");
+      return { content: [{ type: "text", text: JSON.stringify(result) }], details: {} }; }
+    catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { content: [{ type: "text", text: JSON.stringify({ error: message }) }], isError: true, details: { code: "skill_not_found", message } };
+    }
   } });
   pi.registerTool({ name: "SkillManage", label: "Manage autogenerated skills", description: "Create, review, patch, inspect, and archive reusable autogenerated skill packages. Prefer patching an existing umbrella; never overwrite skills.", parameters: skillManageSchema, async execute(_id: string, params: any) { try { return { content: [{ type: "text", text: JSON.stringify(manager.execute(params)) }], details: {} }; } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; } } });
   pi.registerCommand?.("curator", {

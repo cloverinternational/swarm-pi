@@ -1,0 +1,23 @@
+import { createServer, type Server, type Socket } from "node:net";
+import { timingSafeEqual } from "node:crypto";
+import { chmod, rm } from "node:fs/promises";
+import type { ControlPlane } from "./control-plane.js";
+import { ControlPlaneError } from "./control-plane.js";
+
+export interface JsonRpcRequest { readonly request_id: string; readonly method: string; readonly params?: unknown; readonly auth?: string; }
+export interface JsonRpcResponse { readonly request_id: string; readonly ok: boolean; readonly result?: unknown; readonly error?: { code: string; message: string; retryable: boolean }; }
+export interface LocalTransportOptions { readonly socketPath: string; readonly token: string; readonly maxRequestBytes?: number; }
+const retryable = new Set(["conflict"]);
+const equalSecret = (a: string, b: string) => { const aa=Buffer.from(a), bb=Buffer.from(b); return aa.length===bb.length && timingSafeEqual(aa,bb); };
+const bad = (code: string, message: string): never => { throw new ControlPlaneError(code as never, message); };
+
+/** Line-delimited JSON-RPC over a permissioned Unix socket. One request per line. */
+export class LocalControlPlaneServer {
+  private server?: Server;
+  constructor(private readonly plane: ControlPlane, private readonly options: LocalTransportOptions) { if (!options.token) throw new Error("local transport token is required"); }
+  async listen(): Promise<void> { await rm(this.options.socketPath, { force: true }); this.server=createServer(socket=>this.handle(socket)); await new Promise<void>((resolve,reject)=>{this.server!.once("error",reject);this.server!.listen(this.options.socketPath,()=>resolve());}); await chmod(this.options.socketPath,0o600); }
+  async close(): Promise<void> { await new Promise<void>(resolve=>this.server?.close(()=>resolve())??resolve()); await rm(this.options.socketPath,{force:true}); }
+  private handle(socket: Socket): void { let buffer=Buffer.alloc(0); const max=this.options.maxRequestBytes??256*1024; socket.on("data",chunk=>{buffer=Buffer.concat([buffer,chunk]);if(buffer.length>max){socket.destroy();return;}let nl;while((nl=buffer.indexOf(10))>=0){const line=buffer.subarray(0,nl).toString();buffer=buffer.subarray(nl+1);void this.dispatch(line).then(r=>socket.write(JSON.stringify(r)+"\n"));}}); }
+  private async dispatch(line:string):Promise<JsonRpcResponse>{let request:JsonRpcRequest;try{const raw=JSON.parse(line) as any;if(!raw||typeof raw!=="object"||Array.isArray(raw)||typeof raw.request_id!=="string"||!raw.request_id||typeof raw.method!=="string")throw new Error();request=raw;}catch{return {request_id:"",ok:false,error:{code:"invalid_request",message:"malformed JSON-RPC request",retryable:false}}}if(typeof request.auth!=="string"||!equalSecret(request.auth,this.options.token))return {request_id:request.request_id,ok:false,error:{code:"unauthorized",message:"authentication failed",retryable:false}};try{return {request_id:request.request_id,ok:true,result:await this.call(request.method,request.params)}}catch(e){if(e instanceof ControlPlaneError)return {request_id:request.request_id,ok:false,error:{code:e.code,message:e.message,retryable:retryable.has(e.code)}};return {request_id:request.request_id,ok:false,error:{code:"internal",message:"control-plane request failed",retryable:false}}}}
+  private async call(method:string,params:unknown):Promise<unknown>{const p=(params&&typeof params==="object"?params:{}) as Record<string,unknown>;switch(method){case "daemon.get_status": return {ready:true,agents: await (this.plane as any).listAgents?.().then((x:any[])=>x.length),jobs: await (this.plane as any).listJobs?.().then((x:any[])=>x.length)};case "agent.register":return this.plane.registerAgent(p as never,String(p.actor??"local"));case "agent.heartbeat":return this.plane.heartbeatAgent(String(p.id) as never,String(p.actor??"local"),p.at as string|undefined);case "agent.stop":return this.plane.stopAgent(String(p.id) as never,String(p.actor??"local"));case "job.create":return this.plane.createJob(p as never,String(p.actor??"local"));case "job.get":return this.plane.getJob(String(p.id) as never);case "job.status":return (this.plane as any).status ? (this.plane as any).status(String(p.id) as never) : this.plane.getJob(String(p.id) as never);case "job.dispatch":return (this.plane as any).dispatch(String(p.id) as never,String(p.actor??"daemon"));case "job.cancel":return this.plane.cancelJob(String(p.id) as never,String(p.actor??"local"));case "job.retry":return this.plane.retryJob(String(p.id) as never,String(p.actor??"local"));case "events.subscribe":return this.plane.readEvents(p.after_sequence as number|undefined,p.limit as number|undefined);default:bad("invalid_request",`unknown method ${method}`);}}
+}

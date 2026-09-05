@@ -11,4 +11,3 @@ taskmanage/dist/
 **/node_modules/
 
 policy/dist/
-.pi/extensions/*test.ts

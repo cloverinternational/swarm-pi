@@ -32,10 +32,15 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
   const extensionPath = fileURLToPath(import.meta.url);
   const configuredDir = options.dir ?? process.env.SWARM_AUTOGEN_DIR;
   const dir = configuredDir?.trim() || join(process.env.HOME ?? process.cwd(), ".swarm", "skills", "autogen");
+  const cwd = resolve((pi.getCwd?.() as string | undefined) ?? process.cwd());
+  const closed = options.closed ?? (process.env.SWARM_SKILLS_CLOSED === "1");
+  const allowedNames = options.allowedNames ?? process.env.SWARM_SKILLS_ALLOWED?.split(",").map(s => s.trim()).filter(Boolean);
   const curatorRunner = options.curatorRunner ?? (!child && typeof pi.exec === "function"
     ? async (request: Parameters<NonNullable<Config["curatorRunner"]>>[0]) => {
       const result = await pi.exec("env", [
         `SWARM_AUTOGEN_MODE=manual`,
+        `SWARM_SKILLS_CLOSED=${closed ? "1" : "0"}`,
+        ...(allowedNames ? [`SWARM_SKILLS_ALLOWED=${allowedNames.join(",")}`] : []),
         `SWARM_AUTOGEN_DIR=${dir}`,
         `SWARM_AUTOGEN_PREVIEW=${request.preview ? "1" : "0"}`,
         "SWARM_AUTOGEN_REQUIRE_VIEW=1",
@@ -51,7 +56,7 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
         "--tools", "SkillManage",
         "--mode", "text",
         "-p", request.prompt,
-      ], { cwd: process.cwd(), timeout: request.timeoutMs });
+      ], { cwd, timeout: request.timeoutMs });
       if (result.code !== 0 || result.killed) {
         throw new Error(`curator child failed (${result.killed ? "timeout" : `exit ${result.code}`}): ${result.stderr.trim()}`);
       }
@@ -67,7 +72,7 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
     accountingExempt: options.accountingExempt ?? process.env.SWARM_AUTOGEN_ACCOUNTING_EXEMPT === "1",
     curatorRunner,
     skillInvoker: (name, args) => {
-      const skill = getSwarmSkillRegistry(pi, { cwd: process.cwd() }).invoke(name, args);
+      const skill = getSwarmSkillRegistry(pi, { cwd, closed, allowedNames }).invoke(name, args);
       return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions };
     },
   });

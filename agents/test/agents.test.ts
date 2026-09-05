@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentManager, createPiRunner } from "../src/index.js";
+import { AgentManager, createPiRunner, registerAgents } from "../src/index.js";
 
 describe("AgentManager", () => {
   it("runs a real Pi child with isolated control tools and inherited execution context", async () => {
@@ -10,8 +10,9 @@ describe("AgentManager", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-agent-runner-"));
     const runner = createPiRunner({ exec: async (...args: any[]) => { seen = args; return { code: 0, stdout: "child result", stderr: "", killed: false }; } });
     expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toBe("child result");
-    expect(seen[0]).toBe("pi");
-    expect(seen[1]).toEqual(expect.arrayContaining(["--mode", "text", "--session", `${cwd}/.pi/agent-sessions/x.jsonl`, "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
+    expect(seen[0]).toBe(process.platform === "win32" ? "cmd.exe" : "env");
+    if (process.platform === "win32") expect(seen[1][3]).toContain("PI_SWARM_SUBAGENT=1");
+    else expect(seen[1]).toEqual(expect.arrayContaining(["PI_SWARM_SUBAGENT=1", "pi", "--mode", "text", "--session", `${cwd}/.pi/agent-sessions/x.jsonl`, "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
     expect(seen[2]).toMatchObject({ cwd });
   });
 
@@ -37,6 +38,41 @@ describe("AgentManager", () => {
     expect((await first.wait()).status).toBe("cancelled");
     expect((await second.wait()).status).toBe("completed");
     expect(maximum).toBe(1);
+  });
+  it("notifies an injected parent event sink when background work completes", async () => {
+    const events: any[] = [];
+    const manager = new AgentManager({ runner: async () => "done", eventSink: event => { events.push(event); } });
+    const handle = manager.spawn({ id: "child", parentId: "parent-session", parentSessionId: "parent-session", sessionId: "session-1", task: "work", background: true });
+    await handle.wait();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "agent.completed", agentId: "child", parentId: "parent-session", parentSessionId: "parent-session", sessionId: "session-1", background: true, result: { status: "completed", output: "done" } });
+  });
+  it("wires background completion to the exact parent Pi session once", async () => {
+    const tools: any[] = [], messages: any[] = [];
+    const pi = { sessionId: "parent-session", registerTool: (tool: any) => tools.push(tool), sendUserMessage: (content: string, options: any) => messages.push({ content, options }) };
+    const manager = new AgentManager({ runner: async () => "finished" });
+    registerAgents(pi, manager);
+    const agent = tools.find(tool => tool.name === "Agent");
+    const result = await agent.execute("call", { task: "work", background: true }, { sessionId: "parent-session" });
+    await manager.control(result.details.handle, "wait");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ content: expect.stringContaining("id=agent"), options: { deliverAs: "followUp" } });
+    expect(messages[0].content).toContain("status=completed");
+    expect(messages[0].content).toContain("output: finished");
+    await manager.control(result.details.handle, "wait");
+    expect(messages).toHaveLength(1);
+
+    const otherMessages: any[] = [];
+    const otherPi = { sessionId: "other-session", registerTool: () => undefined, sendUserMessage: (content: string) => otherMessages.push(content) };
+    registerAgents(otherPi, manager);
+    expect(otherMessages).toHaveLength(0);
+  });
+  it("does not emit completion for foreground agents", async () => {
+    const messages: any[] = [], pi = { sessionId: "parent", registerTool: (tool: any) => messages.push(tool), sendUserMessage: () => { throw new Error("must not notify"); } };
+    const manager = new AgentManager({ runner: async () => "done" });
+    registerAgents(pi, manager);
+    const agent = messages.find(tool => tool.name === "Agent");
+    await agent.execute("call", { task: "work" }, { sessionId: "parent" });
   });
   it("steers a running agent and emits completion", async () => {
     const manager = new AgentManager({ runner: async ({ signal, spec }) => { await new Promise(r => setTimeout(r, 5)); if (signal.aborted) throw new Error("cancelled"); return spec.task; } });

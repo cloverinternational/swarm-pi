@@ -11,6 +11,35 @@ const pi = (entries: JournalEntry[] = []) => ({
 const event = (type: string, more: any = {}) => ({ type, ...more });
 
 describe("TaskManage hooks coordinator", () => {
+  it("queues advisory guidance until before_agent_start can inject a model message", () => {
+    const h = new TaskHooksCoordinator(new TaskManager(), pi(), { enforcementMode: "advise" });
+    expect(h.on(event("tool_call", { toolName: "write", input: {} }))).toMatchObject({ message: expect.stringContaining("No active task") });
+    const result = h.on(event("before_agent_start", { prompt: "continue" }));
+    expect(result).toMatchObject({ message: expect.stringContaining("No active task") });
+    expect(h.on(event("before_agent_start", { prompt: "continue" }))).toBeUndefined();
+  });
+
+  it("guides legacy task creation and activation events", () => {
+    const manager = new TaskManager();
+    const h = new TaskHooksCoordinator(manager, pi());
+    expect(h.on(event("tool_result", { toolName: "TaskCreate", input: { subject: "work" }, result: {} }))?.message).toContain("Update it");
+    expect(h.on(event("tool_result", { toolName: "TaskUpdate", input: { taskId: "1", status: "in_progress" }, result: {} }))?.message).toContain("ACTIVE");
+  });
+
+  it("reminds about active or pending tasks on a throttled user-message cadence", () => {
+    const m = new TaskManager();
+    const h = new TaskHooksCoordinator(m, pi());
+    m.execute({ operations: [{ key: "a", op: "create", subject: "Work", status: "in_progress" }] });
+    expect(h.on(event("input", { text: "first" }))).toBeUndefined();
+    expect(h.on(event("before_agent_start", { prompt: "first" }))).toMatchObject({ message: expect.stringContaining("active task") });
+    for (let i = 0; i < 4; i++) {
+      h.on(event("input", { text: `message ${i}` }));
+      expect(h.on(event("before_agent_start", { prompt: `message ${i}` }))).toBeUndefined();
+    }
+    h.on(event("input", { text: "sixth" }));
+    expect(h.on(event("before_agent_start", { prompt: "sixth" }))).toMatchObject({ message: expect.stringContaining("active task") });
+  });
+
   it("orders the gate, allows exemptions, and bypasses subagents", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p, { enforcementMode: "block" });
     expect(h.on(event("tool_call", { toolName: "write", input: {} }), {})).toMatchObject({ block: true });
@@ -46,8 +75,12 @@ describe("TaskManage hooks coordinator", () => {
     const createResult = m.execute(createInput);
     expect(h.on(event("tool_result", { toolName: "TaskManage", input: createInput, result: createResult }))).toBeDefined();
     m.execute({ operations: [{ key: "focus", op: "update", taskId: "1", status: "in_progress" }] });
-    h.on(event("tool_result", { toolName: "bash", input: { command: "curl -H 'token=abc' https://x" }, result: {} }));
+    h.on(event("tool_result", { toolCallId: "audit-call", toolName: "bash", input: { command: "curl -H 'token=abc' https://x" }, result: {} }));
     expect(h.auditSnapshot()[0].summary).toContain("[REDACTED]");
+    const audited = m.execute({ operations: [{ key: "audit", op: "get", taskId: "1", include_audit: true }] });
+    expect((audited.results[0].data as any).task.audit_events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool", tool: "bash", tool_call_id: "audit-call", outcome: "success" }),
+    ]));
     expect(h.auditSnapshot()[0].outcome).toBe("success");
     h.on(event("tool_result", { toolName: "bash", input: {}, error: "nope" }));
     expect((h.on(event("tool_result", { toolName: "bash", input: {}, result: {} }))?.message)).toContain("resolved");

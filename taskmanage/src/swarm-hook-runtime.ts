@@ -25,7 +25,8 @@ export interface HookDefinition {
   handle: (event: RuntimeEvent, context: RuntimeHookContext) => HookDecision | void | Promise<HookDecision | void>;
 }
 export interface HookAudit { hook: string; event: string; outcome: "executed" | "skipped" | "blocked" | "failed"; at: string; message?: string; tool?: string; toolCallId?: string }
-export interface HookRuntimeOptions { defaultTimeoutMs?: number; auditLimit?: number; appendAudit?: (audit: HookAudit) => void; routeSubagent?: (event: RuntimeEvent, context: RuntimeHookContext) => RuntimeHookContext | Promise<RuntimeHookContext>; }
+export interface HookExecutionObservation extends HookAudit { phase: HookPhase; output?: string }
+export interface HookRuntimeOptions { defaultTimeoutMs?: number; auditLimit?: number; appendAudit?: (audit: HookAudit) => void; onExecution?: (observation: HookExecutionObservation) => void; routeSubagent?: (event: RuntimeEvent, context: RuntimeHookContext) => RuntimeHookContext | Promise<RuntimeHookContext>; }
 
 const aliases: Record<string, string> = {
   before_tool: "tool.before_execute", tool_call: "tool.before_execute", beforetool: "tool.before_execute",
@@ -98,12 +99,14 @@ export class HookRuntimeCoordinator {
       this.usage.set(key, used + 1); if (remaining != null) this.budget.set(key, remaining - 1);
       try {
         const decision = await withTimeout(Promise.resolve(hook.handle(event, { ...routed, isSubagent: event.subagent || routed.isSubagent })), hook.timeoutMs ?? this.options.defaultTimeoutMs);
-        if (decision?.action === "block") { const a = { hook: hook.name, event: event.type, outcome: "blocked" as const, at: new Date().toISOString(), message: decision.message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a); return { event, blocked: a }; }
+        if (decision?.action === "block") { const a = { hook: hook.name, event: event.type, outcome: "blocked" as const, at: new Date().toISOString(), message: decision.message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a); this.optionsIn.onExecution?.({ ...a, phase: event.phase, output: decision.output }); return { event, blocked: a }; }
         hookOutput = decision?.output;
-        this.record({ hook: hook.name, event: event.type, outcome: "executed", at: new Date().toISOString(), message: decision?.message ?? decision?.output, tool: event.tool, toolCallId: event.toolCallId });
+        const observation = { hook: hook.name, event: event.type, outcome: "executed" as const, at: new Date().toISOString(), message: decision?.message ?? decision?.output, tool: event.tool, toolCallId: event.toolCallId, phase: event.phase, output: decision?.output };
+        this.record(observation);
+        this.optionsIn.onExecution?.(observation);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error), outcome = hook.failureMode === "block" ? "blocked" : "failed";
-        const a = { hook: hook.name, event: event.type, outcome: outcome as "blocked" | "failed", at: new Date().toISOString(), message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a);
+        const a = { hook: hook.name, event: event.type, outcome: outcome as "blocked" | "failed", at: new Date().toISOString(), message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a); this.optionsIn.onExecution?.({ ...a, phase: event.phase });
         if (hook.failureMode === "block") return { event, blocked: a };
         if (hook.failureMode === "throw") throw error;
       }

@@ -4,6 +4,31 @@ import { spawn } from "node:child_process";
 import { relative, resolve, isAbsolute } from "node:path";
 
 export type Operation = "read" | "write" | "execute" | "network" | "credential";
+
+/** Explicit unattended-worker boundary. Omitted limits are intentionally conservative. */
+export interface AutonomyPolicy {
+  workspace: string;
+  tools: readonly string[];
+  network: { enabled: boolean; allowedHosts: readonly string[] };
+  mutation: { enabled: boolean; approval: "deny" | "broker" | "autoApprove" };
+  approval: { requiredFor: readonly Operation[] };
+  budget: { maxAttempts: number; maxTokens?: number; maxCost?: number; timeoutMs: number };
+  recursion: { maxDepth: number; maxChildren: number };
+}
+
+export function createAutonomyPolicy(input: Partial<AutonomyPolicy> & Pick<AutonomyPolicy, "workspace">): AutonomyPolicy {
+  const p: AutonomyPolicy = {
+    workspace: resolve(input.workspace), tools: [...(input.tools ?? [])],
+    network: { enabled: input.network?.enabled ?? false, allowedHosts: [...(input.network?.allowedHosts ?? [])] },
+    mutation: { enabled: input.mutation?.enabled ?? false, approval: input.mutation?.approval ?? "deny" },
+    approval: { requiredFor: [...(input.approval?.requiredFor ?? ["write", "execute", "network"])] },
+    budget: { maxAttempts: input.budget?.maxAttempts ?? 1, maxTokens: input.budget?.maxTokens, maxCost: input.budget?.maxCost, timeoutMs: input.budget?.timeoutMs ?? 30_000 },
+    recursion: { maxDepth: input.recursion?.maxDepth ?? 0, maxChildren: input.recursion?.maxChildren ?? 0 },
+  };
+  if (p.budget.maxAttempts < 1 || p.budget.timeoutMs < 1 || p.recursion.maxDepth < 0 || p.recursion.maxChildren < 0) throw new PolicyError("limits.invalid", "autonomy limits are invalid");
+  if (p.mutation.approval === "autoApprove" && !p.mutation.enabled) throw new PolicyError("approval.invalid", "auto approval requires mutation enabled");
+  return Object.freeze(p);
+}
 export type Decision = "allow" | "deny" | "approval_required";
 export interface PolicyConfig {
   workspace: string;

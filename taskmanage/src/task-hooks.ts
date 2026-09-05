@@ -22,6 +22,8 @@ export interface HookPi {
 interface HookState {
   turns: number; toolCalls: number; lastNudgeTurn: number; maintenanceAt: number;
   maintenanceAtByTask: Record<string, number>;
+  maintenanceMessageCount: number;
+  maintenanceMessageTaskId?: string;
   hadError: boolean; skillCalls: number; lastSkillReview: number; audit: AuditRecord[];
   focusTaskId?: string; completedCalls: string[]; nudgeBudget: number;
 }
@@ -86,12 +88,14 @@ function stateFrom(entries: readonly unknown[]): HookState {
   const d = (found as any)?.data;
   return d ? { turns: d.turns ?? 0, toolCalls: d.toolCalls ?? 0, lastNudgeTurn: d.lastNudgeTurn ?? 0,
     maintenanceAt: d.maintenanceAt ?? 0, maintenanceAtByTask: d.maintenanceAtByTask && typeof d.maintenanceAtByTask === "object" ? { ...d.maintenanceAtByTask } : {},
+    maintenanceMessageCount: d.maintenanceMessageCount ?? 0,
+    maintenanceMessageTaskId: typeof d.maintenanceMessageTaskId === "string" ? d.maintenanceMessageTaskId : undefined,
     hadError: !!d.hadError, skillCalls: d.skillCalls ?? 0,
     lastSkillReview: d.lastSkillReview ?? 0, audit: Array.isArray(d.audit) ? d.audit.slice(-200) : [],
     focusTaskId: typeof d.focusTaskId === "string" ? d.focusTaskId : undefined,
     completedCalls: Array.isArray(d.completedCalls) ? d.completedCalls.slice(-500) : [],
     nudgeBudget: typeof d.nudgeBudget === "number" ? Math.max(0, d.nudgeBudget) : 1 } :
-    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, maintenanceAtByTask: {}, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [], nudgeBudget: 1 };
+    { turns: 0, toolCalls: 0, lastNudgeTurn: 0, maintenanceAt: 0, maintenanceAtByTask: {}, maintenanceMessageCount: 0, hadError: false, skillCalls: 0, lastSkillReview: 0, audit: [], completedCalls: [], nudgeBudget: 1 };
 }
 function summary(name: string, args: any): string {
   if (!args || typeof args !== "object") return name;
@@ -124,6 +128,7 @@ export class TaskHooksCoordinator {
   private prompt = "";
   private shared: SharedNudgeState;
   private sessionOwner?: object;
+  private pendingMessages: { message: string; hookName: string }[] = [];
   private anonymousTerminals: { fingerprint: string; type: string }[] = [];
   constructor(private readonly manager: TaskManager, private readonly pi: HookPi, config: HookConfig = {}) {
     this.config = { enforcementMode: config.enforcementMode ?? "advise", nudgeInterval: config.nudgeInterval ?? 5,
@@ -135,7 +140,7 @@ export class TaskHooksCoordinator {
   }
   private persist() { this.pi.appendEntry("pi-swarm-task-hooks", this.state); }
   auditSnapshot(): readonly AuditRecord[] { return this.state.audit.map(x => ({ ...x })); }
-  private message(message: string) { return { message: `[TASK HOOK] ${message}` }; }
+  private message(message: string, hookName = "task-maintenance-reminder-hook") { return { message: `[TASK HOOK] ${message}`, hookName }; }
   private tasks(): Task[] { return this.manager.snapshot().tasks.filter(t => t.status !== "deleted"); }
   private focus(): Task | undefined { return this.tasks().find(t => t.status === "in_progress" && t.active); }
   private taskOps(e: HookEvent): Operation[] {
@@ -182,9 +187,46 @@ export class TaskHooksCoordinator {
       return;
     }
     if (event.type === "shutdown" || event.type === "session_shutdown") { this.persist(); return; }
-    if (event.type === "input" || event.type === "before_agent_start") { this.prompt = text(event.text ?? event.prompt); return; }
+    if (event.type === "input" || event.type === "before_agent_start") {
+      this.prompt = text(event.text ?? event.prompt);
+      if (event.type === "input") {
+        const focus = this.focus();
+        const pending = this.tasks().filter(task => task.status === "pending");
+        const taskId = focus?.id ?? (pending.length ? "pending" : undefined);
+        if (taskId !== this.state.maintenanceMessageTaskId) {
+          this.state.maintenanceMessageTaskId = taskId;
+          this.state.maintenanceMessageCount = 0;
+        }
+        if (taskId && this.state.maintenanceMessageCount % 5 === 0) {
+          this.state.maintenanceMessageCount++;
+          this.persist();
+          this.pendingMessages.push({
+            message: focus
+              ? `Task maintenance: you have an active task \"${focus.subject}\". Mark it completed when done and add tasks if scope expands.`
+              : `Task maintenance: you have pending tasks but none is active. Use TaskManage to update an available task to status \"in_progress\" and active=true.`,
+            hookName: "task-maintenance-reminder-hook",
+          });
+        } else if (taskId) {
+          this.state.maintenanceMessageCount++;
+        }
+      }
+      // Pi does not allow tool_call/turn_end handlers to return model-visible
+      // messages. Carry advisory guidance to the next agent-start boundary.
+      if (event.type === "before_agent_start" && this.pendingMessages.length) {
+        const message = this.pendingMessages.map(item => item.message).join("\n\n");
+        this.pendingMessages = [];
+        return { message, hookName: "task-guidance-hook" };
+      }
+      return;
+    }
     if (event.type === "turn_start") { this.state.turns++; this.persist(); return; }
-    if (event.type === "tool_call") return this.gate(event, ctx);
+    if (event.type === "tool_call") {
+      const decision: any = this.gate(event, ctx);
+      // tool_call return values can only block. Preserve advisory guidance for
+      // the next model turn instead of silently dropping it at the adapter.
+      if (decision?.message && !decision.block) this.pendingMessages.push({ message: decision.message, hookName: decision.hookName ?? "task-enforcement-hook" });
+      return decision;
+    }
     if (event.type === "tool_execution_update") return; // progress is observed, never audited
     if (event.type === "tool_result" || event.type === "tool_execution_end") {
       const id = event.toolCallId ?? event.tool_call_id;
@@ -206,9 +248,15 @@ export class TaskHooksCoordinator {
         this.state.completedCalls.push(String(id));
         this.state.completedCalls = this.state.completedCalls.slice(-500);
       }
-      return this.outcome(event, ctx);
+      const decision = this.outcome(event, ctx);
+      if (decision?.message) this.pendingMessages.push({ message: decision.message, hookName: decision.hookName ?? "task-guidance-hook" });
+      return decision;
     }
-    if (event.type === "turn_end") return this.endTurn(ctx);
+    if (event.type === "turn_end") {
+      const decision = this.endTurn(ctx);
+      if (decision?.message) this.pendingMessages.push({ message: decision.message, hookName: decision.hookName ?? "task-maintenance-reminder-hook" });
+      return decision;
+    }
   }
   private anonymousTerminalFingerprint(e: HookEvent): string {
     const stable = (value: unknown): string => {
@@ -221,15 +269,15 @@ export class TaskHooksCoordinator {
     return stable({ name: toolName(e), input: input(e), failed: failed(e), batch: this.batchResult(e) });
   }
   private gate(e: HookEvent, ctx: HookContext) {
-    if (this.config.enforcementMode === "off" || this.isSubagent?.(ctx) ||
+    if (this.config.enforcementMode === "off" || process.env.PI_SWARM_SUBAGENT === "1" || this.isSubagent?.(ctx) ||
       (ctx as any)?.isSubagent === true || (ctx as any)?.agentType === "subagent" ||
       e.isSubagent === true) return;
     const name = toolName(e), n = normalize(name);
     if (!name || exempt(name, input(e))) return;
     if (this.focus()) return;
-    const reason = "No active task is focused; create or update a task with status \"in_progress\" before acting.";
-    if (this.config.enforcementMode === "block") return { block: true, reason };
-    return this.message(reason);
+    const reason = "No active task is focused; use TaskManage to create a task, then update it with status \"in_progress\" and active=true before acting.";
+    if (this.config.enforcementMode === "block") return { block: true, reason, hookName: "task-enforcement-hook" };
+    return this.message(reason, "task-enforcement-hook");
   }
   private outcome(e: HookEvent, ctx: HookContext) {
     const name = toolName(e), n = normalize(name);
@@ -249,13 +297,36 @@ export class TaskHooksCoordinator {
     }
     // Keep routine bookkeeping out of the audit, but retain anomalous
     // TaskManage terminal results so partial/failed Pi payloads are visible.
+    const at = new Date().toISOString();
     if (!IGNORED_AUDIT.has(n) || (n === "taskmanage" && isFailure)) {
-      this.state.audit.push({ tool: name, outcome: isFailure ? "failure" : "success", summary: summary(name, input(e)), at: new Date().toISOString() });
+      const record = { tool: name, outcome: isFailure ? "failure" as const : "success" as const, summary: summary(name, input(e)), at };
+      this.state.audit.push(record);
       this.state.audit = this.state.audit.slice(-200);
+      // Task audit is intentionally best-effort: it must never turn a normal
+      // tool result into a failed tool result. The manager owns persistence.
+      this.manager.appendActiveAuditEvent({
+        actor: typeof (ctx as any).agentId === "string" ? (ctx as any).agentId : "main",
+        summary: record.summary,
+        tool: name,
+        toolCallId: typeof (e.toolCallId ?? e.tool_call_id) === "string" ? (e.toolCallId ?? e.tool_call_id) : undefined,
+        outcome: record.outcome,
+        at,
+      });
     }
     this.persist();
-    if (resolvedError) return this.message("An error was resolved; preserve any reusable learning in an existing skill.");
+    if (resolvedError) return this.message("An error was resolved; preserve any reusable learning in an existing skill.", "task-guidance-hook");
     if (n === "taskmanage" && this.resultSucceeded(e)) return this.guidance(this.taskOps(e), e);
+    // Legacy task tools may still be supplied by a host/provider. Keep their
+    // lifecycle guidance equivalent to TaskManage rather than merely exempting
+    // them from the gate.
+    if ((n === "taskcreate" || n === "taskupdate" || n === "todowrite") && !isFailure) {
+      const params = input(e);
+      const status = typeof params?.status === "string" ? params.status : undefined;
+      const taskId = typeof params?.taskId === "string" ? params.taskId : "?";
+      if (status === "in_progress") return this.message(`Task #${taskId} is now ACTIVE. You can proceed with tools.`, "task-guidance-hook");
+      if (status === "completed") return this.message(`Task #${taskId} completed. Activate the next pending task or create a new task if needed.`, "task-guidance-hook");
+      if (n === "taskcreate" && !this.focus()) return this.message("Task created successfully. Update it with status: \"in_progress\" and active=true before proceeding with other tools.", "task-guidance-hook");
+    }
     return;
   }
   private guidance(ops: Operation[], event?: HookEvent) {
@@ -271,11 +342,15 @@ export class TaskHooksCoordinator {
     if (!task && mutation.op === "update" && typeof mutation.taskId === "string")
       task = snap.tasks.find(t => t.id === mutation.taskId);
     if (mutation.op === "create") {
-      if (mutation.status === "in_progress") return this.message(`Task #${task?.id ?? "?"} is now ACTIVE. You can proceed with tools.`);
+      if (mutation.status === "in_progress") {
+        if (task?.status === "in_progress" && task.active === true)
+          return this.message(`Task #${task.id} is now ACTIVE. You can proceed with tools.`, "task-guidance-hook");
+        return this.message(`Task #${task?.id ?? "?"} is in progress but not focused. Set active=true before proceeding with other tools.`, "task-guidance-hook");
+      }
       if (this.focus()) return;
-      return this.message("Task created successfully. Activate it with status: \"in_progress\" before proceeding.");
+      return this.message("Task created successfully. Update it with status: \"in_progress\" and active=true before proceeding with other tools.", "task-guidance-hook");
     }
-    if (mutation.status === "in_progress") return this.message(`Task #${task?.id ?? "?"} is now ACTIVE. You can proceed with tools.`);
+    if (mutation.status === "in_progress") return this.message(`Task #${task?.id ?? "?"} is now ACTIVE. You can proceed with tools.`, "task-guidance-hook");
     if (mutation.status === "completed") {
       const active = snap.tasks.find(t => t.status === "in_progress" && t.active);
       const pending = snap.tasks.filter(t => t.status === "pending");

@@ -437,6 +437,11 @@ func (sdk *SDKIntegration) UpdateLastMessageCompletion(ctx context.Context, conv
 		lastAssistant.Metadata = make(map[string]interface{})
 	}
 
+	// Store cumulative walltime on the conversation. This is deliberately
+	// separate from the message display metadata so compaction/reload retains
+	// the total across the entire logical conversation.
+	conv.WallTime += elapsed
+
 	// Store elapsed time in nanoseconds (for precision when deserializing)
 	lastAssistant.Metadata["elapsed_time_ns"] = float64(elapsed.Nanoseconds())
 

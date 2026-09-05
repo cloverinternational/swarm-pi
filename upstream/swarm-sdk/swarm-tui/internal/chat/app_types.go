@@ -317,6 +317,7 @@ type Conversation struct {
 	Model      string   // Most recent assistant model
 	ModelsUsed []string // All unique models used (ordered by first appearance)
 	CostUSD    float64  // Total cost in USD (from SDK)
+	WallTime   time.Duration // Cumulative agent walltime, persisted across compaction
 
 	// Lineage: forking and compaction tracking
 	ForkedFrom    string // Parent conversation ID (if forked via edit)

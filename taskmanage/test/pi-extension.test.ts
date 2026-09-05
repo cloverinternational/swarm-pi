@@ -90,6 +90,41 @@ describe("root Pi TaskManage extension", () => {
     expect(payload.results[0].data.tasks[0].subject).toBe("Build adapter");
   });
 
+  it("injects queued advisory guidance at before_agent_start", async () => {
+    const runtime = fakePi();
+    registerTaskManageExtension(runtime.pi, { enforcementMode: "advise" });
+    const toolCall = runtime.handlers.get("tool_call")![0];
+    await toolCall({ toolName: "write", input: {} }, {});
+    const beforeStart = runtime.handlers.get("before_agent_start")![0];
+    await expect(beforeStart({ prompt: "continue", systemPrompt: "base" }, {})).resolves.toMatchObject({
+      message: { customType: "swarm-task-hook", content: expect.stringContaining("No active task"), display: false },
+    });
+  });
+
+  it("covers the full Pi task lifecycle: block, activate, audit, and completion guidance", async () => {
+    const runtime = fakePi();
+    registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
+    const before = runtime.handlers.get("tool_call")![0];
+    expect(await before({ toolName: "write", toolCallId: "blocked", input: {} }, {})).toMatchObject({ block: true });
+
+    const tool = runtime.tools.find((candidate: any) => candidate.name === "TaskManage");
+    await tool.execute("create", { operations: [{ key: "work", op: "create", subject: "Do work" }] });
+    const after = runtime.handlers.get("tool_result")![0];
+    await after({ toolName: "TaskManage", toolCallId: "create-result", input: { operations: [{ key: "work", op: "create", subject: "Do work" }] }, result: { status: "succeeded", results: [{ key: "work", op: "create", status: "succeeded", data: { task: { id: "1" } } }] } }, {});
+    const guidance = runtime.handlers.get("before_agent_start")![0];
+    expect(await guidance({ prompt: "continue", systemPrompt: "base" }, {})).toMatchObject({ message: { content: expect.stringContaining("Update it") } });
+
+    await tool.execute("activate", { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] });
+    await after({ toolName: "TaskManage", toolCallId: "activate-result", input: { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] }, result: { status: "succeeded", results: [{ key: "activate", op: "update", status: "succeeded", data: { task: { id: "1" } } }] } }, {});
+    expect(await guidance({ prompt: "continue", systemPrompt: "base" }, {})).toMatchObject({ message: { content: expect.stringContaining("ACTIVE") } });
+
+    await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, {});
+    const audited = await tool.execute("audit-get", { operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
+    expect(JSON.parse(audited.content[0].text).results[0].data.task.audit_events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool", tool: "bash", tool_call_id: "audit" }),
+    ]));
+  });
+
   it("handles Pi lifecycle payloads whose event name is not in the payload", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
@@ -114,6 +149,7 @@ describe("root Pi TaskManage extension", () => {
     expect(result.systemPrompt).toContain("# Delegation (the Task tool)");
     expect(result.systemPrompt.match(/You are an expert software engineering assistant/g)).toHaveLength(1);
     expect(result.systemPrompt).toContain("Current working directory: /workspace/project");
+    // Re-processing an already assembled Forge prompt is idempotent.
     await expect(handler({ systemPrompt: result.systemPrompt }, {})).resolves.toBeUndefined();
   });
 
@@ -139,6 +175,7 @@ describe("root Pi TaskManage extension", () => {
     }, {}, {});
     expect(call.render(80).join("\n")).toContain("TaskManage");
     expect(call.render(80).join("\n")).toContain("Managing tasks");
+    expect(() => call.invalidate()).not.toThrow();
 
     const result = await tool.execute("call-3", {
       operations: [{ key: "plan", op: "create", subject: "Design the renderer" }],
@@ -147,6 +184,7 @@ describe("root Pi TaskManage extension", () => {
     expect(panel.render(100).join("\n")).toContain("○ #");
     expect(panel.render(100).join("\n")).toContain("Design the renderer");
     expect(panel.render(100).join("\n")).not.toContain("plan");
+    expect(() => panel.invalidate()).not.toThrow();
     expect(tool.renderShell).toBe("self");
   });
 
@@ -166,6 +204,7 @@ describe("root Pi TaskManage extension", () => {
     const lines = widget.render(80).join("\n");
     expect(lines).toContain("Tasks   0/1 done");
     expect(lines).toContain("● [A] Build the renderer");
+    expect(() => widget.invalidate()).not.toThrow();
   });
 
   it("keeps task output within narrow widths for wide subjects", async () => {
@@ -217,8 +256,8 @@ describe("root Pi TaskManage extension", () => {
     };
 
     await shortcuts[0].options.handler(ctx);
-    expect(shortcuts[0].shortcut).toBe("ctrl+alt+t");
-    expect(commands[0].name).toBe("thinking");
+    expect(shortcuts[0].shortcut).toBe("ctrl+alt+shift+t");
+    expect(commands[0].name).toBe("swarm-thinking");
     expect(selectedTitle).toContain("Thinking settings");
     expect(selectedOptions).toHaveLength(6);
     expect(level).toBe("high");

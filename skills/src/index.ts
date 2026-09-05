@@ -4,8 +4,15 @@ import { join, relative, resolve } from "node:path";
 export type SkillSource = "managed" | "install" | "project" | "user" | "autogen" | "cli";
 export interface LoadedSkill { name: string; description: string; instructions: string; dir: string; filePath: string; source: SkillSource; precedence: number; supportFiles: string[]; disableModelInvocation?: boolean; }
 export interface SkillDiagnostic { path: string; message: string; }
-export interface SkillLoaderOptions { cwd?: string; home?: string; installDir?: string; managedDir?: string; autogenDir?: string; cliPaths?: string[]; closed?: boolean; allowedNames?: string[]; }
+export interface SkillLoaderOptions { cwd?: string; home?: string; installDir?: string; managedDir?: string; autogenDir?: string; cliPaths?: string[]; closed?: boolean; allowedNames?: string[]; allowedSkills?: string[]; }
 export interface SkillLoadResult { skills: LoadedSkill[]; diagnostics: SkillDiagnostic[]; searchPaths: Array<{ path: string; source: SkillSource; precedence: number }>; }
+
+/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+export function generateAvailableSkillsXML(skills: LoadedSkill[]): string {
+  if (!skills.length) return "";
+  const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+  return `<available_skills>\n${skills.map(skill => `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(skill.description)}</description>\n    <location>${esc(skill.filePath)}</location>\n  </skill>`).join("\n")}\n</available_skills>`;
+}
 
 const MAX_NAME = 64, MAX_DESC = 1024;
 const precedence: Record<SkillSource, number> = { managed: 600, cli: 500, install: 400, project: 300, user: 200, autogen: 100 };
@@ -31,6 +38,10 @@ const walkFiles = (root:string,out:string[]) => { let es; try{es=readdirSync(roo
 export class SkillLoader {
   private watchers: FSWatcher[] = [];
   constructor(private readonly options: SkillLoaderOptions = {}) {}
+  configure(policy: Pick<SkillLoaderOptions, "closed" | "allowedNames">) {
+    this.options.closed = !!policy.closed;
+    if (policy.allowedNames) this.options.allowedNames = [...policy.allowedNames];
+  }
   paths(): Array<{path:string;source:SkillSource;precedence:number}> {
     const cwd=resolve(this.options.cwd ?? process.cwd()), home=this.options.home ?? process.env.HOME ?? cwd;
     const rows:Array<{path:string;source:SkillSource;precedence:number}> = [];
@@ -48,7 +59,7 @@ export class SkillLoader {
   load(): SkillLoadResult {
     const paths=this.paths(), diagnostics:SkillDiagnostic[]=[]; const selected=new Map<string,LoadedSkill>();
     for(const spec of paths){ for(const file of walk(spec.path)){ const dir=resolve(file,".."); let raw; try{raw=readFileSync(file,"utf8");}catch(e){diagnostics.push({path:file,message:String(e)});continue;} const {fields,body}=parseFrontmatter(raw); const name=fields.name || (dir.split("/").pop() ?? ""); const description=fields.description ?? ""; if(!validName(name)){diagnostics.push({path:file,message:`invalid skill name ${name}`});continue;} if(description.length>MAX_DESC){diagnostics.push({path:file,message:"description exceeds 1024 characters"});continue;} const skill:LoadedSkill={name,description,instructions:body.trimEnd(),dir,filePath:file,source:spec.source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:fields["disable-model-invocation"] === "true"}; const prior=selected.get(name); if(!prior || skill.precedence>=prior.precedence) selected.set(name,skill); } }
-    let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); if(this.options.closed && this.options.allowedNames) skills=skills.filter(s=>this.options.allowedNames!.includes(s.name)); return {skills,diagnostics,searchPaths:paths};
+    let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); const allowed = this.options.allowedNames ?? this.options.allowedSkills; if (allowed) skills=skills.filter(s=>allowed.includes(s.name)); return {skills,diagnostics,searchPaths:paths};
   }
   find(name:string):LoadedSkill|undefined{return this.load().skills.find(s=>s.name===name)}
   watch(onChange:(result:SkillLoadResult)=>void):()=>void { this.closeWatchers(); for(const p of this.paths()){ if(!existsSync(p.path)) continue; try{this.watchers.push(watch(p.path,{recursive:true},()=>onChange(this.load())))}catch{} } return ()=>this.closeWatchers(); }

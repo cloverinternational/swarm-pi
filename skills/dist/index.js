@@ -1,5 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
 import { join, resolve } from "node:path";
+/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+export function generateAvailableSkillsXML(skills) {
+    if (!skills.length)
+        return "";
+    const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+    return `<available_skills>\n${skills.map(skill => `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(skill.description)}</description>\n    <location>${esc(skill.filePath)}</location>\n  </skill>`).join("\n")}\n</available_skills>`;
+}
 const MAX_NAME = 64, MAX_DESC = 1024;
 const precedence = { managed: 600, cli: 500, install: 400, project: 300, user: 200, autogen: 100 };
 const sourceFor = (path, roots) => roots.find(r => { const p = resolve(path), root = resolve(r.root); return p === root || p.startsWith(root + "/"); })?.source ?? "user";
@@ -69,6 +76,11 @@ export class SkillLoader {
     constructor(options = {}) {
         this.options = options;
     }
+    configure(policy) {
+        this.options.closed = !!policy.closed;
+        if (policy.allowedNames)
+            this.options.allowedNames = [...policy.allowedNames];
+    }
     paths() {
         const cwd = resolve(this.options.cwd ?? process.cwd()), home = this.options.home ?? process.env.HOME ?? cwd;
         const rows = [];
@@ -125,8 +137,9 @@ export class SkillLoader {
             }
         }
         let skills = [...selected.values()].sort((a, b) => a.name.localeCompare(b.name));
-        if (this.options.closed && this.options.allowedNames)
-            skills = skills.filter(s => this.options.allowedNames.includes(s.name));
+        const allowed = this.options.allowedNames ?? this.options.allowedSkills;
+        if (allowed)
+            skills = skills.filter(s => allowed.includes(s.name));
         return { skills, diagnostics, searchPaths: paths };
     }
     find(name) { return this.load().skills.find(s => s.name === name); }

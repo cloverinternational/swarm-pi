@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Policy, PolicyError, runProcess } from "../src/index.js";
+import { Policy, PolicyError, runProcess, createAutonomyPolicy } from "../src/index.js";
 
 const setup = async () => { const root = await mkdtemp(join(tmpdir(), "swarm-policy-")); await mkdir(join(root, "inside")); await writeFile(join(root, "inside", "x"), "ok"); return root; };
 
@@ -32,5 +32,10 @@ describe("deterministic policy", () => {
     const timed = await runProcess(p, { tool: "bash", operation: "execute", command: process.execPath }, ["-e", "setTimeout(()=>{},1000)"]);
     expect(timed.timedOut).toBe(true);
     const controller = new AbortController(); const running = runProcess(p, { tool: "bash", operation: "execute", command: process.execPath }, ["-e", "setTimeout(()=>{},1000)"], controller.signal); controller.abort(); const cancelled = await running; expect(cancelled.code).not.toBe(0);
+  });
+  it("constructs conservative unattended policy and rejects unsafe approval", () => {
+    const p = createAutonomyPolicy({ workspace: "/tmp/work" });
+    expect(p.network.enabled).toBe(false); expect(p.mutation.enabled).toBe(false); expect(p.recursion.maxDepth).toBe(0);
+    expect(() => createAutonomyPolicy({ workspace: "/tmp/work", mutation: { enabled: false, approval: "autoApprove" } })).toThrow("auto approval");
   });
 });

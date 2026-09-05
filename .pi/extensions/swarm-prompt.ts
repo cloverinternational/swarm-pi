@@ -118,14 +118,17 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   registerHook(pi, "swarm-prompt", "before_agent_start", (event: PromptExtensionEvent, ctx: PromptExtensionContext) => {
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
     const selected = resolveActiveSystemPrompt(cwd);
+    // Pi-native and explicitly custom prompts own their exact system-prompt
+    // contents. Leave them untouched; their respective canonical skill loaders
+    // remain responsible for making skills available to the model.
     if (selected.kind === "pi") return;
     if (selected.kind === "custom") return { systemPrompt: selected.content };
     const registry = getSwarmSkillRegistry(pi as any, { cwd });
     const catalog = registry.catalog();
-    const skillGuidance = catalog ? `\n\n${catalog}\nWhen a user request matches an available skill, invoke the Skill tool before responding; do not reproduce the skill instructions instead of invoking it.` : "";
+    const skillGuidance = catalog && !event.systemPrompt.includes("<available_skills>") ? `\n\n${catalog}\nWhen a user request matches an available skill, invoke the Skill tool before responding; do not reproduce the skill instructions instead of invoking it.` : "";
     // Forge may already have been assembled by another prompt layer. Keep its
-    // content intact but still append the catalog from the shared registry.
-    if (event.systemPrompt.includes(forgeMarker)) return { systemPrompt: event.systemPrompt + skillGuidance };
+    // content intact and make catalog injection idempotent.
+    if (event.systemPrompt.includes(forgeMarker)) return skillGuidance ? { systemPrompt: event.systemPrompt + skillGuidance } : undefined;
     const assembly = assembleForgePrompt(event.systemPrompt, { cwd, ...event.swarmPrompt });
     // Pi's native skill loader owns the Pi ecosystem. Do not inject Swarm's
     // install/autogen skills into the system prompt; Swarm skills remain an
