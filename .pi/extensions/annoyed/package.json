@@ -1,0 +1,6 @@
+{
+  "name": "@pi-swarm/annoyed",
+  "private": true,
+  "type": "module",
+  "description": "Local SQLite-backed Annoyed kanban extension for Pi"
+}
