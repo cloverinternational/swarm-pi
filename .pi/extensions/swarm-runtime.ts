@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { Policy } from "../../policy/src/index.ts";
-import { AgentManager, registerAgents } from "../../agents/src/index.ts";
+import { AgentManager, createPiRunner, registerAgents } from "../../agents/src/index.ts";
 import { MCPManager } from "../../mcp/src/index.ts";
 import { registerSwarmPrompt } from "./swarm-prompt.ts";
 
@@ -24,7 +24,7 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
   // Dedicated extensions own tool registration; the umbrella only owns shared
   // policy/identity and must never register duplicate tools.
 
-  state.agents = registerAgents(pi, new AgentManager({ cwd, concurrency: 4 }));
+  state.agents = registerAgents(pi, new AgentManager({ cwd, concurrency: 4, runner: createPiRunner(pi) }));
   pi.on?.("session_shutdown", () => state.mcp?.close());
   const manifests = pi.mcpManifests ?? [];
   if (Array.isArray(manifests)) state.mcp = new MCPManager(manifests, { closed: options.closed ?? true, registerTool: tool => pi.registerTool(tool) });

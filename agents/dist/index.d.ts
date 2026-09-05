@@ -52,6 +52,9 @@ export interface RunnerContext {
     steering: readonly string[];
 }
 export type Runner = (ctx: RunnerContext) => Promise<string>;
+/** Build a real Pi child-session runner. The child is deliberately prevented
+ * from recursively spawning this control surface; the parent owns orchestration. */
+export declare function createPiRunner(pi: any): Runner;
 export declare class AgentManager {
     private readonly options;
     private readonly agents;

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { AgentManager } from "../src/index.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AgentManager, createPiRunner } from "../src/index.js";
 
 describe("AgentManager", () => {
+  it("runs a real Pi child with isolated control tools and inherited execution context", async () => {
+    let seen: any;
+    const cwd = mkdtempSync(join(tmpdir(), "pi-agent-runner-"));
+    const runner = createPiRunner({ exec: async (...args: any[]) => { seen = args; return { code: 0, stdout: "child result", stderr: "", killed: false }; } });
+    expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toBe("child result");
+    expect(seen[0]).toBe("pi");
+    expect(seen[1]).toEqual(expect.arrayContaining(["--mode", "text", "--session", `${cwd}/.pi/agent-sessions/x.jsonl`, "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
+    expect(seen[2]).toMatchObject({ cwd });
+  });
+
   it("inherits profile capabilities and preserves parent identity", async () => {
     let seen: any;
     const manager = new AgentManager({ profiles: [{ name: "review", systemPrompt: "be precise", capabilities: ["read"] }], runner: async ctx => { seen = ctx; return "done"; } });

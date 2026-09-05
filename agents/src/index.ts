@@ -13,6 +13,23 @@ export interface BackgroundHandle { readonly id: string; readonly parentId?: str
 export interface RunnerContext { signal: AbortSignal; spec: Required<Pick<AgentSpec, "id" | "task">> & AgentSpec; task: string; profile?: Profile; provider?: string; model?: string; cwd: string; instructions: readonly string[]; steering: readonly string[]; }
 export type Runner = (ctx: RunnerContext) => Promise<string>;
 
+/** Build a real Pi child-session runner. The child is deliberately prevented
+ * from recursively spawning this control surface; the parent owns orchestration. */
+export function createPiRunner(pi: any): Runner {
+  return async (ctx) => {
+    if (typeof pi?.exec !== "function") return defaultRunner(ctx);
+    const sessionDir = `${ctx.cwd}/.pi/agent-sessions`;
+    await mkdir(sessionDir, { recursive: true });
+    const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}.jsonl`;
+    const args = ["--mode", "text", "--print", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
+    if (ctx.provider) args.unshift("--provider", ctx.provider);
+    if (ctx.model) args.unshift("--model", ctx.model);
+    const result = await pi.exec("pi", args, { cwd: ctx.cwd, signal: ctx.signal });
+    if (result?.killed || result?.code !== 0) throw new Error(`child pi failed (${result?.killed ? "killed" : `exit ${result?.code}`}): ${(result?.stderr ?? "").trim()}`);
+    return String(result?.stdout ?? "").trim();
+  };
+}
+
 const clone = <T>(v: T): T => structuredClone(v);
 const unique = (xs: readonly string[]) => [...new Set(xs.filter(Boolean))];
 const stableId = (parentId: string | undefined, sessionId: string, task: string) => `agent-${createHash("sha256").update(`${parentId ?? "root"}\n${sessionId}\n${task}`).digest("hex").slice(0, 20)}`;

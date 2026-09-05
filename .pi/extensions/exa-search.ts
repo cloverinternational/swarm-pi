@@ -4,7 +4,14 @@ import { join } from "node:path";
 function exaKey() {
   const env = process.env.EXA_API_KEY?.trim(); if (env) return env;
   const configured = process.env.PI_SWARM_API_KEYS ?? join(process.env.HOME ?? process.cwd(), ".swarmos", "credentials.json");
-  try { const value = JSON.parse(readFileSync(configured, "utf8"))?.providers?.Exa?.api_key; if (typeof value === "string" && value.trim()) return value.trim(); } catch {}
+  const local = join(process.cwd(), ".pi", "config", "api-keys.json");
+  for (const path of [configured, local]) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      const value = parsed?.providers?.Exa?.api_key ?? parsed?.exa?.apiKey;
+      if (typeof value === "string" && value.trim()) return value.trim();
+    } catch {}
+  }
   return undefined;
 }
 
@@ -32,13 +39,32 @@ export default function exaSearchExtension(pi: any) {
       const query = String(params.query ?? "").trim();
       if (!query) return { content: [{ type: "text", text: "query is required" }], isError: true, details: {} };
       if (params.allowed_domains?.length && params.excluded_domains?.length) return { content: [{ type: "text", text: "allowed_domains and excluded_domains are mutually exclusive" }], isError: true, details: {} };
+      // The tool caller may supply optional fields as empty strings. Exa rejects
+      // empty date strings ("Invalid date format"), so normalize those away and
+      // validate dates before sending the request.
+      const optionalDate = (value: unknown, name: string) => {
+        if (value == null || String(value).trim() === "") return undefined;
+        const date = String(value).trim();
+        if (!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(date) || Number.isNaN(Date.parse(date))) {
+          throw new Error(`${name} must be a valid ISO 8601 date`);
+        }
+        return date;
+      };
+      let startPublishedDate: string | undefined;
+      let endPublishedDate: string | undefined;
+      try {
+        startPublishedDate = optionalDate(params.start_published_date, "start_published_date");
+        endPublishedDate = optionalDate(params.end_published_date, "end_published_date");
+      } catch (error) {
+        return { content: [{ type: "text", text: (error as Error).message }], isError: true, details: {} };
+      }
       const body: any = {
         query, type: params.search_type ?? "auto", numResults: params.num_results ?? 10,
         category: params.category, includeDomains: params.allowed_domains, excludeDomains: params.excluded_domains,
-        startPublishedDate: params.start_published_date, endPublishedDate: params.end_published_date,
+        startPublishedDate, endPublishedDate,
         contents: { highlights: { numSentences: 5, highlightsPerUrl: 3, query } },
       };
-      Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+      Object.keys(body).forEach(k => body[k] === undefined || body[k] === "" ? delete body[k] : undefined);
       const response = await fetch(`${process.env.EXA_BASE_URL ?? "https://api.exa.ai"}/search`, { method: "POST", headers: { "x-api-key": key, "content-type": "application/json" }, body: JSON.stringify(body), signal });
       const data: any = await response.json();
       if (!response.ok) return { content: [{ type: "text", text: `Exa HTTP ${response.status}: ${data?.message ?? data?.error ?? "request failed"}` }], isError: true, details: {} };
