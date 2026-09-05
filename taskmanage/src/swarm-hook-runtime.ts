@@ -14,7 +14,7 @@ export interface RuntimeEvent {
   scope?: string; subagent?: boolean; input?: unknown; output?: unknown;
   failed?: boolean; [key: string]: unknown;
 }
-export interface HookDecision { action?: HookAction; message?: string; metadata?: Record<string, unknown> }
+export interface HookDecision { action?: HookAction; message?: string; output?: string; metadata?: Record<string, unknown> }
 export interface RuntimeHookContext { sessionId?: string; isSubagent?: boolean; [key: string]: unknown }
 export interface HookDefinition {
   name: string; priority?: number; events?: string[]; scopes?: string[];
@@ -77,7 +77,7 @@ export class HookRuntimeCoordinator {
   }
   auditSnapshot() { return this.audit.map(a => ({ ...a })); }
   private record(audit: HookAudit) { this.audit.push(audit); this.audit = this.audit.slice(-this.options.auditLimit); this.optionsIn.appendAudit?.(audit); }
-  async dispatch(payload: Record<string, unknown>, eventName?: string, context: RuntimeHookContext = {}): Promise<{ event: RuntimeEvent; blocked?: HookAudit }> {
+  async dispatch(payload: Record<string, unknown>, eventName?: string, context: RuntimeHookContext = {}): Promise<{ event: RuntimeEvent; blocked?: HookAudit; hookOutput?: string }> {
     let event = normalizeHookEvent(payload, eventName);
     if (event.phase === "after") {
       const id = event.toolCallId;
@@ -86,6 +86,7 @@ export class HookRuntimeCoordinator {
       if (id) this.terminal.add(id);
     }
     let routed = context;
+    let hookOutput: string | undefined;
     if (event.subagent && this.optionsIn.routeSubagent) routed = await this.optionsIn.routeSubagent(event, context);
     for (const hook of this.definitions) {
       if (hook.phase && hook.phase !== event.phase || hook.events && !hook.events.some(p => matches(p, event.type)) || hook.scopes && (!event.scope || !hook.scopes.includes(event.scope)) || hook.filter && !hook.filter(event)) {
@@ -98,7 +99,8 @@ export class HookRuntimeCoordinator {
       try {
         const decision = await withTimeout(Promise.resolve(hook.handle(event, { ...routed, isSubagent: event.subagent || routed.isSubagent })), hook.timeoutMs ?? this.options.defaultTimeoutMs);
         if (decision?.action === "block") { const a = { hook: hook.name, event: event.type, outcome: "blocked" as const, at: new Date().toISOString(), message: decision.message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a); return { event, blocked: a }; }
-        this.record({ hook: hook.name, event: event.type, outcome: "executed", at: new Date().toISOString(), message: decision?.message, tool: event.tool, toolCallId: event.toolCallId });
+        hookOutput = decision?.output;
+        this.record({ hook: hook.name, event: event.type, outcome: "executed", at: new Date().toISOString(), message: decision?.message ?? decision?.output, tool: event.tool, toolCallId: event.toolCallId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error), outcome = hook.failureMode === "block" ? "blocked" : "failed";
         const a = { hook: hook.name, event: event.type, outcome: outcome as "blocked" | "failed", at: new Date().toISOString(), message, tool: event.tool, toolCallId: event.toolCallId }; this.record(a);
@@ -106,7 +108,7 @@ export class HookRuntimeCoordinator {
         if (hook.failureMode === "throw") throw error;
       }
     }
-    return { event };
+    return { event, hookOutput };
   }
 }
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

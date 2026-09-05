@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HookRuntimeCoordinator, type HookDefinition } from "../../taskmanage/src/swarm-hook-runtime.ts";
+import { registerHook } from "../hook-state.ts";
 
 interface DiskHook { type?: string; command?: string; prompt?: string; timeout?: number; }
 interface Matcher { matcher?: string; hooks?: DiskHook[]; }
@@ -14,7 +15,17 @@ function loadFiles(cwd: string, home: string) {
 function parseTimeout(value: unknown){if(typeof value!=="string")return 60000;const m=value.match(/^(\d+)(ms|s|m)?$/);if(!m)return 60000;return Number(m[1])*(m[2]==="m"?60000:m[2]==="s"?1000:1);}
 export function registerDiskHooks(pi: any, options: { cwd?: string; home?: string; defaultTimeoutMs?: number } = {}) {
   const cwd=options.cwd??process.cwd(), home=options.home??process.env.HOME??cwd; const runtime=new HookRuntimeCoordinator({defaultTimeoutMs:options.defaultTimeoutMs??60000,appendAudit:a=>pi.appendEntry?.("pi-swarm-disk-hook-audit",a)});
-  for(const h of loadFiles(cwd,home)) runtime.register({name:h.name,priority:h.priority,events:h.events,phase:h.events.some((e:string)=>e.includes("after"))?"after":"before",timeoutMs:h.timeoutMs,failureMode:"block",filter:(event:any)=>!h.matcher||h.matcher==="*"||new RegExp(`^(?:${h.matcher})$`).test(String(event.tool??event.toolName??"")),handle:async event=>{const child=await import("node:child_process");await new Promise<void>((resolve,reject)=>{const p=child.exec(h.command,{cwd,timeout:h.timeoutMs,maxBuffer:1024*1024},(error:any,stdout:string)=>{if(h.action==="block_on_output"&&stdout) return reject(new Error("disk hook blocked (output)")); if(h.action==="block_exit2"&&error?.code===2)return reject(new Error("disk hook blocked (exit 2)")); if(h.action==="block"&&error)return reject(new Error(`disk hook failed (${error.code??"unknown"})`)); if(error&&h.action!=="continue")return reject(error); resolve();}); p.stdin?.end(JSON.stringify(event)); p.on("error",reject);});}});
-  pi.on?.("tool_call",(e:any,c:any)=>runtime.dispatch(e,"tool_call",c)); pi.on?.("tool_result",(e:any,c:any)=>runtime.dispatch(e,"tool_result",c)); pi.on?.("session_start",(e:any,c:any)=>runtime.dispatch(e,"session_start",c)); pi.registerCommand?.("swarm-disk-hooks",{description:"Reload and inspect disk hooks",handler:async(_a:string,ctx:any)=>ctx.ui?.notify?.(`Loaded ${loadFiles(cwd,home).length} disk hooks`,"info")}); return runtime;
+  for(const h of loadFiles(cwd,home)) runtime.register({name:h.name,priority:h.priority,events:h.events,timeoutMs:h.timeoutMs,failureMode:"block",filter:(event:any)=>!h.matcher||h.matcher==="*"||new RegExp(`^(?:${h.matcher})$`).test(String(event.tool??event.toolName??"")),handle:async event=>{const child=await import("node:child_process");return await new Promise<any>((resolve,reject)=>{const p=child.exec(h.command,{cwd,timeout:h.timeoutMs,maxBuffer:1024*1024},(error:any,stdout:string,stderr:string)=>{if(h.action==="block_on_output"&&stdout) return reject(new Error("disk hook blocked (output)")); if(h.action==="block_exit2"&&error?.code===2)return reject(new Error("disk hook blocked (exit 2)")); if(h.action==="block"&&error)return reject(new Error(`disk hook failed (${error.code??"unknown"})`)); if(error&&h.action!=="continue")return reject(error); resolve({output:[stdout,stderr].filter(Boolean).join("\n").trim()||undefined});}); p.stdin?.on("error",()=>{/* hook exited before consuming the event */}); p.stdin?.end(JSON.stringify(event)); p.on("error",reject);});}});
+  const dispatch = async (eventName: string, e: any, c: any, canBlock = false) => {
+    const result = await runtime.dispatch(e, eventName, c);
+    return canBlock && result.blocked ? { block: true, reason: result.blocked.message ?? `Blocked by ${result.blocked.hook}`, hookOutput: result.hookOutput } : result.hookOutput ? { hookOutput: result.hookOutput } : undefined;
+  };
+  registerHook(pi, "disk-hooks", "tool_call", (e:any,c:any) => dispatch("tool_call", e, c, true));
+  registerHook(pi, "disk-hooks", "tool_result", (e:any,c:any) => dispatch("tool_result", e, c));
+  registerHook(pi, "disk-hooks", "session_start", (e:any,c:any) => dispatch("session_start", e, c));
+  registerHook(pi, "disk-hooks", "session_shutdown", (e:any,c:any) => dispatch("session_shutdown", e, c));
+  registerHook(pi, "disk-hooks", "before_agent_start", (e:any,c:any) => dispatch("user.prompt_submit", e, c));
+  registerHook(pi, "disk-hooks", "session_before_compact", (e:any,c:any) => dispatch("compact.before", e, c));
+  pi.registerCommand?.("swarm-disk-hooks",{description:"Reload and inspect disk hooks",handler:async(_a:string,ctx:any)=>ctx.ui?.notify?.(`Loaded ${loadFiles(cwd,home).length} disk hooks`,"info")}); return runtime;
 }
 export default function swarmDiskHooksExtension(pi:any){return registerDiskHooks(pi);}

@@ -3,6 +3,16 @@ import { TaskManager, registerTaskManage, taskManageSchema, type JournalEntry } 
 
 const create = (key:string, subject=key) => ({key,op:"create" as const,subject});
 describe("TaskManage", () => {
+  it("resets state when a new session has no task snapshot", () => {
+    const entries: JournalEntry[] = [];
+    const manager = new TaskManager(entry => entries.push(entry));
+    manager.execute({ operations: [create("old")] });
+    manager.rehydrate(entries);
+    expect(manager.snapshot().tasks).toHaveLength(1);
+    manager.rehydrate([]);
+    expect(manager.snapshot().tasks).toEqual([]);
+  });
+
   it("rejects unknown batch fields and emits an auditable operation event", () => {
     const events: any[] = [];
     const m = new TaskManager(undefined, event => events.push(event));

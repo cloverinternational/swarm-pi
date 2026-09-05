@@ -76,64 +76,166 @@ const style = (theme: RenderTheme, color: string, value: string) =>
   theme.fg ? theme.fg(color, value) : value;
 const bold = (theme: RenderTheme, value: string) => theme.bold ? theme.bold(value) : value;
 const dim = (theme: RenderTheme, value: string) => theme.dim ? theme.dim(value) : value;
-const fit = (value: string, width: number) => {
-  const max = Math.max(12, width - 6);
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+const characterWidth = (character: string) => {
+  const point = character.codePointAt(0) ?? 0;
+  if (/\p{Mark}/u.test(character)) return 0;
+  return point >= 0x1100 && (
+    point <= 0x115f || point === 0x2329 || point === 0x232a ||
+    point >= 0x2e80 && point <= 0xa4cf ||
+    point >= 0xac00 && point <= 0xd7a3 ||
+    point >= 0xf900 && point <= 0xfaff ||
+    point >= 0xfe10 && point <= 0xfe6f ||
+    point >= 0xff00 && point <= 0xff60 ||
+    point >= 0x1f300 && point <= 0x1faff
+  ) ? 2 : 1;
 };
-const component = (lines: string[]): RenderComponent => ({
-  render: (width: number) => lines.map(line => fit(line, width)),
+const displayWidth = (value: string) => Array.from(value).reduce((width, character) => width + characterWidth(character), 0);
+const truncate = (value: string, width: number) => {
+  if (width <= 0) return "";
+  if (displayWidth(value) <= width) return value;
+  const limit = Math.max(0, width - 1);
+  let used = 0;
+  let result = "";
+  for (const character of value) {
+    const next = characterWidth(character);
+    if (used + next > limit) break;
+    result += character;
+    used += next;
+  }
+  return `${result}…`;
+};
+const component = (lines: string[] | ((width: number) => string[])): RenderComponent => ({
+  render: (width: number) => typeof lines === "function" ? lines(width) : lines,
 });
 
-function operationLabel(operation: Operation): string {
-  const verb = operation.op === "create" ? "Create" :
-    operation.op === "update" ? "Update" :
-    operation.op === "get" ? "Inspect" : "List";
-  const subject = operation.subject ?? (typeof operation.taskId === "string" ? `#${operation.taskId}` : "");
-  return subject ? `${verb} ${subject}` : verb;
+type RenderTask = {
+  id?: string;
+  subject?: string;
+  content?: string;
+  status?: Status;
+  active?: boolean;
+  category?: Category;
+  parent_id?: string;
+  depends_on?: string[];
+};
+
+function taskRows(batch: Batch): { tasks: RenderTask[]; errors: string[] } {
+  const order: string[] = [];
+  const tasks = new Map<string, RenderTask>();
+  const errors: string[] = [];
+  let anonymous = 0;
+  for (const result of batch.results) {
+    if (result.error) {
+      errors.push(result.error.message || "Task update failed");
+      continue;
+    }
+    if (result.status !== "succeeded" || !isObj(result.data)) continue;
+    const data = result.data as { task?: RenderTask; tasks?: RenderTask[] };
+    const values = data.task ? [data.task] : Array.isArray(data.tasks) ? data.tasks : [];
+    for (const task of values) {
+      const key = task.id || `__anonymous_${anonymous++}`;
+      if (!tasks.has(key)) order.push(key);
+      tasks.set(key, task);
+    }
+  }
+  return { tasks: order.map(key => tasks.get(key)!), errors };
+}
+
+function renderTaskResult(task: RenderTask, first: boolean, width: number, theme: RenderTheme): string {
+  const prefix = first ? "    ⎿ " : "      ";
+  const rawIcon = task.status === "completed" ? "✓" : task.status === "in_progress" ? "◉" :
+    task.status === "pending" ? "○" : "?";
+  if (width <= displayWidth(prefix) + 2) return truncate(`${prefix}${rawIcon}`, width);
+  const icon = task.status === "completed" ? style(theme, "success", rawIcon) :
+    task.status === "in_progress" ? style(theme, "warning", rawIcon) : dim(theme, rawIcon);
+  const label = `${task.id ? `#${task.id} ` : ""}${task.content || task.subject || "Untitled task"}`;
+  const available = Math.max(0, width - displayWidth(prefix) - 2);
+  const text = truncate(label, available);
+  const rendered = task.status === "in_progress" ? bold(theme, text) :
+    task.status === "completed" ? dim(theme, text) : text;
+  return `${prefix}${icon} ${rendered}`;
 }
 
 export const taskManageRenderers = {
-  renderCall(args: Params, theme: RenderTheme): RenderComponent {
-    const operations = Array.isArray(args?.operations) ? args.operations : [];
-    const mode = args?.mode === "atomic" ? "atomic · rollback on failure" : "sequential · commit successful prefix";
-    const preview = operations.slice(0, 3).map(operation => `  · ${operationLabel(operation)}`);
-    if (operations.length > 3) preview.push(`  · +${operations.length - 3} more`);
-    return component([
-      `${bold(theme, "▸ TaskManage")}  ${dim(theme, mode)}`,
-      ...preview,
-    ]);
+  renderCall(_args: Params, theme: RenderTheme): RenderComponent {
+    return component([`${bold(theme, "TaskManage")} ${dim(theme, "Managing tasks…")}`]);
   },
 
   renderResult(result: any, options: RenderContext, theme: RenderTheme): RenderComponent {
+    if (options.isPartial)
+      return component([`    ${dim(theme, "⎿")} ${dim(theme, "Managing tasks…")}`]);
     let batch: Batch | undefined;
     const text = result?.content?.find((item: any) => item?.type === "text")?.text;
     try { batch = typeof text === "string" ? JSON.parse(text) : undefined; } catch { /* use fallback */ }
     if (!batch || !Array.isArray(batch.results)) {
-      return component([`${style(theme, "error", "✗ TaskManage")}  ${dim(theme, "Unable to read result")}`]);
+      const message = options.isError ? "Task update failed" : "Task state unavailable";
+      return component([`    ${dim(theme, "⎿")} ${options.isError ? style(theme, "error", message) : dim(theme, message)}`]);
     }
 
-    const succeeded = batch.results.filter(item => item.status === "succeeded").length;
-    const failed = batch.results.filter(item => item.status === "failed").length;
-    const skipped = batch.results.filter(item => item.status === "skipped").length;
-    const isFailure = options.isError || batch.status === "failed";
-    const statusColor = isFailure ? "error" : batch.status === "partial" ? "warning" : "success";
-    const icon = isFailure ? "✗" : batch.status === "partial" ? "!" : "✓";
-    const lines = [
-      `${style(theme, statusColor, `${icon} TaskManage`)}  ${bold(theme, batch.status.toUpperCase())}  ${dim(theme, `${succeeded} succeeded · ${failed} failed · ${skipped} skipped`)}`,
-    ];
-    for (const item of batch.results.slice(0, options.expanded ? 50 : 6)) {
-      const itemIcon = item.status === "succeeded" ? "✓" : item.status === "failed" ? "✗" : "·";
-      const data = item.data as { task?: { subject?: string }; tasks?: unknown[] } | undefined;
-      const task = data?.task;
-      const taskCount = Array.isArray(data?.tasks) ? `${data.tasks.length} task(s)` : undefined;
-      const detail = item.error?.message ?? task?.subject ?? taskCount ?? (item.op === "list" ? "tasks updated" : item.op);
-      lines.push(`  ${style(theme, item.status === "failed" ? "error" : "muted", itemIcon)} ${item.key}  ${dim(theme, detail)}`);
-    }
-    if (batch.results.length > 6 && !options.expanded)
-      lines.push(`  ${dim(theme, `+${batch.results.length - 6} more · expand to inspect`)}`);
-    return component(lines);
+    const rows = taskRows(batch);
+    if (!rows.tasks.length && !rows.errors.length)
+      return component([`    ${dim(theme, "⎿")} ${dim(theme, "Tasks unchanged")}`]);
+    return component(width => {
+      const lines = rows.tasks.map((task, index) => renderTaskResult(task, index === 0, width, theme));
+      for (const message of rows.errors) {
+        const prefix = lines.length ? "      " : "    ⎿ ";
+        lines.push(`${prefix}${style(theme, "error", "✗")} ${truncate(message, Math.max(0, width - displayWidth(prefix) - 2))}`);
+      }
+      return lines;
+    });
   },
 };
+
+function categoryLetter(category?: Category): string {
+  return category === "researching" ? "R" : category === "planning" ? "P" :
+    category === "verifying" ? "V" : category === "debugging" ? "D" :
+    category === "documenting" ? "X" : "A";
+}
+
+function orderedOpenTasks(tasks: Task[]): Array<{ task: Task; depth: number }> {
+  const open = tasks.filter(task => task.status === "pending" || task.status === "in_progress");
+  const visible = new Set(open.map(task => task.id));
+  const children = new Map<string, Task[]>();
+  const roots: Task[] = [];
+  for (const task of open) {
+    if (task.parentTaskId && visible.has(task.parentTaskId))
+      children.set(task.parentTaskId, [...(children.get(task.parentTaskId) ?? []), task]);
+    else roots.push(task);
+  }
+  const rank = (task: Task) => task.active ? 0 : task.status === "in_progress" ? 1 : 2;
+  const output: Array<{ task: Task; depth: number }> = [];
+  const visit = (task: Task, depth: number) => {
+    output.push({ task, depth });
+    for (const child of (children.get(task.id) ?? []).sort((a, b) => rank(a) - rank(b))) visit(child, depth + 1);
+  };
+  for (const task of roots.sort((a, b) => rank(a) - rank(b))) visit(task, 0);
+  return output;
+}
+
+export function taskWidgetRenderer(tasks: Task[], theme: RenderTheme): RenderComponent {
+  const current = tasks.filter(task => task.status !== "deleted");
+  const completed = current.filter(task => task.status === "completed").length;
+  const ordered = orderedOpenTasks(current);
+  return component(width => {
+    const header = `Tasks   ${completed}/${current.length} done`;
+    const lines = [displayWidth(header) > width ? truncate(header, width) :
+      `${bold(theme, dim(theme, "Tasks"))}${dim(theme, `   ${completed}/${current.length} done`)}`];
+    for (const { task, depth } of ordered) {
+      const blocked = task.dependsOn.some(id => current.find(candidate => candidate.id === id)?.status !== "completed");
+      const glyph = task.active ? style(theme, "accent", "●") :
+        task.status === "in_progress" ? style(theme, "accent", "◐") :
+        blocked ? style(theme, "warning", "⧗") : dim(theme, "○");
+      const indent = `  ${"  ".repeat(depth)}`;
+      const badge = dim(theme, `[${categoryLetter(task.category)}]`);
+      const available = Math.max(0, width - displayWidth(indent) - 6);
+      const subject = truncate(task.subject, available);
+      lines.push(width <= displayWidth(indent) + 6
+        ? truncate(`${indent}${task.active ? "●" : task.status === "in_progress" ? "◐" : blocked ? "⧗" : "○"} [${categoryLetter(task.category)}]`, width)
+        : `${indent}${glyph} ${badge} ${task.active ? bold(theme, subject) : dim(theme, subject)}`);
+    }
+    return lines;
+  });
+}
 
 export class TaskManager {
   private state: State = { nextId: 1, tasks: [], keys: {} };
@@ -159,6 +261,9 @@ export class TaskManager {
     this.state = restored;
   }
   rehydrate(entries: readonly JournalEntry[]): void {
+    this.state = { nextId: 1, tasks: [], keys: {} };
+    this.revision = 0;
+    this.stats = { mutations: 0, reads: 0, failures: 0, lastRevision: 0 };
     const replayed = replayLatest<State>(entries, "pi-swarm-task-state", (value) => value as State);
     if (replayed) {
       this.restore(replayed.state);
@@ -472,17 +577,35 @@ export class TaskManager {
   }
 }
 
-export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]}})=>void): void }, presentation = taskManageRenderers): TaskManager {
+export function registerTaskManage(pi: { registerTool(tool: unknown): void; appendEntry(type: string, data: unknown): void; on(event: string, handler: (event: unknown, ctx: {sessionManager?: {getEntries(): readonly unknown[]; getBranch?(): readonly unknown[]}; ui?: {setWidget(key: string, content: unknown): void}})=>void): void }, presentation = taskManageRenderers): TaskManager {
   const manager = new TaskManager(
     entry => pi.appendEntry(entry.type, entry.data),
     event => pi.appendEntry(event.type, event.data),
   );
-  pi.on("session_start", (_event, ctx) => manager.rehydrate((ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]));
+  let ui: {setWidget(key: string, content: unknown): void} | undefined;
+  const refreshWidget = (ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
+    ui = ctx?.ui ?? ui;
+    if (!ui) return;
+    const tasks = manager.snapshot().tasks.filter(task => task.status !== "deleted");
+    const visible = tasks.some(task => task.status === "pending" || task.status === "in_progress");
+    ui.setWidget("swarm-tasks", visible
+      ? ((_tui: unknown, theme: RenderTheme) => taskWidgetRenderer(tasks, theme))
+      : undefined);
+  };
+  pi.on("session_start", (_event, ctx) => {
+    manager.rehydrate((ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries() ?? []) as JournalEntry[]);
+    refreshWidget(ctx);
+  });
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
+    renderShell: "self",
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
     promptGuidelines: ["Use TaskManage for multi-step work and keep exactly one active task when working sequentially."],
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
-    execute: async (_id:string, params:Params, signal?:AbortSignal) => ({ content:[{type:"text",text:JSON.stringify(manager.execute(params,signal))}] }) });
+    execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
+      const batch = manager.execute(params,signal);
+      refreshWidget(ctx);
+      return { content:[{type:"text",text:JSON.stringify(batch)}] };
+    } });
   return manager;
 }

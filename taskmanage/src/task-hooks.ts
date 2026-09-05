@@ -14,7 +14,7 @@ export interface HookConfig {
   isSubagent?: (ctx: unknown) => boolean;
 }
 export interface HookEvent { type: string; [key: string]: any }
-export interface HookContext { sessionManager?: { getEntries(): readonly unknown[] }; [key: string]: any }
+export interface HookContext { sessionManager?: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] }; [key: string]: any }
 export interface HookPi {
   on(event: string, handler: (event: HookEvent, ctx: HookContext) => any): void;
   appendEntry(type: string, data?: unknown): void;
@@ -166,7 +166,7 @@ export class TaskHooksCoordinator {
   }
   on(event: HookEvent, ctx: HookContext = {}): any {
     if (event.type === "session_start") {
-      this.state = stateFrom(ctx.sessionManager?.getEntries?.() ?? []);
+      this.state = stateFrom(ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? []);
       if (ctx.sessionManager && typeof ctx.sessionManager === "object") {
         this.sessionOwner = ctx.sessionManager;
         const existing = sharedBySession.get(this.sessionOwner);

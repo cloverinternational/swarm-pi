@@ -49,9 +49,8 @@ export async function openThinkingSettings(pi: ThinkingAPI, ctx: ThinkingContext
 
 export default function swarmThinkingExtension(pi: ThinkingAPI): void {
   const open = (ctx: ThinkingContext) => openThinkingSettings(pi, ctx);
-  // Ctrl+T is a built-in Pi binding for collapsing/expanding thinking blocks.
-  // Use the adjacent chord for the level picker so Pi does not skip this
-  // extension because of a shortcut conflict.
+  // Ctrl+T is Pi's built-in thinking-block visibility toggle. Keep it
+  // reserved for Pi; use the adjacent chord for the Swarm level picker.
   pi.registerShortcut("ctrl+alt+t", {
     description: "Open thinking settings",
     handler: open,

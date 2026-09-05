@@ -68,6 +68,19 @@ describe("TaskManage hooks coordinator", () => {
     expect(restored.on(event("turn_end"))).toBeUndefined();
   });
 
+  it("rehydrates hook state from the active branch instead of a sibling", () => {
+    const p = pi();
+    const h = new TaskHooksCoordinator(new TaskManager(), p);
+    const sibling = [{ type: "pi-swarm-task-hooks", data: { turns: 99, nudgeBudget: 0 } }];
+    const branch = [{ type: "pi-swarm-task-hooks", data: { turns: 3, nudgeBudget: 1 } }];
+    h.on(event("session_start"), { sessionManager: {
+      getEntries: () => sibling,
+      getBranch: () => branch,
+    } });
+    h.on(event("session_shutdown"));
+    expect((p.entries.at(-1) as any).data).toMatchObject({ turns: 3, nudgeBudget: 1 });
+  });
+
   it("deduplicates Pi terminal events and rejects failed or partial batches", () => {
     const p = pi(), m = new TaskManager(), h = new TaskHooksCoordinator(m, p);
     const input = { operations: [{ key: "a", op: "create", subject: "work", status: "in_progress" }] };

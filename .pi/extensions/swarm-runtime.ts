@@ -4,19 +4,18 @@ import { AgentManager, registerAgents } from "../../agents/src/index.ts";
 import { MCPManager } from "../../mcp/src/index.ts";
 import { registerSwarmPrompt } from "./swarm-prompt.ts";
 
-const RUNTIME = Symbol.for("pi-swarm-runtime");
 type RuntimeState = { initialized: boolean; cwd: string; agents?: AgentManager; policy?: Policy; mcp?: MCPManager; };
+const runtimeByPi = new WeakMap<object, RuntimeState>();
 
 type Pi = any;
 
 /** Single integration boundary for the Pi-Swarm extensions. */
 export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: boolean; allowedTools?: string[]; allowedSkills?: string[]; allowMutation?: boolean; allowNetwork?: boolean } = {}): RuntimeState {
-  const root = globalThis as any;
-  const existing = root[RUNTIME] as RuntimeState | undefined;
-  if (existing?.initialized && existing.cwd === resolve(options.cwd ?? process.cwd())) return existing;
   const cwd = resolve(options.cwd ?? pi.getCwd?.() ?? process.cwd());
+  const existing = runtimeByPi.get(pi as object);
+  if (existing?.initialized && existing.cwd === cwd) return existing;
   const state: RuntimeState = { initialized: true, cwd };
-  root[RUNTIME] = state;
+  runtimeByPi.set(pi as object, state);
 
   // Establish prompt and resource policy before feature registration.
   registerSwarmPrompt(pi);

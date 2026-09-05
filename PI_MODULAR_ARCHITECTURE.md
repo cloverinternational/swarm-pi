@@ -119,21 +119,16 @@ prompt instruction or UI confirmation.
 
 ### `swarm-tools`
 
-Ports the Swarm Forge catalog as Pi tools:
+Reuses Pi's native filesystem, search, edit, and shell tools. Do not register a
+parallel `forge_*` catalog: duplicate read/write/grep/bash tools clutter the
+model-facing surface, drift from Pi's maintained contracts, and create a second
+authorization path.
 
-- `forge.read`;
-- `forge.write`;
-- `forge.patch`;
-- `bash` / background execution;
-- task/todo management;
-- history/conversation access;
-- subagent/delegate operations;
-- optional web/MCP/vault tools.
-
-Each definition contains a TypeBox schema, execution function, progress updates,
-and custom rendering. Tool names should be namespaced where collision with Pi
-builtins is possible. Registration belongs in `pi.registerTool`; activation is
-controlled by `pi.setActiveTools`.
+Swarm-specific tools remain appropriate only where Pi has no native equivalent,
+including task management, history/conversation access, subagent operations,
+and optional MCP/vault capabilities. Their definitions use typed schemas,
+progress updates, and custom rendering, and activation remains controlled by
+`pi.setActiveTools`.
 
 Tool registration is not authorization. `swarm-policy` remains the mandatory
 pre-execution gate.

@@ -4,6 +4,7 @@ import {
   type HookConfig,
   registerInteractionTools,
 } from "../../taskmanage/src/index.ts";
+import "../hook-state.ts";
 
 /**
  * Minimal structural subset of Pi's ExtensionAPI used by TaskManage.
@@ -44,7 +45,6 @@ export function registerTaskManageExtension(
   const hooks = registerTaskHooks(pi, manager, options);
   const interactions = registerInteractionTools(pi as any, { headless: options?.headless, timeoutMs: options?.interactionTimeoutMs });
   const result = { manager, hooks, interactions };
-  (globalThis as any).__piSwarmTaskManageRegistered = true;
   taskRuntimeByPi.set(owner, result);
   return result;
 }

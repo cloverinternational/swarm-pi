@@ -131,41 +131,11 @@ Evidence:
   `upstream/pi-mono/packages/coding-agent/docs/extensions.md:1251–1308`,
   `:1703–1710`, and `:1882–1888`.
 
-Recommended tool shape:
-
-```ts
-pi.registerTool({
-  name: "swarm_forge_read",
-  label: "Forge Read",
-  description: "Read a bounded file range in the authorized workspace.",
-  parameters: Type.Object({
-    path: Type.String(),
-    offset: Type.Optional(Type.Integer({ minimum: 1 })),
-    limit: Type.Optional(Type.Integer({ minimum: 1 })),
-  }),
-  async execute(toolCallId, params, signal, onUpdate, ctx) {
-    const decision = policy.authorize({
-      tool: "forge.read",
-      input: params,
-      cwd: ctx.cwd,
-    });
-    if (!decision.allowed) {
-      throw new Error(decision.reason);
-    }
-    return forgeRead(params, { signal, onUpdate });
-  },
-  renderCall(args, theme, context) {
-    return renderForgeReadCall(args, theme, context);
-  },
-  renderResult(result, options, theme, context) {
-    return renderForgeReadResult(result, options, theme, context);
-  },
-});
-```
-
-The policy check belongs in a shared module or hook as well as at the tool
-boundary for defense in depth. It must use one classifier, not separate
-implementations in every tool.
+Do not register renamed copies of Pi's built-in tools. Pi's native filesystem,
+search, edit, and shell tools are the canonical model-facing surface. Apply
+Swarm policy through the shared `tool_call` gate and improve native-tool
+rendering where needed instead of maintaining duplicate execution
+implementations.
 
 ### What Pi already gives us
 
@@ -299,8 +269,8 @@ swarm-prompt.ts
 swarm-policy.ts
   └─ shared classifier → allowlist + workspace + mutation decision
 
-swarm-tools.ts
-  └─ swarm_forge_read → native Pi ToolDefinition
+Pi native tools
+  └─ read/write/edit/search/bash → shared Swarm policy gate
 
 swarm-hooks.ts
   └─ tool_call/tool_result → central gate + audit event
