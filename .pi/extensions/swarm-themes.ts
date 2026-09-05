@@ -11,20 +11,11 @@ export default function swarmThemes(pi: any) {
     if (ctx.ui?.getAllThemes?.().some((t: any) => t.name === "swarm-swarmcode") && !process.env.PI_THEME) {
       ctx.ui.setTheme?.("swarm-swarmcode");
     }
-    ctx.ui?.setEditorComponent?.((tui: any, theme: any, keybindings: any) => {
-      class SwarmPromptEditor extends CustomEditor {
-        render(width: number): string[] {
-          const lines = super.render(width);
-          // Pi's editor keeps the prompt out of the submitted text. Prefix the
-          // visible first input row only, preserving autocomplete and history.
-          const row = lines.findIndex((line) => !line.includes("─") && (line.includes("\x1b[7m") || line.trim().length > 0));
-          if (row >= 0 && !lineHasSwarmPrompt(lines[row] ?? "")) {
-            lines[row] = truncateToWidth(`${theme.borderColor("> ")}${lines[row]}`, width);
-          }
-          return lines;
-        }
-      }
-      return new SwarmPromptEditor(tui, theme, keybindings);
-    });
+    // Do not replace Pi's editor component. The installed Pi/TUI build mounts
+    // CustomEditor through MouseRegion, and theme invalidation calls a child
+    // invalidate method that this extension cannot safely provide. Keeping
+    // Pi's native editor avoids breaking /reload and tool-row rendering.
+    // The Swarm prompt prefix is cosmetic and is intentionally disabled until
+    // the CustomEditor contract is version-pinned and tested.
   });
 }

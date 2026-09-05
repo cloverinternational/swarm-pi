@@ -41,7 +41,10 @@ export function registerTaskManageExtension(
   const owner = pi as object;
   const existing = taskRuntimeByPi.get(owner);
   if (existing) return existing;
-  const manager = registerTaskManage(pi);
+  const bridged: any[] = [];
+  const registrationPi = { ...pi, registerTool: (tool: unknown) => { bridged.push(tool); pi.registerTool(tool); } };
+  const manager = registerTaskManage(registrationPi);
+  (pi as any).codemodeTools = [...((pi as any).codemodeTools ?? []), ...bridged];
   const hooks = registerTaskHooks(pi, manager, options);
   const interactions = registerInteractionTools(pi as any, { headless: options?.headless, timeoutMs: options?.interactionTimeoutMs });
   const result = { manager, hooks, interactions };
