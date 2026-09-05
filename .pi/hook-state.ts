@@ -56,14 +56,10 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
   if ((event === "tool_call" || isPost) && info.tool) {
     const phase = isPost ? "post" : "pre";
     const marker = outcome === "blocked" ? "!" : outcome === "failed" ? "×" : "✓";
-    // appendEntry is durable but excluded from LLM context, exactly matching
-    // Swarm's local HookExecutionUpdate stream. The entry renderer owns TUI
-    // presentation; successful rows and hook output never become messages.
     const data = { ...record, hookName: displayHookName(group, event, payload), phase };
     // Custom messages render at the exact event position. The context
     // listener removes them before every provider request, so they remain
     // visible in the TUI but never become LLM context.
-    const marker = outcome === "blocked" ? "!" : outcome === "failed" ? "×" : "✓";
     shared.pi.sendMessage?.({ customType: "swarm-hook-event", content: `${marker} [${phase}-hook] ${data.hookName}`, display: true, details: data }, { triggerTurn: false });
   }
   return record;

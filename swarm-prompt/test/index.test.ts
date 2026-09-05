@@ -63,7 +63,12 @@ describe("vendored SwarmForge prompt", () => {
 
   it("does not read upstream sources at runtime", () => {
     const loader = readFileSync(fileURLToPath(new URL("../src/index.ts", import.meta.url)), "utf8");
-    expect(loader).not.toContain("upstream/");
-    expect(loader).not.toMatch(/\.go\b/);
+    // UPSTREAM_SOURCE records provenance as a string, so the mention of
+    // upstream/ is expected. What must not happen is opening it: every path
+    // the loader resolves has to live under ../assets/.
+    const resolved = [...loader.matchAll(/new URL\(\s*`([^`]*)`/g)].map((match) => match[1]);
+    expect(resolved.length).toBeGreaterThan(0);
+    for (const path of resolved) expect(path).toMatch(/^\.\.\/assets\//);
+    expect(loader).not.toMatch(/readFileSync\([^)]*upstream/);
   });
 });

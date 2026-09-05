@@ -1,19 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
+import { swarmForgeSystemPrompt } from "../../swarm-prompt/src/index.ts";
 
-const swarmPromptDocument = new URL("../../upstream/swarm-sdk/swarm-tui/docs/FORGE_SWARM_SYSTEM_PROMPT.md", import.meta.url);
-
-/** Extract the canonical prompt body from the upstream documentation verbatim. */
-export function extractCanonicalSwarmPrompt(markdown: string): string {
-  const match = markdown.match(/```text\n([\s\S]*?)\n```/);
-  if (!match) throw new Error("Canonical Forge Swarm system prompt fenced block was not found");
-  return match[1];
-}
-
-export const canonicalSwarmSystemPrompt = extractCanonicalSwarmPrompt(
-  readFileSync(swarmPromptDocument, "utf8"),
-);
+/**
+ * The canonical prompt now comes from the vendored @pi-swarm/swarm-prompt
+ * package. It previously came from docs/FORGE_SWARM_SYSTEM_PROMPT.md, which
+ * lags the Go source badly -- the doc is roughly half the size and still names
+ * the retired task_create/task_update tools.
+ */
+export const canonicalSwarmSystemPrompt = swarmForgeSystemPrompt;
 
 /** A named system prompt shown by the /sp picker. */
 export interface SystemPromptPreset {

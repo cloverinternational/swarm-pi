@@ -3,53 +3,14 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { registerHook } from "../hook-state.ts";
 
-const promptSource = new URL("../../upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go", import.meta.url);
+import {
+  UPSTREAM_SOURCE,
+  forgeSwarmSystemPrompt,
+  swarmForgeSystemPrompt,
+} from "../../swarm-prompt/src/index.ts";
 
-/** Evaluate the raw/quoted string concatenation used by Swarm's Go prompt constants. */
-export function extractGoStringConstant(source: string, name: string): string {
-  const marker = `const ${name} =`;
-  let cursor = source.indexOf(marker);
-  if (cursor < 0) throw new Error(`Swarm prompt constant ${name} was not found`);
-  cursor += marker.length;
-  const fragments: string[] = [];
+export { UPSTREAM_SOURCE, forgeSwarmSystemPrompt, swarmForgeSystemPrompt };
 
-  while (cursor < source.length) {
-    while (/\s/.test(source[cursor] ?? "")) cursor++;
-    if (source[cursor] === "+") { cursor++; continue; }
-    if (source[cursor] === "`") {
-      const end = source.indexOf("`", cursor + 1);
-      if (end < 0) throw new Error(`Swarm prompt constant ${name} has an unterminated raw string`);
-      fragments.push(source.slice(cursor + 1, end));
-      cursor = end + 1;
-      continue;
-    }
-    if (source[cursor] === "\"") {
-      let end = cursor + 1;
-      for (; end < source.length; end++) {
-        if (source[end] === "\\") { end++; continue; }
-        if (source[end] === "\"") break;
-      }
-      if (end >= source.length) throw new Error(`Swarm prompt constant ${name} has an unterminated quoted string`);
-      fragments.push(JSON.parse(source.slice(cursor, end + 1)));
-      cursor = end + 1;
-      continue;
-    }
-    const identifier = source.slice(cursor).match(/^[A-Za-z_][A-Za-z0-9_]*/)?.[0];
-    if (identifier) {
-      fragments.push(extractGoStringConstant(source, identifier));
-      cursor += identifier.length;
-      continue;
-    }
-    break;
-  }
-
-  if (!fragments.length) throw new Error(`Swarm prompt constant ${name} does not contain a string expression`);
-  return fragments.join("");
-}
-
-const promptDocument = readFileSync(promptSource, "utf8");
-export const forgeSwarmSystemPrompt = extractGoStringConstant(promptDocument, "forgeSwarmSystemPrompt");
-export const swarmForgeSystemPrompt = extractGoStringConstant(promptDocument, "swarmForgeSystemPrompt");
 const forgeMarker = "<!-- pi-swarm:forge-prompt:v1 -->";
 
 export interface PromptExtensionEvent {
@@ -126,7 +87,7 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
   const sections: string[] = [];
   const add = (section: string, content: string, origin: string, ref = "") => { const value = clean(content); if (!value) return; sections.push(value); provenance.push({ section, origin, ref, hash: hash(value), bytes: Buffer.byteLength(value) }); };
   add("workspace", workspaceBlock(workspace), "runtime", "workspace");
-  add("forge", `${forgeMarker}\n${swarmForgeSystemPrompt}`, "forge", "upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go#swarmForgeSystemPrompt");
+  add("forge", `${forgeMarker}\n${swarmForgeSystemPrompt}`, "forge", `${UPSTREAM_SOURCE}#swarmForgeSystemPrompt`);
   add("user", options.userPrompt || "", "configuration", "userPrompt");
 
   const tools = (options.tools || []).map((tool) => typeof tool === "string" ? { name: tool, guidance: options.toolGuidance?.[tool] || "" } : tool).filter((tool) => tool.guidance);

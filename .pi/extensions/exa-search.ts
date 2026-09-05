@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 function exaKey() {
@@ -38,35 +38,69 @@ export default function exaSearchExtension(pi: any) {
       if (!key) return { content: [{ type: "text", text: "EXA_API_KEY is not configured" }], isError: true, details: {} };
       const query = String(params.query ?? "").trim();
       if (!query) return { content: [{ type: "text", text: "query is required" }], isError: true, details: {} };
-      if (params.allowed_domains?.length && params.excluded_domains?.length) return { content: [{ type: "text", text: "allowed_domains and excluded_domains are mutually exclusive" }], isError: true, details: {} };
+      // Prefer the allow-list if both are supplied. This keeps permissive model
+      // tool calls from becoming provider validation failures.
+      const allowedDomains = Array.isArray(params.allowed_domains) ? params.allowed_domains.filter((v: any) => typeof v === "string" && v.trim()) : [];
+      const excludedDomains = allowedDomains.length ? [] : (Array.isArray(params.excluded_domains) ? params.excluded_domains.filter((v: any) => typeof v === "string" && v.trim()) : []);
       // The tool caller may supply optional fields as empty strings. Exa rejects
       // empty date strings ("Invalid date format"), so normalize those away and
       // validate dates before sending the request.
-      const optionalDate = (value: unknown, name: string) => {
-        if (value == null || String(value).trim() === "") return undefined;
-        const date = String(value).trim();
-        if (!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(date) || Number.isNaN(Date.parse(date))) {
-          throw new Error(`${name} must be a valid ISO 8601 date`);
-        }
-        return date;
+      const optionalDate = (value: unknown) => {
+        const date = String(value ?? "").trim();
+        // Invalid optional filters are ignored: the query remains useful and
+        // the agent never gets stuck on Exa's strict date parser.
+        return /^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(date) && !Number.isNaN(Date.parse(date)) ? date : undefined;
       };
-      let startPublishedDate: string | undefined;
-      let endPublishedDate: string | undefined;
-      try {
-        startPublishedDate = optionalDate(params.start_published_date, "start_published_date");
-        endPublishedDate = optionalDate(params.end_published_date, "end_published_date");
-      } catch (error) {
-        return { content: [{ type: "text", text: (error as Error).message }], isError: true, details: {} };
-      }
+      const startPublishedDate = optionalDate(params.start_published_date);
+      const endPublishedDate = optionalDate(params.end_published_date);
       const body: any = {
         query, type: params.search_type ?? "auto", numResults: params.num_results ?? 10,
-        category: params.category, includeDomains: params.allowed_domains, excludeDomains: params.excluded_domains,
+        category: params.category,
+        includeDomains: allowedDomains.length ? allowedDomains : undefined,
+        excludeDomains: excludedDomains.length ? excludedDomains : undefined,
         startPublishedDate, endPublishedDate,
         contents: { highlights: { numSentences: 5, highlightsPerUrl: 3, query } },
       };
-      Object.keys(body).forEach(k => body[k] === undefined || body[k] === "" ? delete body[k] : undefined);
-      const response = await fetch(`${process.env.EXA_BASE_URL ?? "https://api.exa.ai"}/search`, { method: "POST", headers: { "x-api-key": key, "content-type": "application/json" }, body: JSON.stringify(body), signal });
-      const data: any = await response.json();
+      const clean = (value: any): any => {
+        if (Array.isArray(value)) return value.length ? value : undefined;
+        if (value && typeof value === "object") {
+          for (const k of Object.keys(value)) value[k] = clean(value[k]);
+          return value;
+        }
+        return value === "" || value == null ? undefined : value;
+      };
+      clean(body);
+      const endpoint = `${process.env.EXA_BASE_URL ?? "https://api.exa.ai"}/search`;
+      const request = (payload: any) => fetch(endpoint, {
+        method: "POST",
+        headers: { "x-api-key": key, "content-type": "application/json" },
+        body: JSON.stringify(payload), signal,
+      });
+      let response: Response;
+      let raw = "";
+      try {
+        response = await request(body);
+        raw = await response.text();
+      } catch (error) {
+        return { content: [{ type: "text", text: `Exa request failed: ${(error as Error).message}` }], isError: true, details: {} };
+      }
+      let data: any;
+      try { data = raw ? JSON.parse(raw) : {}; } catch { data = { error: raw }; }
+      // Defense in depth: older callers or a stale loaded extension may still
+      // pass date fields that Exa rejects. Retry once with dates removed rather
+      // than exposing a recoverable provider validation error to the agent.
+      if (!response.ok && response.status === 400 && /date|ISO 8601|published/i.test(raw)) {
+        const fallback = { ...body };
+        delete fallback.startPublishedDate;
+        delete fallback.endPublishedDate;
+        try {
+          response = await request(fallback);
+          raw = await response.text();
+          try { data = raw ? JSON.parse(raw) : {}; } catch { data = { error: raw }; }
+        } catch (error) {
+          return { content: [{ type: "text", text: `Exa request failed: ${(error as Error).message}` }], isError: true, details: {} };
+        }
+      }
       if (!response.ok) return { content: [{ type: "text", text: `Exa HTTP ${response.status}: ${data?.message ?? data?.error ?? "request failed"}` }], isError: true, details: {} };
       const results = (data.results ?? []).map((r: any) => ({ title: r.title, url: r.url, author: r.author, publishedDate: r.publishedDate, highlights: r.highlights ?? [], summary: r.summary }));
       return { content: [{ type: "text", text: JSON.stringify({ query, backend: "exa", searchType: data.searchType, results, costDollars: data.costDollars }, null, 2) }], details: { requestId: data.requestId, resultCount: results.length } };

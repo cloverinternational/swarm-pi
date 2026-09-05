@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:packages",
-    "build:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core skills schedule; do npm --prefix $d run build || exit $?; done",
+    "build:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core swarm-prompt skills schedule; do npm --prefix $d run build || exit $?; done",
     "test": "npm run test:packages",
-    "test:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core skills schedule; do npm --prefix $d test || exit $?; done",
+    "test:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core swarm-prompt skills schedule; do npm --prefix $d test || exit $?; done",
     "dogfood": "npm run build && npm test"
   }
 }

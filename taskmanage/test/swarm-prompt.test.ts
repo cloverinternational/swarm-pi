@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleForgePrompt, comparePromptGolden, extractGoStringConstant, forgeSwarmSystemPrompt, swarmForgeSystemPrompt } from "../../.pi/extensions/swarm-prompt";
+import { assembleForgePrompt, comparePromptGolden, forgeSwarmSystemPrompt, swarmForgeSystemPrompt } from "../../.pi/extensions/swarm-prompt";
 
 describe("Forge prompt assembly", () => {
-  it("loads the exact live Forge constant rather than the stale documentation copy", () => {
-    const source = readFileSync(new URL("../../upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go", import.meta.url), "utf8");
-    expect(forgeSwarmSystemPrompt).toBe(extractGoStringConstant(source, "forgeSwarmSystemPrompt"));
+  it("serves the live Forge constant rather than the stale documentation copy", () => {
+    // Byte-for-byte parity against system_prompt.go is asserted in
+    // swarm-prompt/test; this guards the content the extension exposes.
     expect(forgeSwarmSystemPrompt).toContain("You have access to TaskManage");
     expect(forgeSwarmSystemPrompt).toContain("## Planning and Requirement Discovery");
     expect(forgeSwarmSystemPrompt).not.toContain("task_create");
-    expect(swarmForgeSystemPrompt).toBe(extractGoStringConstant(source, "swarmForgeSystemPrompt"));
+    expect(swarmForgeSystemPrompt.startsWith(forgeSwarmSystemPrompt)).toBe(true);
     expect(swarmForgeSystemPrompt).toContain("# Delegation (the Task tool)");
   });
 
