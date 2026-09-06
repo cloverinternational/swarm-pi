@@ -49,8 +49,9 @@ describe("schedule tools", () => {
     await scheduler.start();
     const tools = new Map<string, any>();
     registerScheduleTools({ registerTool: (tool: any) => tools.set(tool.name, tool) }, scheduler);
-    const result = await tools.get("ScheduleWakeup").execute("call", { prompt: "x", delay: "-1m" });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("invalid delay");
+    // Pi flags a tool result as failed only when execute() throws; the
+    // message is Swarm's sdkerr-wrapped text (schedule_wakeup.go).
+    await expect(tools.get("ScheduleWakeup").execute("call", { prompt: "x", delay: "-1m" })).rejects.toThrow(/^Error executing ScheduleWakeup: invalid delay format: -1m \(error_id=err_[0-9a-f]{20}\)$/);
+    await expect(tools.get("CronDelete").execute("call", { id: "nope" })).rejects.toThrow("Error executing CronDelete: task 'nope' not found (error_id=");
   });
 });

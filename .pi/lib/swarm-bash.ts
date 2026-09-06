@@ -44,7 +44,7 @@ export const estimateTokens = (s: string) => (s === "" ? 0 : Math.max(1, Math.fl
 const truncateTokens = (s: string, maxTokens: number) => Buffer.from(s).subarray(0, maxTokens * 4).toString("utf8");
 
 /** Go %q for attribute values (ASCII-safe subset; Swarm attrs are ints/bools/short labels). */
-function goQuote(value: string): string {
+export function goQuote(value: string): string {
   let out = "\"";
   for (const ch of value) {
     const code = ch.codePointAt(0)!;

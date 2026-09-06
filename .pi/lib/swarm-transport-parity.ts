@@ -100,7 +100,8 @@ export function alignProviderPayload<T extends Record<string, unknown>>(payload:
   // which runs after the `context` event, so collapse again here where every
   // message already carries its provider role.
   const collapsed = Array.isArray(payload.messages) ? collapseUserText(payload.messages as MessageLike[]) : undefined;
-  const withMessages = collapsed ? { ...payload, messages: collapsed } : payload;
+  const trimmed = trimWireContent((collapsed ?? payload.messages ?? []) as MessageLike[]);
+  const withMessages = trimmed ? { ...payload, messages: trimmed } : collapsed ? { ...payload, messages: collapsed } : payload;
   // Canonical Swarm schemas replace the permissive validator schemas the
   // tools register with (see swarm-tool-surface.ts PERMISSIVE_PARAMETERS).
   const withCanonical = overlaySwarmToolSchemas(withMessages) ?? withMessages;
@@ -168,6 +169,61 @@ export function collapseUserText(messages: readonly MessageLike[]): MessageLike[
 
 function isTextBlock(block: unknown): block is TextBlock {
   return Boolean(block) && typeof block === "object" && (block as TextBlock).type === "text" && typeof (block as TextBlock).text === "string";
+}
+
+/**
+ * Swarm's OpenAI translation (internal/provider/openai/translate.go
+ * TranslateMessage + stream.go reasoning-as-text fallback), applied to Pi's
+ * session messages before the provider sees them:
+ *  - assistant thinking is never sent as `reasoning_content` (non-GLM); when
+ *    the turn produced no text at all, the reasoning IS the text content.
+ *  - tool-result image blocks are dropped (tool messages are plain strings).
+ *  - an unknown tool yields "Error: Tool '<name>' not found" (agent_tools.go)
+ *    where pi-agent-core says "Tool <name> not found".
+ * Returns undefined when nothing changed.
+ */
+export function swarmMessageShapes(messages: readonly MessageLike[], knownTools: ReadonlySet<string>): MessageLike[] | undefined {
+  let changed = false;
+  const next = messages.map(message => {
+    if (message.role === "assistant" && Array.isArray(message.content)) {
+      const blocks = message.content as any[];
+      const thinking = blocks.filter(b => b?.type === "thinking" && typeof b.thinking === "string");
+      if (thinking.length === 0) return message;
+      const hasText = blocks.some(b => isTextBlock(b) && b.text.trim() !== "");
+      const rest = blocks.filter(b => b?.type !== "thinking");
+      changed = true;
+      return { ...message, content: hasText ? rest : [{ type: "text", text: thinking.map(b => b.thinking).join("") }, ...rest.filter(b => !isTextBlock(b))] };
+    }
+    if (message.role === "toolResult" && Array.isArray(message.content)) {
+      const blocks = message.content as any[];
+      const name = typeof (message as any).toolName === "string" ? (message as any).toolName : "";
+      let out = blocks;
+      if (blocks.some(b => b?.type === "image")) { out = blocks.filter(b => b?.type !== "image"); changed = true; }
+      if (name && !knownTools.has(name) && out.length === 1 && isTextBlock(out[0]) && out[0].text === `Tool ${name} not found`) {
+        out = [{ type: "text", text: `Error: Tool '${name}' not found` }]; changed = true;
+      }
+      return out === blocks ? message : { ...message, content: out };
+    }
+    return message;
+  });
+  return changed ? next : undefined;
+}
+
+/**
+ * translate.go: `content := strings.TrimSpace(msg.Content)`; an assistant
+ * message left with no content and no tool calls becomes "[Response truncated]".
+ */
+export function trimWireContent(messages: readonly MessageLike[]): MessageLike[] | undefined {
+  let changed = false;
+  const next = messages.map(message => {
+    if ((message.role !== "user" && message.role !== "assistant") || typeof message.content !== "string") return message;
+    let content = message.content.trim();
+    if (message.role === "assistant" && content === "" && !Array.isArray((message as any).tool_calls)) content = "[Response truncated]";
+    if (content === message.content) return message;
+    changed = true;
+    return { ...message, content };
+  });
+  return changed ? next : undefined;
 }
 
 // ---------------------------------------------------------------------------

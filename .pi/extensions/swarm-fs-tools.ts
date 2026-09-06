@@ -14,6 +14,12 @@ const error = (name: string, message: string): never => {
 export function registerSwarmFSTools(pi: Pi): void {
   if (registrations.has(pi as object)) return;
   registrations.add(pi as object);
+  // checkpoint.go SnapshotContext provenance, published by the transport
+  // parity extension (conversation id + the user turn as the model saw it).
+  const provenance = () => ({
+    conversationId: (globalThis as any)[Symbol.for("pi-swarm-conversation-id")] as string | undefined,
+    userMessage: (globalThis as any)[Symbol.for("pi-swarm-last-user-message")] as string | undefined,
+  });
   // Load eagerly so a missing/corrupt parity fixture fails extension startup.
   loadSwarmToolSurface();
   // Swarm's headless broker (--approval-mode auto) approves every file-read
@@ -28,7 +34,7 @@ export function registerSwarmFSTools(pi: Pi): void {
     name: "apply_patch", label: "apply_patch", description: "", parameters: {},
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
       try {
-        const text = await applyPatch(params?.input, { workspacePath: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), cwd: params?.cwd, signal });
+        const text = await applyPatch(params?.input, { workspacePath: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), cwd: params?.cwd, signal, ...provenance() });
         return { content: [{ type: "text", text }], details: {} };
       } catch (e) { return error("apply_patch", (e as Error).message); }
     },

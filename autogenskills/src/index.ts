@@ -557,7 +557,17 @@ export class AutoSkillManager {
     if (action === "history") {
       const headPath = join(this.config.dir, ".history", "heads", name);
       this.safePath(this.config.dir, `.history/heads/${name}`);
-      if (!existsSync(headPath)) return { revisions: [] };
+      if (!existsSync(headPath)) {
+        // history.go historySnapshot: with no recorded head, the live state
+        // is reported as a single synthetic "untracked" revision whose id is
+        // the sha256 of the canonical manifest (format 1, zero created_at,
+        // zero curator_meta). A package that does not exist is "absent".
+        if (!this.packageRoot(name)) {
+          const manifest = `{"format":${HISTORY_FORMAT},"skill":${JSON.stringify(name)},"action":"untracked","created_at":"0001-01-01T00:00:00Z","placement":"absent","curator_meta":{"state":"","last_used_at":"0001-01-01T00:00:00Z","created_at":"0001-01-01T00:00:00Z","pinned":false,"version":""}}`;
+          return { revisions: [{ id: this.hashBytes(manifest), action: "untracked", createdAt: "0001-01-01T00:00:00Z", placement: "absent", files: {}, blobs: {} }] };
+        }
+        return { revisions: [] };
+      }
       const revisions: Revision[] = [], seen = new Set<string>();
       let cursor = readFileSync(headPath, "utf8").trim();
       while (cursor) {

@@ -8,6 +8,54 @@ import { PERMISSIVE_PARAMETERS, applySwarmSurface, overlaySwarmToolSchemas } fro
 import { alignProviderPayload } from "../../.pi/lib/swarm-transport-parity.ts";
 import { SwarmSkillRegistry } from "../../.pi/lib/swarm-skill-registry.ts";
 import { readImage } from "../../.pi/lib/swarm-read-image.ts";
+import { swarmMessageShapes, trimWireContent } from "../../.pi/lib/swarm-transport-parity.ts";
+import { truncateSnapshotMessage } from "../../.pi/lib/swarm-apply-patch.ts";
+import { annoyedPublicTitle, annoyedResultXML, publishAnnoyedIssue } from "../../.pi/lib/swarm-annoyed-publish.ts";
+import { goLocalRFC3339 } from "../../schedule/src/tools.js";
+
+describe("OpenAI message shapes (translate.go, stream.go reasoning fallback)", () => {
+  it("turns reasoning-only assistant turns into text, drops thinking otherwise, strips tool images, renames unknown-tool errors", () => {
+    const known = new Set(["bash"]);
+    const shaped = swarmMessageShapes([
+      { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }, { type: "toolCall", id: "1", name: "bash", arguments: {} }] },
+      { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }, { type: "text", text: "Let me look." }] },
+      { role: "toolResult", toolName: "Read", content: [{ type: "image", data: "x", mimeType: "image/png" }, { type: "text", text: "Image file: a.png" }] },
+      { role: "toolResult", toolName: "nope", content: [{ type: "text", text: "Tool nope not found" }] },
+      { role: "toolResult", toolName: "bash", content: [{ type: "text", text: "Tool bash not found" }] },
+    ], known)!;
+    expect(shaped[0].content).toEqual([{ type: "text", text: "hmm" }, { type: "toolCall", id: "1", name: "bash", arguments: {} }]);
+    expect(shaped[1].content).toEqual([{ type: "text", text: "Let me look." }]);
+    expect(shaped[2].content).toEqual([{ type: "text", text: "Image file: a.png" }]);
+    expect(shaped[3].content).toEqual([{ type: "text", text: "Error: Tool 'nope' not found" }]);
+    expect(shaped[4].content).toEqual([{ type: "text", text: "Tool bash not found" }]);
+    expect(swarmMessageShapes([{ role: "user", content: "x" }], known)).toBeUndefined();
+  });
+  it("trims wire content and substitutes [Response truncated]", () => {
+    const trimmed = trimWireContent([{ role: "user", content: " hi\n" }, { role: "assistant", content: "  " }, { role: "assistant", content: "", tool_calls: [{}] }, { role: "tool", content: " keep " }])!;
+    expect(trimmed.map(m => m.content)).toEqual(["hi", "[Response truncated]", "", " keep "]);
+    expect(trimWireContent([{ role: "user", content: "hi" }])).toBeUndefined();
+  });
+});
+
+describe("checkpoint.go / schedule / annoyed formats", () => {
+  it("byte-truncates snapshot provenance like Go slicing", () => {
+    expect(truncateSnapshotMessage("x".repeat(300))).toHaveLength(300);
+    expect(truncateSnapshotMessage("x".repeat(301))).toBe("x".repeat(297) + "...");
+  });
+  it("formats local RFC3339 like time.Format(time.RFC3339)", () => {
+    expect(goLocalRFC3339(new Date(2026, 8, 5, 22, 7, 57))).toMatch(/^2026-09-05T22:07:57(Z|[+-]\d\d:\d\d)$/);
+  });
+  it("renders the annoyed XML result and publishes through gh api with Go's error text", async () => {
+    expect(annoyedResultXML("it broke", "https://github.com/o/r/issues/1", "o/r", "low")).toBe('<result status="ok" severity="low">\n  <issue><![CDATA[it broke]]></issue>\n  <publication_url><![CDATA[https://github.com/o/r/issues/1]]></publication_url>\n  <repository><![CDATA[o/r]]></repository>\n</result>');
+    expect(annoyedPublicTitle("  many   words ", "high")).toBe("[HIGH] many words");
+    const calls: any[] = [];
+    const ok = await publishAnnoyedIssue("o/r", "t", "b", async (args, stdin) => { calls.push([args, stdin]); return { code: 0, signal: null, stdout: '{"html_url":"https://github.com/o/r/issues/7"}', stderr: "" }; });
+    expect(ok).toBe("https://github.com/o/r/issues/7");
+    expect(calls[0]).toEqual([["api", "--method", "POST", "repos/o/r/issues", "--input", "-"], '{"title":"t","body":"b"}']);
+    await expect(publishAnnoyedIssue("o/r", "t", "b", async () => ({ code: 4, signal: null, stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login\n" }))).rejects.toThrow("annoyed: GitHub API POST repos/o/r/issues: exit status 4: To get started with GitHub CLI, please run:  gh auth login");
+    await expect(publishAnnoyedIssue("o/r", "t", "b", async () => ({ code: 0, signal: null, stdout: '{"html_url":"http://x/issues/1"}', stderr: "" }))).rejects.toThrow("annoyed: gh returned invalid issue URL");
+  });
+});
 
 describe("TaskManage.Validate port (task_manage.go parseTaskOperations)", () => {
   const v = swarmValidateTaskManageParams;

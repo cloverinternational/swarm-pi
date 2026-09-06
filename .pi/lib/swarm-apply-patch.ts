@@ -13,12 +13,23 @@ import {
 } from "node:fs";
 import { dirname, basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { goQuote } from "./swarm-bash.ts";
 
 export type PatchKind = "add" | "update" | "delete";
 export interface PatchChunk { ctxOffset: number; del: string[]; ins: string[] }
 export interface PatchHunk { anchors: string[]; context: string[]; chunks: PatchChunk[]; eof: boolean }
 export interface PatchOp { kind: PatchKind; path: string; moveTo: string; addBody: string; hunks: PatchHunk[] }
-export interface ApplyPatchOptions { workspacePath?: string; cwd?: string; signal?: AbortSignal }
+export interface ApplyPatchOptions {
+  workspacePath?: string; cwd?: string; signal?: AbortSignal;
+  /** checkpoint.go SnapshotContext provenance: tools.OwnerConversationID / UserMessageFromContext. */
+  conversationId?: string; userMessage?: string;
+}
+
+/** checkpoint.go: `if len(msg) > 300 { msg = msg[:297] + "..." }` — byte slicing. */
+export function truncateSnapshotMessage(message: string): string {
+  const bytes = Buffer.from(message, "utf8");
+  return bytes.length > 300 ? bytes.subarray(0, 297).toString("utf8") + "..." : message;
+}
 
 const BEGIN = "*** Begin Patch", END = "*** End Patch", EOF = "*** End of File";
 const UPDATE = "*** Update File: ", DELETE = "*** Delete File: ", ADD = "*** Add File: ", MOVE = "*** Move to: ";
@@ -306,7 +317,7 @@ function atomicWrite(path: string, content: string, mode: number) {
 
 let snapshotCounter = 0n;
 const snapshotName = (path: string) => `${basename(path)}-${BigInt(Date.now()) * 1_000_000n + process.hrtime.bigint() % 1_000_000n + snapshotCounter++}.bak`;
-function snapshot(workspace: string, path: string, existed: boolean, content: string) {
+function snapshot(workspace: string, path: string, existed: boolean, content: string, provenance: { conversationId?: string; userMessage?: string } = {}) {
   if (!workspace) return;
   const dir = join(workspace, ".swarm", "snapshots");
   mkdirSync(dir, { recursive: true, mode: 0o700 }); chmodSync(dir, 0o700);
@@ -315,8 +326,18 @@ function snapshot(workspace: string, path: string, existed: boolean, content: st
   const name = snapshotName(path), bak = join(dir, name);
   writeFileSync(bak, content, { mode: 0o600 });
   writeFileSync(bak.slice(0, -4) + ".ctx.json", JSON.stringify({
-    tool_name: "apply_patch", file_path: path, timestamp: new Date().toISOString(), ...(existed ? {} : { new_file: true }),
+    ...(provenance.conversationId ? { conversation_id: provenance.conversationId } : {}),
+    tool_name: "apply_patch", file_path: path,
+    timestamp: goNowUTC(),
+    ...(provenance.userMessage ? { user_message: truncateSnapshotMessage(provenance.userMessage) } : {}),
+    ...(existed ? {} : { new_file: true }),
   }, null, 2), { mode: 0o644 });
+}
+/** time.Now().UTC().Format(time.RFC3339Nano): trailing zeros trimmed. */
+function goNowUTC(): string {
+  const iso = new Date().toISOString();
+  const frac = (iso.slice(20, 23) + String(Number(process.hrtime.bigint() % 1_000_000n)).padStart(6, "0")).replace(/0+$/, "");
+  return `${iso.slice(0, 19)}${frac ? `.${frac}` : ""}Z`;
 }
 
 /** Preflight and transactionally apply every operation in a V4A patch. */
@@ -367,7 +388,7 @@ export async function applyPatch(input: string, options: ApplyPatchOptions = {})
   }
   const seen = new Set<string>();
   for (const ch of changes) {
-    const take = (p: string, existed: boolean, body: string) => { if (!seen.has(p)) { snapshot(workspace, p, existed, body); seen.add(p); } };
+    const take = (p: string, existed: boolean, body: string) => { if (!seen.has(p)) { snapshot(workspace, p, existed, body, options); seen.add(p); } };
     if (ch.op.kind === "add") take(ch.absDest, ch.destExisted, ch.destOldContent);
     else { take(ch.absPath, true, ch.oldContent); if (ch.op.kind === "update" && ch.absDest !== ch.absPath) take(ch.absDest, ch.destExisted, ch.destOldContent); }
   }
@@ -421,7 +442,7 @@ export async function undoFile(path: string, workspacePath = process.cwd()): Pro
   const parts: string[] = [];
   if (ctx?.tool_name) parts.push(`tool: ${ctx.tool_name}`);
   if (ctx?.conversation_id) parts.push(`conversation: ${ctx.conversation_id}`);
-  if (ctx?.user_message) parts.push(`because: ${JSON.stringify(ctx.user_message)}`);
+  if (ctx?.user_message) parts.push(`because: ${goQuote(ctx.user_message)}`);
   if (ctx?.timestamp) parts.push(`at: ${ctx.timestamp}`);
   rmSync(bak, { force: true }); rmSync(ctxPath, { force: true });
   return message + (parts.length ? `\n${parts.join(" | ")}` : "");

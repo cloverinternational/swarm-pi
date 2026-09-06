@@ -111,6 +111,33 @@ export const TOOL_SCRIPTS = {
     { id: "call_t27", tool: "bash", args: {} },
     { id: "call_t28", tool: "Read", args: {} },
   ],
+  // Message shapes the base scripts never exercise: assistant text next to a
+  // tool call, reasoning_content, two tool calls in one assistant message,
+  // an unknown tool name, an image Read (vision content in a tool result),
+  // and the remaining tools' happy/error paths.
+  shapes: [
+    { id: "call_s1", text: "Let me look.", command: "printf one" },
+    { id: "call_s2", reasoning: "thinking about it", command: "printf two" },
+    { id: "call_s3", calls: [{ id: "call_s3a", tool: "bash", args: { command: "printf a" } }, { id: "call_s3b", tool: "bash", args: { command: "printf b" } }] },
+    { id: "call_s4", tool: "nonexistent_tool", args: { x: 1 } },
+    { id: "call_s5", command: "printf '\\x89PNG\\r\\n\\x1a\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\x01\\0\\0\\0\\x01\\x08\\x06\\0\\0\\0\\x1f\\x15\\xc4\\x89\\0\\0\\0\\rIDATx\\x9cc\\xf8\\x0f\\0\\x01\\x01\\x01\\0\\x18\\xdd\\x8d\\xb4\\0\\0\\0\\0IEND\\xaeB\\x60\\x82' > .parity-probe.png" },
+    { id: "call_s6", tool: "Read", args: { file_path: ".parity-probe.png" } },
+    { id: "call_s7", command: "rm -f .parity-probe.png" },
+    { id: "call_s8", tool: "CronCreate", args: { prompt: "parity tick", cron: "*/5 * * * *", recurring: true } },
+    { id: "call_s9", tool: "CronList", args: {} },
+    { id: "call_s10", tool: "CronDelete", args: { id: "nope" } },
+    { id: "call_s11", tool: "ScheduleWakeup", args: { prompt: "later", delay: "5m" } },
+    { id: "call_s12", tool: "ScheduleWakeup", args: { prompt: "later", delay: "bogus" } },
+    { id: "call_s13", tool: "HistoryGet", args: { conversation_id: "does-not-exist" } },
+    { id: "call_s14", tool: "vault_exec", args: { credentialId: "nope", command: "true" } },
+    { id: "call_s15", tool: "vault_add", args: { id: "k", kind: "api_key", secret: "s" } },
+    { id: "call_s16", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Add File: .parity-mv.txt\n+x\n*** End Patch" } },
+    { id: "call_s17", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Update File: .parity-mv.txt\n*** Move to: .parity-mv2.txt\n@@\n-x\n+y\n*** End Patch" } },
+    { id: "call_s18", tool: "Undo", args: { path: ".parity-mv2.txt" } },
+    { id: "call_s19", command: "rm -f .parity-mv.txt .parity-mv2.txt" },
+    { id: "call_s20", tool: "annoyed", args: { issue: "parity probe issue", category: "other", severity: "low", observed: "o", expected: "e" } },
+    { id: "call_s21", tool: "SkillManage", args: { action: "history", name: "does-not-exist" } },
+  ],
 };
 export const expectedPrimaryRequests = (scenario = "default") => TOOL_SCRIPTS[scenario].length + 1;
 export const EXPECTED_PRIMARY_REQUESTS = expectedPrimaryRequests("default");
@@ -146,7 +173,12 @@ export function canonicalizeRequest(request) {
           .replace(/(Fingerprint: ")[0-9a-f]{32}(")/g, "$1<fingerprint>$2")
           // Task timestamps (RFC3339Nano) and bash spill files are per-run.
           .replace(/"(created_at|updated_at|completed_at)":"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
-          .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt");
+          .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
+          .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
+          .replace(/"fire_time": ?"[^"]+"/g, '"fire_time":"<ts>"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
+          .replace(/conversation: \d{8}-\d{6}-[a-z0-9]{6}/g, "conversation: <id>")
+          .replace(/ \| at: \d{4}-\d\d-\d\dT[^ ]+Z/g, " | at: <ts>")
+          .replace(/annoyed: GitHub API POST [^\n]*/g, "annoyed: GitHub API POST <gh>");
       }
       return value;
     }
@@ -189,7 +221,14 @@ export function wireFingerprint(rawText) {
     .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
     .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2")
     .replace(/\\"(created_at|updated_at|completed_at)\\":\\"\d{4}-\d\d-\d\dT[^\\"]+\\"/g, '\\"$1\\":\\"<ts>\\"')
-    .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt");
+    .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
+    .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
+    .replace(/\\"fire_time\\": ?\\"[^\\"]+\\"/g, '\\"fire_time\\":\\"<ts>\\"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
+    .replace(/conversation: \d{8}-\d{6}-[a-z0-9]{6}/g, "conversation: <id>")
+    .replace(/ \| at: \d{4}-\d\d-\d\dT[^ \\]+Z/g, " | at: <ts>")
+    // gh's stderr depends on the host's auth state; both sides run the same
+    // gh binary, but the sanitized detail may differ in whitespace.
+    .replace(/annoyed: GitHub API POST [^"]*?(?= \(error_id=)/g, "annoyed: GitHub API POST <gh>");
 }
 
 export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
@@ -354,17 +393,17 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
     // carries the success envelope and the "Error executing bash" envelope
     // respectively, so both result shapes are compared on the wire.
     const toolResults = Array.isArray(body.messages) ? body.messages.filter(message => message?.role === "tool").length : 0;
-    const step = script[toolResults];
-    const stepTool = step?.tool ?? "bash";
-    if (step && (body.tools ?? []).some(tool => tool?.function?.name === stepTool)) {
+    // Steps are indexed by completed tool CALLS (a parallel step consumes
+    // one index per call) so multi-call steps line up on both runtimes.
+    let consumed = 0, step;
+    for (const candidate of script) { if (consumed >= toolResults) { step = candidate; break; } consumed += candidate.calls?.length ?? 1; }
+    const calls = step ? (step.calls ?? [{ id: step.id, tool: step.tool ?? "bash", args: step.args ?? { command: step.command, ...(step.cwd ? { cwd: step.cwd } : {}), ...(step.description ? { description: step.description } : {}), ...(step.timeout_seconds ? { timeout_seconds: step.timeout_seconds } : {}) } }]) : [];
+    if (step && consumed === toolResults && (body.tools ?? []).length > 0) {
+      if (step.reasoning) emit(openAIChunk(body.model, { role: "assistant", reasoning_content: step.reasoning }));
+      if (step.text) emit(openAIChunk(body.model, { role: "assistant", content: step.text }));
       emit(openAIChunk(body.model, {
         role: "assistant",
-        tool_calls: [{
-          index: 0,
-          id: step.id,
-          type: "function",
-          function: { name: stepTool, arguments: JSON.stringify(step.args ?? { command: step.command, ...(step.cwd ? { cwd: step.cwd } : {}), ...(step.description ? { description: step.description } : {}), ...(step.timeout_seconds ? { timeout_seconds: step.timeout_seconds } : {}) }) },
-        }],
+        tool_calls: calls.map((call, index) => ({ index, id: call.id, type: "function", function: { name: call.tool, arguments: JSON.stringify(call.args) } })),
       }));
       emit(openAIChunk(body.model, {}, "tool_calls"));
     } else {
