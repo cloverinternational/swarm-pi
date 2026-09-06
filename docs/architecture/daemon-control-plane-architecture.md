@@ -8,12 +8,12 @@ design contract, not an implementation plan disguised as source code.
 
 The repository already has the right small pieces, but they are host-local:
 
-- `schedule/src` is a deterministic scheduler with an injected `PromptSink`.
+- `packages/tools/schedule/src` is a deterministic scheduler with an injected `PromptSink`.
   It validates five-field cron, supports recurring/one-shot jobs, uses an
   atomic JSON store at `.swarm/scheduled_tasks.json`, serializes mutations, and
   delivers prompts asynchronously. Its `agentId` is routing metadata, not an
   agent process or durable execution lease.
-- `.pi/extensions/schedule.ts` binds that scheduler to one Pi runtime through
+- `.pi/extensions/30-tools/schedule.ts` binds that scheduler to one Pi runtime through
   `sendUserMessage(..., { deliverAs: "followUp" })`. It starts on extension
   load and stops on `session_shutdown`; it must not become the daemon.
 - `taskmanage` is a Pi journal adapter for the upstream task contract. It
@@ -24,7 +24,7 @@ The repository already has the right small pieces, but they are host-local:
 - `runtime-contracts` already supplies the appropriate neutral vocabulary:
   stable IDs, normalized events, policy context/capabilities, typed outcomes,
   audit records, and persistence interfaces.
-- `runtime-contracts/README.md`, `runtime-contracts`, `swarm-core`, and the
+- `packages/runtime/runtime-contracts/README.md`, `runtime-contracts`, `swarm-core`, and the
   existing modular Pi architecture explicitly keep provider credentials,
   execution, sandboxing, and durable host state outside the extension layer.
 - The upstream Go scheduler has two delivery modes: enqueue a prompt into an
@@ -327,11 +327,11 @@ redaction.
 
 ## References audited
 
-- `schedule/src/{cron,index,scheduler,store,tools,types}.ts`
-- `.pi/extensions/schedule.ts`
+- `packages/tools/schedule/src/{cron,index,scheduler,store,tools,types}.ts`
+- `.pi/extensions/30-tools/schedule.ts`
 - `docs/reference/taskmanage-reference-contract.md`,
-  `docs/reference/taskmanage-workflows.md`, and `taskmanage/src/task-manage.ts`
-- `runtime-contracts/README.md`
+  `docs/reference/taskmanage-workflows.md`, and `packages/tools/taskmanage/src/task-manage.ts`
+- `packages/runtime/runtime-contracts/README.md`
 - `docs/architecture/modular-pi-architecture.md`,
   `docs/reference/pi-missing-tools-and-ecosystem.md`
 - `vendor/swarm-sdk/internal/tools/builtin/{cron_scheduler,schedule_wakeup}.go`

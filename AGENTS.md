@@ -14,7 +14,7 @@ architecture notes, and commands below still describe the repository.
 5. [Package boundaries](#package-boundaries)
 6. [Change contract](#change-contract)
 7. [Validation](#validation)
-8. [Safety and upstream policy](#safety-and-upstream-policy)
+8. [Safety and vendor policy](#safety-and-vendor-policy)
 9. [Capability locator](#capability-locator)
 10. [AGENTS.md discovery](#agentsmd-discovery)
 
@@ -31,13 +31,14 @@ The governing separation is:
 Pi AgentSession + SessionManager
         │ lifecycle, context, provider, native tools
         ▼
-Pi ExtensionAPI (.pi/extensions)
+Pi ExtensionAPI (.pi/extensions/<NN-layer>/)
         │ registration, gates, persistence, rendering
-        ├── prompt/context      ── swarm-prompt + swarm-context
-        ├── policy/governance   ── policy + hooks + upstream-readonly
-        ├── Swarm tools         ── agents, tasks, history, fs, bash, MCP, vault
-        ├── durable state       ── session entries + .swarm stores
-        └── presentation        ── renderers, widgets, status, footer, themes
+        ├── 00-runtime   ── integration boundary, hook engine, tool surface, parity
+        ├── 10-context   ── swarm-prompt + swarm-context, plan mode, skills
+        ├── 20-policy    ── policy + disk hooks + vendor read-only guard
+        ├── 30-tools     ── agents, tasks, history, fs, bash, MCP, vault, research
+        ├── 40-state     ── session entries + .swarm stores
+        └── 50-ui        ── renderers, widgets, status, footer, themes
 ```
 
 Semantic state, authorization, persistence, and cancellation must not depend
@@ -46,33 +47,56 @@ prose or rendered text when a lifecycle event or persisted entry is available.
 
 ## Repository map
 
+Everything is filed by one rule — *what does it primarily register or
+export?* — into six layers. The same six names are used for Pi extensions,
+shared libraries, their tests, and the npm packages, so a concept has one
+address in each tree.
+
+| # | Layer | Owns |
+| --- | --- | --- |
+| 00 | `runtime` | integration boundary, hook engine, tool surface/gating, transport parity, telemetry |
+| 10 | `context` | system prompt, prompt/context config, plan mode, thinking, skills, inspector |
+| 20 | `policy` | vendor read-only guard, disk hooks, sleep blocker, nudges |
+| 30 | `tools` | every `registerTool` surface: bash, fs, search, agents, tasks, schedule, history, vault, research, MCP, ask-user, annoyed, codemode |
+| 40 | `state` | durable session entries: memory history, conversation metadata |
+| 50 | `ui` | control panel, metrics widgets, themes, tools-status command |
+
 | Path | Purpose |
 | --- | --- |
-| `.pi/extensions/` | Pi entrypoints: tools, commands, lifecycle hooks, renderers, and adapters. |
-| `.pi/lib/` | Shared extension/runtime helpers; keep reusable behavior here. |
+| `.pi/extensions/<NN-layer>/` | Pi entrypoints. Each layer directory has a `package.json` whose `pi.extensions` list is the load order; layers load in numeric-prefix order. Pi discovers only one level deep, so a new extension must be added to its layer manifest. |
+| `.pi/lib/<layer>/` | Shared extension/runtime helpers, filed by the same rule. Hook infrastructure (`hook-state`, `hook-observations`, `hook-presenter`, `hook-render-bridge`) lives in `.pi/lib/runtime/`. |
+| `.pi/test/<layer>/` | Tests for `.pi` code. A test lives in the layer of the module it primarily imports. |
+| `.pi/config/` | Project configuration: `prompt-context.json`, `swarm-settings.json`, and the ignored `api-keys.json`. |
 | `.pi/themes/` | Local Pi theme definitions. |
-| `agents/` | Agent/delegate execution and runner adapters. |
-| `autogenskills/` | Generated-skill discovery and lifecycle integration. |
-| `mcp/` | MCP manifest and tool adapter package. |
-| `policy/` | Capability, workspace, mutation, network, and approval policy. |
-| `runtime-contracts/` | Stable runtime/lifecycle contracts and control-plane types. |
-| `schedule/` | Scheduling and recurring execution contracts. |
-| `skills/` | Skill loading, registry, and builtins. |
-| `swarm-contract/` | Shared Swarm protocol/schema contracts. |
-| `swarm-core/` | Shared runtime identity, state, and lifecycle implementation. |
-| `swarm-prompt/` | Prompt/context assembly and provenance. |
-| `taskmanage/` | Durable task management and task hooks/tools. |
-| `tests/` | Repository-level parity and integration tests. |
-| `tools/` | Probes, dogfood, and integration helpers. |
-| `docs/` and `*.md` | Architecture, parity, and operational design records. |
-| `bridges/`, `infra/` | Go bridge and local integration infrastructure. |
-| `upstream/` | Vendored read-only reference snapshots. |
-| `.swarm/`, `.pi/agent-sessions/` | Local/generated runtime state; never source of truth for implementation. |
+| `packages/<layer>/<name>/` | npm workspaces (`packages/*/*`). Directory name equals the npm name suffix: `packages/runtime/core` is `@pi-swarm/core`. |
+| `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces). |
+| `packages/context/` | `prompt` (canonical prompt assets and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
+| `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
+| `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
+| `tests/parity/` | Cross-runtime parity suite (`node --test`). |
+| `tools/parity/` | Pi ↔ Swarm probes, fixtures, generators; `plexus/` holds the A/B harness. |
+| `tools/integration/` | Postgres integration runner and cache dogfood. |
+| `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode. |
+| `docs/architecture/` | Living design descriptions. |
+| `docs/reference/` | Contracts, inventories, and operational references. |
+| `docs/parity/` | Parity plan, acceptance record, and VHS media. |
+| `docs/plans/{active,archive}/` | Plans still driving work; executed plans headed with what superseded them. |
+| `infra/` | `postgres/` compose stack, `bridges-go/` Go bridge. |
+| `vendor/` | Read-only references: `pi-mono`, `swarm-sdk`, and the `opencode` and `pi-ask-user` submodules. Never edited. |
+| `artifacts/` | Ignored. Probe outputs (`artifacts/parity/<run>/`), baselines, recordings. |
+| `.swarm/`, `.pi/agent-sessions/` | Ignored runtime state; never a source of truth for implementation. |
+
+Naming rules: directories and Markdown files are `kebab-case`; the only
+capitalised files are `AGENTS.md`, per-package `README.md`, and skill
+`SKILL.md`/reference files whose names are contractual. `dist/`,
+`node_modules/`, `artifacts/`, `.pi/agent-sessions/`, and `.swarm/` are never
+tracked. Generated files say so in their header and name their generator.
 
 ## How Pi is composed
 
-1. Pi loads project extensions from `.pi/extensions/` and exposes the
-   `ExtensionAPI`.
+1. Pi loads project extensions from `.pi/extensions/` one level deep: each
+   `<NN-layer>/package.json` declares its entry files under `pi.extensions`,
+   and Pi exposes the `ExtensionAPI` to each of them.
 2. Extensions register tools with `pi.registerTool`, commands with
    `pi.registerCommand`, shortcuts with `pi.registerShortcut`, and lifecycle
    handlers with `pi.on`.
@@ -90,7 +114,7 @@ prose or rendered text when a lifecycle event or persisted entry is available.
 
 Important UI locations:
 
-- **Bottom/footer:** `.pi/extensions/conversation-metrics.ts`; it calls
+- **Bottom/footer:** `.pi/extensions/50-ui/conversation-metrics.ts`; it calls
   `ctx.ui.setFooter(...)`, shows running/idle walltime and output tokens, and
   refreshes with `requestRender()`. Pi has exactly one footer slot, so this
   extension is its sole owner: other extensions must not call `setFooter`.
@@ -100,7 +124,7 @@ Important UI locations:
   factories must guard re-entry per `pi` instance (WeakSet/WeakMap), never with
   a process-wide boolean: `/reload` re-evaluates modules with a fresh `pi`
   while `globalThis` survives, and a boolean guard silently skips registration.
-- **Inline hook rows:** `.pi/hook-render-bridge.ts` and `.pi/hook-presenter.ts`.
+- **Inline hook rows:** `.pi/lib/runtime/hook-render-bridge.ts` and `.pi/lib/runtime/hook-presenter.ts`.
 - **Themes:** `.pi/themes/*.json`.
 
 The detailed design references are
@@ -112,7 +136,7 @@ documents when a change alters a documented architectural boundary.
 ## AGENTS.md discovery
 
 Pi-Swarm now discovers instructions hierarchically through
-`.pi/lib/swarm-context.ts` and injects them through `.pi/extensions/swarm-prompt.ts`.
+`.pi/lib/context/swarm-context.ts` and injects them through `.pi/extensions/10-context/swarm-prompt.ts`.
 The algorithm follows the current working directory's lexical path upward to
 the nearest `.git` directory or `.git` file, then loads one instruction file
 per directory from repository root to the working directory. If no Git root is
@@ -149,15 +173,17 @@ When changing discovery, preserve these invariants:
 
 ## Extension inventory
 
-| Area | Entrypoints |
+| Layer (load order) | Entrypoints |
 | --- | --- |
-| Runtime/prompt | `swarm-runtime`, `swarm-prompt`, `system-prompts`, `system-inspector` |
-| Tools/files | `swarm-bash`, `swarm-fs-tools`, `swarm-agent-tools`, `control-task-tools`, `taskmanage` |
-| Governance | `hooks`, `swarm-disk-hooks`, `upstream-readonly`, `swarm-plan-mode`, `annoyed/nudge` |
-| State/history | `conversation-metrics`, `memory-history`, `history-search`, `cache-telemetry` |
-| Skills/MCP/network | `swarm-skills`, `autogenskills`, `codemode`, `swarm-search`, `exa-search`, `research-tools` |
-| Control/integration | `control-panel`, `swarm-transport-parity`, `schedule`, `pi-ask-user`, `swarm-history-vault-tools`, `vault` |
-| UI | `conversation-metrics`, `swarm-themes`, `swarm-thinking`, `system-inspector` |
+| `00-runtime` | `cache-telemetry`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
+| `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
+| `20-policy` | `swarm-disk-hooks`, `upstream-readonly` |
+| `30-tools` | `annoyed/`, `codemode/`, `control-task-tools`, `exa-search`, `history-search`, `pi-ask-user`, `research-tools`, `schedule`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
+| `40-state` | `memory-history`, `swarm-conversation-metadata` |
+| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status` |
+
+The list in each layer's `package.json` is authoritative; this table mirrors
+it. Adding an extension means adding the file *and* its manifest entry.
 
 An extension is an adapter, not a second agent runtime. Prefer Pi native
 capabilities and shared policy over duplicate tools or parallel global state.
@@ -167,31 +193,31 @@ capabilities and shared policy over duplicate tools or parallel global state.
 Use this section when a user names a tool, skill, or hook. Start at the public
 Pi extension, then follow its imported package/library. Keep the extension
 thin: execution/domain logic belongs in the package or `.pi/lib/`, policy
-belongs in `policy`, and rendering belongs in the extension/render bridge.
+belongs in `packages/policy/policy`, and rendering belongs in the extension/render bridge.
 
 ### Tools by user-facing name
 
 | Tool(s) | Pi registration | Owning implementation / seam |
 | --- | --- | --- |
-| `bash` | `.pi/extensions/swarm-bash.ts` | `.pi/lib/swarm-bash.ts`; policy must gate execution separately. |
-| `Read`, `apply_patch`, `Undo` | `.pi/extensions/swarm-fs-tools.ts` | `.pi/lib/swarm-apply-patch.ts`, `.pi/lib/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. |
-| `Agent`, `AgentControl` | `.pi/extensions/swarm-agent-tools.ts` | `agents/src/index.ts`, `agents/src/general-agent-adapter.ts`; child runner/session isolation lives in `agents`. |
-| `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `.pi/extensions/taskmanage.ts`, `.pi/extensions/control-task-tools.ts` | `taskmanage/src/task-manage.ts`, `taskmanage/src/workflow.ts`, `taskmanage/src/persistence.ts`, `runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
-| `HistorySearch`, `HistoryGet` | `.pi/extensions/swarm-history-vault-tools.ts` and `.pi/extensions/history-search.ts` | `.pi/lib/swarm-history-tools.ts`; history search/read is deliberately read-only, bounded, and redacted. |
-| `memory_history` | `.pi/extensions/memory-history.ts` | Extension-local memory implementation; preserve workspace/session scoping and redaction. |
-| `skills_list`, `skill_view` | `.pi/extensions/swarm-skills.ts` | `skills/src/index.ts` and `.pi/lib/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
-| `Skill`, `SkillManage` | skill/autogen integration via `.pi/extensions/swarm-skills.ts`, `.pi/extensions/autogenskills.ts` | `autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
-| `websearch` | `.pi/extensions/exa-search.ts` | Exa HTTP adapter; credentials/config must remain outside tool arguments. |
-| `xai_web_search`, `x_search` | `.pi/extensions/swarm-search.ts` | xAI HTTP adapter; credential lookup is environment/vault mediated. |
-| `web_fetch`, `deepwiki`, `browser_get_page` | `.pi/extensions/research-tools.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
-| `codemode` | `.pi/extensions/codemode/index.ts` | `.pi/extensions/codemode/src/` interpreter, schema, OpenAPI, and runtime; it composes registered tools and must not bypass policy. |
-| `enter_plan_mode`, `exit_plan_mode` | `.pi/extensions/swarm-plan-mode.ts` | `.pi/lib/swarm-plan-mode.ts`; plan approval is separate from implementation. |
-| `control_plane_status` | `.pi/extensions/control-panel.ts` | `runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
-| `daemon_status`, goal/task/run tools | `.pi/extensions/swarm-runtime.ts`, `.pi/extensions/control-task-tools.ts` | `runtime-contracts/src/daemon-rpc.ts`, `goal-loop.ts`, `control-task.ts`; unavailable daemon must fail closed. |
-| `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `.pi/extensions/swarm-history-vault-tools.ts` | `.pi/lib/swarm-vault-tools.ts`; never expose secret values. |
-| `vault` | `.pi/extensions/vault.ts` | `.pi/lib/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
-| `mcp__<server>__<tool>` | `.pi/extensions/swarm-runtime.ts` / `mcp/src/index.ts` | `mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |
-| `annoyed` | `.pi/extensions/annoyed/index.ts` | `.pi/extensions/annoyed/store.ts`; issue persistence is separate from the nudge hook. |
+| `bash` | `.pi/extensions/30-tools/swarm-bash.ts` | `.pi/lib/tools/swarm-bash.ts`; policy must gate execution separately. |
+| `Read`, `apply_patch`, `Undo` | `.pi/extensions/30-tools/swarm-fs-tools.ts` | `.pi/lib/tools/swarm-apply-patch.ts`, `.pi/lib/tools/swarm-read-image.ts`; filesystem boundary is an explicit decoupling seam. |
+| `Agent`, `AgentControl` | `.pi/extensions/30-tools/swarm-agent-tools.ts` | `packages/tools/agents/src/index.ts`, `packages/tools/agents/src/general-agent-adapter.ts`; child runner/session isolation lives in `packages/tools/agents`. |
+| `task_create`, `task_update`, `task_get`, `task_list`, `task_delete`, `task_claim`, `task_note`, `task_plan`, `task_complete`, `task_reopen`, `task_block`, `task_unblock`, `task_focus`, `task_unfocus`, `task_status`, `run_status` | `.pi/extensions/30-tools/taskmanage.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/tools/taskmanage/src/task-manage.ts`, `packages/tools/taskmanage/src/workflow.ts`, `packages/tools/taskmanage/src/persistence.ts`, `packages/runtime/runtime-contracts/src/control-task.ts`; do not duplicate task state in extensions. |
+| `HistorySearch`, `HistoryGet` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` and `.pi/extensions/30-tools/history-search.ts` | `.pi/lib/tools/swarm-history-tools.ts`; history search/read is deliberately read-only, bounded, and redacted. |
+| `memory_history` | `.pi/extensions/40-state/memory-history.ts` | Extension-local memory implementation; preserve workspace/session scoping and redaction. |
+| `skills_list`, `skill_view` | `.pi/extensions/10-context/swarm-skills.ts` | `packages/context/skills/src/index.ts` and `.pi/lib/context/swarm-skill-registry.ts`; skill bodies/support files stay on disk. |
+| `Skill`, `SkillManage` | skill/autogen integration via `.pi/extensions/10-context/swarm-skills.ts`, `.pi/extensions/10-context/autogenskills.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
+| `websearch` | `.pi/extensions/30-tools/exa-search.ts` | Exa HTTP adapter; credentials/config must remain outside tool arguments. |
+| `xai_web_search`, `x_search` | `.pi/extensions/30-tools/swarm-search.ts` | xAI HTTP adapter; credential lookup is environment/vault mediated. |
+| `web_fetch`, `deepwiki`, `browser_get_page` | `.pi/extensions/30-tools/research-tools.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
+| `codemode` | `.pi/extensions/30-tools/codemode/index.ts` | `.pi/extensions/30-tools/codemode/src/` interpreter, schema, OpenAPI, and runtime; it composes registered tools and must not bypass policy. |
+| `enter_plan_mode`, `exit_plan_mode` | `.pi/extensions/10-context/swarm-plan-mode.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
+| `control_plane_status` | `.pi/extensions/50-ui/control-panel.ts` | `packages/runtime/runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
+| `daemon_status`, goal/task/run tools | `.pi/extensions/00-runtime/swarm-runtime.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/runtime/runtime-contracts/src/daemon-rpc.ts`, `goal-loop.ts`, `control-task.ts`; unavailable daemon must fail closed. |
+| `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; never expose secret values. |
+| `vault` | `.pi/extensions/30-tools/vault.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
+| `mcp__<server>__<tool>` | `.pi/extensions/00-runtime/swarm-runtime.ts` / `packages/tools/mcp/src/index.ts` | `packages/tools/mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |
+| `annoyed` | `.pi/extensions/30-tools/annoyed/index.ts` | `.pi/extensions/30-tools/annoyed/store.ts`; issue persistence is separate from the nudge hook. |
 
 Names may be filtered by active-tool policy. `swarm-tools-status` and
 `system-inspector` show the runtime's actual registered/active surface; use
@@ -201,31 +227,31 @@ those instead of assuming every row above is enabled.
 
 | Skill source | Location | Owner / notes |
 | --- | --- | --- |
-| Builtin `loop` | `skills/builtins/loop/SKILL.md` | `skills/src/index.ts` loader; progressive disclosure. |
-| Builtin `swarm-skill` | `skills/builtins/swarm-skill/SKILL.md` and `references/SKILL-AUTHORING.md` | Skill authoring contract. |
-| Builtin `swarm-workflow` | `skills/builtins/swarm-workflow/SKILL.md` and `references/` | Workflow schema, profiles, examples, strategies, troubleshooting. |
-| `ask-user` | `pi-ask-user/skills/ask-user/SKILL.md` and `references/ask-user-skill-extension-spec.md` | Separate nested package/submodule; UI interaction skill. |
-| Autogenerated/project/user/managed/install skills | Runtime search paths resolved by `skills/src/index.ts` | Do not hard-code paths; `swarm-skills.ts` exposes source and support files. |
-| Autogenerated skill lifecycle/revisions | `.pi/extensions/autogenskills.ts` + `autogenskills/src/index.ts` | Curator, locks, budgets, review/absorb/archive/pin. |
+| Builtin `loop` | `packages/context/skills/builtins/loop/SKILL.md` | `packages/context/skills/src/index.ts` loader; progressive disclosure. |
+| Builtin `swarm-skill` | `packages/context/skills/builtins/swarm-skill/SKILL.md` and `references/SKILL-AUTHORING.md` | Skill authoring contract. |
+| Builtin `swarm-workflow` | `packages/context/skills/builtins/swarm-workflow/SKILL.md` and `references/` | Workflow schema, profiles, examples, strategies, troubleshooting. |
+| `ask-user` | `vendor/pi-ask-user/skills/ask-user/SKILL.md` and `references/ask-user-skill-extension-spec.md` | Separate nested package/submodule; UI interaction skill. |
+| Autogenerated/project/user/managed/install skills | Runtime search paths resolved by `packages/context/skills/src/index.ts` | Do not hard-code paths; `swarm-skills.ts` exposes source and support files. |
+| Autogenerated skill lifecycle/revisions | `.pi/extensions/10-context/autogenskills.ts` + `packages/context/autogenskills/src/index.ts` | Curator, locks, budgets, review/absorb/archive/pin. |
 | Local harness skill | `.swarm/skills/pi-harness-engineering/SKILL.md` | Runtime state/configuration; do not mistake it for a builtin package skill. |
 
 If changing skill discovery, loading, precedence, progressive disclosure, or
-support-file safety, change `skills/src/index.ts` and its tests first; change
+support-file safety, change `packages/context/skills/src/index.ts` and its tests first; change
 the Pi adapter only for registration/presentation concerns.
 
 ### Hooks and lifecycle locations
 
 | Hook group / concern | Registration | Implementation / events |
 | --- | --- | --- |
-| Central hook state and ordering | `.pi/hook-state.ts` | Registration, enablement, persistence, and visibility. |
-| Prompt hook `swarm-prompt` | `.pi/extensions/swarm-prompt.ts` | `before_agent_start`; prompt/context assembly in `swarm-prompt/src/index.ts` and `.pi/lib/swarm-context.ts`. |
-| Disk hooks `disk-hooks` | `.pi/extensions/swarm-disk-hooks.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
-| Upstream guard | `.pi/extensions/upstream-readonly.ts` | `tool_call`; blocks mutation targeting `upstream/`. |
-| Inline hook presentation | `.pi/extensions/hooks.ts`, `.pi/hook-render-bridge.ts`, `.pi/hook-presenter.ts` | UI only; never make governance depend on rendering. |
-| Annoyance/nudge | `.pi/extensions/annoyed/nudge.ts` | `tool_result`, `turn_end`; persistence in `annoyed/store.ts`. |
-| Task enforcement | `.pi/extensions/taskmanage.ts` | `taskmanage/src/task-hooks.ts`, `swarm-hook-runtime.ts`; task state is authoritative in taskmanage. |
-| Metrics/cache telemetry | `.pi/extensions/conversation-metrics.ts`, `cache-telemetry.ts` | Agent/message/provider lifecycle; persisted telemetry is non-secret. |
-| Theme/thinking/UI lifecycle | `.pi/extensions/swarm-themes.ts`, `swarm-thinking.ts` | Presentation/config only. |
+| Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |
+| Prompt hook `packages/context/prompt` | `.pi/extensions/10-context/swarm-prompt.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. |
+| Disk hooks `disk-hooks` | `.pi/extensions/20-policy/swarm-disk-hooks.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
+| Vendor guard | `.pi/extensions/20-policy/upstream-readonly.ts` | `tool_call`; blocks mutation targeting `vendor/`. |
+| Inline hook presentation | `.pi/extensions/00-runtime/hooks.ts`, `.pi/lib/runtime/hook-render-bridge.ts`, `.pi/lib/runtime/hook-presenter.ts` | UI only; never make governance depend on rendering. |
+| Annoyance/nudge | `.pi/extensions/30-tools/annoyed/nudge.ts` | `tool_result`, `turn_end`; persistence in `annoyed/store.ts`. |
+| Task enforcement | `.pi/extensions/30-tools/taskmanage.ts` | `packages/tools/taskmanage/src/task-hooks.ts`, `swarm-hook-runtime.ts`; task state is authoritative in taskmanage. |
+| Metrics/cache telemetry | `.pi/extensions/50-ui/conversation-metrics.ts`, `cache-telemetry.ts` | Agent/message/provider lifecycle; persisted telemetry is non-secret. |
+| Theme/thinking/UI lifecycle | `.pi/extensions/50-ui/swarm-themes.ts`, `swarm-thinking.ts` | Presentation/config only. |
 
 For a hook bug, first identify the Pi event (`before_agent_start`, `tool_call`,
 `tool_result`, `turn_start/end`, `session_start/shutdown`, or compaction), then
@@ -236,35 +262,36 @@ are separate seams and should remain decoupled.
 
 | Package | Primary source files | Change here when… |
 | --- | --- | --- |
-| `agents` | `agents/src/index.ts`, `general-agent-adapter.ts`, `worker-daemon.ts`, `absurd-control-plane.ts` | Agent identity, runner, cancellation, concurrency, or child sessions change. |
-| `autogenskills` | `autogenskills/src/index.ts` | Skill curation, locking, budgets, revision history, or review policy changes. |
-| `mcp` | `mcp/src/index.ts` | MCP manifests, transports, discovery, tool allowlists, or auth change. |
-| `policy` | `policy/src/policy.ts`, `policy/src/index.ts` | Authorization, workspace/mutation/network boundaries, or fail-closed rules change. |
-| `runtime-contracts` | `runtime-contracts/src/*.ts` | Control-plane, daemon, goal-loop, task, or stable runtime interfaces change. |
-| `schedule` | `schedule/src/{cron,scheduler,store,tools,types}.ts` | Scheduling semantics, persistence, or schedule tools change. |
-| `skills` | `skills/src/index.ts`, `skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
-| `swarm-contract` | `swarm-contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
-| `swarm-core` | `swarm-core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
-| `swarm-prompt` | `swarm-prompt/src/index.ts`, `assets/*.txt`, `scripts/sync.mjs` | Canonical prompt assets or prompt provenance changes. |
-| `taskmanage` | `taskmanage/src/*.ts` | Task persistence, hooks, workflows, interaction, or authoritative task lifecycle changes. |
+| `packages/tools/agents` | `packages/tools/agents/src/index.ts`, `general-agent-adapter.ts`, `worker-daemon.ts`, `absurd-control-plane.ts` | Agent identity, runner, cancellation, concurrency, or child sessions change. |
+| `packages/context/autogenskills` | `packages/context/autogenskills/src/index.ts` | Skill curation, locking, budgets, revision history, or review policy changes. |
+| `packages/tools/mcp` | `packages/tools/mcp/src/index.ts` | MCP manifests, transports, discovery, tool allowlists, or auth change. |
+| `packages/policy/policy` | `packages/policy/policy/src/policy.ts`, `packages/policy/policy/src/index.ts` | Authorization, workspace/mutation/network boundaries, or fail-closed rules change. |
+| `packages/runtime/runtime-contracts` | `packages/runtime/runtime-contracts/src/*.ts` | Control-plane, daemon, goal-loop, task, or stable runtime interfaces change. |
+| `packages/tools/schedule` | `packages/tools/schedule/src/{cron,scheduler,store,tools,types}.ts` | Scheduling semantics, persistence, or schedule tools change. |
+| `packages/context/skills` | `packages/context/skills/src/index.ts`, `packages/context/skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
+| `packages/runtime/contract` | `packages/runtime/contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
+| `packages/runtime/core` | `packages/runtime/core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
+| `packages/context/prompt` | `packages/context/prompt/src/index.ts`, `assets/*.txt`, `scripts/sync.mjs` | Canonical prompt assets or prompt provenance changes. |
+| `packages/tools/taskmanage` | `packages/tools/taskmanage/src/*.ts` | Task persistence, hooks, workflows, interaction, or authoritative task lifecycle changes. |
 
-Tests live beside each package in its `test/` directory. Pi adapter behavior
-is tested primarily under `taskmanage/test/` and `.pi/lib/*.test.ts`; update
-both sides when a public contract crosses the package/extension boundary.
+Tests live beside each package in its `test/` directory and under
+`.pi/test/<layer>/` for extension and library behaviour; one root
+`vitest.config.ts` runs both. Update both sides when a public contract crosses
+the package/extension boundary.
 
 ## Package boundaries
 
-- `swarm-prompt` owns prompt precedence, workspace context, and non-secret
+- `packages/context/prompt` owns prompt precedence, workspace context, and non-secret
   provenance; chain `event.systemPrompt` instead of overwriting blindly.
-- `policy` owns final fail-closed authorization. Tool registration or a prompt
+- `packages/policy/policy` owns final fail-closed authorization. Tool registration or a prompt
   instruction is not authorization.
-- `taskmanage`, `agents`, `history-search`, and `memory-history` own their
+- `packages/tools/taskmanage`, `packages/tools/agents`, `history-search`, and `memory-history` own their
   respective durable workflows; use stable IDs and bounded outputs.
-- `swarm-core` owns shared runtime identity/lifecycle; extensions must not each
+- `packages/runtime/core` owns shared runtime identity/lifecycle; extensions must not each
   invent global identity or duplicate lifecycle state.
-- `skills`, `autogenskills`, `mcp`, and `schedule` provide opt-in capability
+- `packages/context/skills`, `packages/context/autogenskills`, `packages/tools/mcp`, and `packages/tools/schedule` provide opt-in capability
   layers; do not make ambient discovery silently widen a closed profile.
-- `swarm-contract` and `runtime-contracts` define interfaces consumed by
+- `packages/runtime/contract` and `packages/runtime/runtime-contracts` define interfaces consumed by
   multiple packages; change them deliberately and update all consumers/tests.
 
 ## Change contract
@@ -289,18 +316,23 @@ patch. This is a contract, not optional documentation.
 ## Validation
 
 ```sh
-npm run build              # build all TypeScript packages
-npm test                   # package test suites
-npm run test:parity        # repository parity tests
-npm run dogfood            # build then package tests
-npm --prefix <package> run build
-npm --prefix <package> test
+npm install                       # one workspace install; single lockfile
+npm run build                     # tsc for every package, dependency order
+npm test                          # vitest: packages/**/test, .pi/test, tests/
+npx vitest run .pi/test/context   # one layer, or any path/file
+npm run build -w @pi-swarm/prompt # one package
+npm run test:parity               # Pi ↔ Swarm wire parity (node --test)
+npm run parity:probe              # capture into artifacts/parity/default
+node tools/repo/rewrite-imports.mjs --check   # every relative specifier resolves
+npm run dogfood                   # build + test + parity
 ```
 
 Run the narrowest relevant check first, then broader checks when the change is
-cross-package. Never claim a check passed unless it was actually run.
+cross-package. Never claim a check passed unless it was actually run. After
+moving files, run the import rewriter with a move map and then `--check`
+rather than editing specifiers by hand.
 
-## Safety and upstream policy
+## Safety and vendor policy
 
 - Preserve uncommitted user changes. Never reset, clean, or rewrite unrelated
   files.
@@ -308,8 +340,8 @@ cross-package. Never claim a check passed unless it was actually run.
   or large dependency trees in source changes or output. Treat `.pi/config` as
   sensitive; use the credential vault for provided secrets.
 - Do not edit, format, regenerate, delete, move, or otherwise mutate anything
-  under `upstream/`. Read it for reference and implement local changes in
-  packages, extensions, tools, or docs. If upstream modification appears
-  necessary, stop and ask for explicit approval.
-- The local `.pi/extensions/upstream-readonly.ts` guard exists to block unsafe
-  upstream mutation; do not bypass it.
+  under `vendor/` (formerly `upstream/`). Read it for reference and implement
+  local changes in packages, extensions, tools, or docs. If a vendored change
+  appears necessary, stop and ask for explicit approval.
+- The local `.pi/extensions/20-policy/upstream-readonly.ts` guard exists to block unsafe
+  mutation under `vendor/`; do not bypass it.

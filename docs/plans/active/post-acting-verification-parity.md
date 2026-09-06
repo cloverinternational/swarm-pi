@@ -10,8 +10,8 @@ verification/documentation workflow as Swarm, without duplicate nudges.
 1. **Map the current event path**
    - Confirm `TaskManage` successful batch results update the authoritative
      `TaskManager` before hook handling.
-   - Confirm the visible runtime is `.pi/lib/swarm-builtin-hooks-runtime.ts`
-     while `taskmanage/src/task-hooks.ts` is currently registered silently.
+   - Confirm the visible runtime is `.pi/lib/runtime/swarm-builtin-hooks-runtime.ts`
+     while `packages/tools/taskmanage/src/task-hooks.ts` is currently registered silently.
    - Confirm duplicate terminal events are deduplicated before outcome logic.
 2. **Implement the parity state machine**
    - Track successful completed `acting` tasks in the owning visible hook

@@ -73,7 +73,7 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
     ...options,
     budgetWidget: undefined,
     // Model-visible budget blocks and skill-review nudges are emitted by the
-    // Swarm builtin hook pipeline (.pi/extensions/swarm-builtin-hooks.ts) in
+    // Swarm builtin hook pipeline (.pi/lib/runtime/swarm-builtin-hooks.ts) in
     // HooksManager priority order; this manager keeps accounting + curation.
     modelContext: false,
     dir,

@@ -107,14 +107,14 @@ This explains the observed ordering. The label is `pre`, but the display operati
 Current code facts:
 
 ```text
-.pi/hook-state.ts
+.pi/lib/runtime/hook-state.ts
   recordHook() calls addHookObservation()
   recordHook() calls shared.present()
 
-.pi/extensions/hooks.ts
+.pi/extensions/00-runtime/hooks.ts
   setHookPresenter() calls pi.sendMessage()
 
-.pi/extensions/hooks.ts
+.pi/extensions/00-runtime/hooks.ts
   registerHookRenderers() is intentionally empty
 
 codemode
@@ -200,7 +200,7 @@ Intentional system reminders are separate and explicitly model-visible.
 Create a pure data module:
 
 ```text
-.pi/hook-observations.ts
+.pi/lib/runtime/hook-observations.ts
 ```
 
 Required state:

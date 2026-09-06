@@ -22,4 +22,4 @@ Slash command forms are intentionally conservative: `/goal create {"description"
 
 ## Pi production wiring
 
-`.pi/extensions/swarm-runtime.ts` registers daemon-backed goal, loop, task, and run tools plus `/goal` and `/loop`. Configure `PI_SWARM_DAEMON_SOCKET` and `PI_SWARM_DAEMON_TOKEN` (or pass explicit options). If configuration is absent, it exposes an explicit unavailable adapter and `daemon_status`; it never falls back to fake or file control planes. Connections are opened only when used and closed at session shutdown.
+`.pi/extensions/00-runtime/swarm-runtime.ts` registers daemon-backed goal, loop, task, and run tools plus `/goal` and `/loop`. Configure `PI_SWARM_DAEMON_SOCKET` and `PI_SWARM_DAEMON_TOKEN` (or pass explicit options). If configuration is absent, it exposes an explicit unavailable adapter and `daemon_status`; it never falls back to fake or file control planes. Connections are opened only when used and closed at session shutdown.

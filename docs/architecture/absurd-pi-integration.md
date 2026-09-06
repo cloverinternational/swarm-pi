@@ -37,13 +37,13 @@ message/tool/turn events. Use it only for recovery when the durable Pi context
 already ends at a resumable boundary; otherwise start a new prompt with
 `runAgentLoop`. Never infer continuation from a missing/unknown transcript.
 
-See `runtime-contracts/src/general-agent.ts` for the narrow typed task,
+See `packages/runtime/runtime-contracts/src/general-agent.ts` for the narrow typed task,
 checkpoint, runtime, status, and tool request/response contracts. The minimal
-worker is `agents/src/worker-daemon.ts`: it registers only the general-agent
+worker is `packages/tools/agents/src/worker-daemon.ts`: it registers only the general-agent
 task, starts Absurd with concurrency one, reports health, and closes its worker
 and client on shutdown. Its runtime factory is injectable for offline tests.
 The transport-neutral control/task tool contract is in
-`runtime-contracts/src/control-task.ts`; `.pi/extensions/control-task-tools.ts`
+`packages/runtime/runtime-contracts/src/control-task.ts`; `.pi/extensions/30-tools/control-task-tools.ts`
 adapts goal/task/run create/get/status/cancel to an injected authoritative
 client. It intentionally does not implement `/goal` or `/loop`, and does not
 introduce another store.

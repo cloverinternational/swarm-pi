@@ -1,6 +1,6 @@
 # History Search
 
-`.pi/extensions/history-search.ts` registers the read-only `history_search` tool.
+`.pi/extensions/30-tools/history-search.ts` registers the read-only `history_search` tool.
 It searches Pi's JSONL sessions without resuming them and streams JSONL datasets
 without loading them into memory. Pi sessions are normally stored under
 `~/.pi/agent/sessions/`, organized by working directory; each file is an

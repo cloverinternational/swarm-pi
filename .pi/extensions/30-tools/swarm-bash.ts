@@ -25,7 +25,7 @@ const registrations = new WeakSet<object>();
  * `Error executing bash: Command exited with code N …` tool error.
  *
  * Swarm's bash-only pre-tool hooks (sleep-blocker, stdin-conflict) live in
- * .pi/extensions/swarm-builtin-hooks.ts so they run in HooksManager priority
+ * .pi/lib/runtime/swarm-builtin-hooks.ts so they run in HooksManager priority
  * order with the task/skill gates and embed their context the same way.
  */
 export function registerSwarmBash(pi: Pi): void {

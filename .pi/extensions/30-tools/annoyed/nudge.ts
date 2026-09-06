@@ -3,8 +3,8 @@ import { AnnoyedStore } from "./store.ts";
 
 /**
  * Swarm's builtin annoyance-nudge hook (internal/hooks/builtin/annoyance_nudge.go)
- * ported 1:1 — see .pi/lib/swarm-annoyance-nudge.ts. The hook itself now runs
- * inside the ordered builtin pipeline (.pi/extensions/swarm-builtin-hooks.ts,
+ * ported 1:1 — see .pi/lib/policy/swarm-annoyance-nudge.ts. The hook itself now runs
+ * inside the ordered builtin pipeline (.pi/lib/runtime/swarm-builtin-hooks.ts,
  * post priority 20) so its reminder shares the single per-turn hook message
  * with the other post-tool hooks, exactly like agent_tools.go. This module
  * keeps the /annoyed command.

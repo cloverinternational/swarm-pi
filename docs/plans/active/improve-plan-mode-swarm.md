@@ -14,7 +14,7 @@ not explicitly preserve the approved/edited plan for subsequent enforcement.
 
 ## Files to modify
 
-- `.pi/lib/swarm-plan-mode.ts`
+- `.pi/lib/context/swarm-plan-mode.ts`
   - Align the plan-file default and plan approval/snapshot contracts with
     Swarm's plan lifecycle.
   - Make state transitions and hydration restart-safe, including plan identity,
@@ -23,7 +23,7 @@ not explicitly preserve the approved/edited plan for subsequent enforcement.
     invalid-state behavior.
   - Preserve workspace containment, symlink, regular-file, UTF-8, and size
     protections.
-- `.pi/extensions/swarm-plan-mode.ts`
+- `.pi/extensions/10-context/swarm-plan-mode.ts`
   - Persist complete lifecycle snapshots at the correct transition points.
   - Restore the latest valid snapshot without duplicating prompt guidance or
     incorrectly re-triggering first-tool behavior.

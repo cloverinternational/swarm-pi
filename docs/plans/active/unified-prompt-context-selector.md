@@ -11,14 +11,14 @@ categories already represented in Pi-Swarm:
 4. Model-visible tools
 
 The selection state will be workspace-scoped, persisted in
-`.pi/prompt-context.json`, and honored by both TUI and headless runs. `/sp`
+`.pi/config/prompt-context.json`, and honored by both TUI and headless runs. `/sp`
 will remain a compatibility entry point.
 
 ## Decisions
 
 - `/configure` opens a category menu, followed by category-specific overlays.
 - Existing `/sp` remains available and uses the consolidated store.
-- `.pi/prompt-context.json` becomes the source of truth for prompt profiles and
+- `.pi/config/prompt-context.json` becomes the source of truth for prompt profiles and
   selections. Existing `.pi/system-prompts.json` is migrated non-destructively;
   the new store wins conflicts and imports only missing legacy profiles.
 - Missing categories preserve current behavior. Explicit empty skills, tools,
@@ -117,18 +117,18 @@ will remain a compatibility entry point.
 
 ## Planned file scope
 
-- `.pi/extensions/system-prompts.ts`: consolidated profile compatibility,
+- `.pi/extensions/10-context/system-prompts.ts`: consolidated profile compatibility,
   migration, and `/sp` behavior.
-- `.pi/extensions/swarm-prompt.ts`: selection-aware prompt composition and
+- `.pi/extensions/10-context/swarm-prompt.ts`: selection-aware prompt composition and
   next-boundary loading.
-- `.pi/lib/swarm-context.ts`: source/file selection and bounded resolution.
-- `.pi/extensions/swarm-transport-parity.ts` or the owning tool-exposure seam:
+- `.pi/lib/context/swarm-context.ts`: source/file selection and bounded resolution.
+- `.pi/extensions/00-runtime/swarm-transport-parity.ts` or the owning tool-exposure seam:
   selected active-tool handling, only if required by the actual host contract.
 - New focused library/module only if an existing owner cannot safely hold the
   persisted selection contract; avoid duplicate stores.
 - Existing `/codemode` selector patterns may be reused, but its unrelated state
   and semantics must not be coupled to prompt configuration.
-- Focused tests under `taskmanage/test/` and relevant package tests.
+- Focused tests under `.pi/test/<layer>/` and relevant package tests.
 - `tools/parity/probe.mjs` / `tools/parity/tui-probe.mjs` and fixtures for the
   selected-context/provider-boundary scenarios.
 

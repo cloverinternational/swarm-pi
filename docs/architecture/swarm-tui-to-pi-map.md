@@ -315,7 +315,7 @@ incremental verification:
     swarm-attach.ts           optional control/serve/ACP bridge client
     swarm-render.ts           tool renderers, status, footer, widgets
     swarm-compat.ts            parity manifest validation and feature flags
-  skills/
+  packages/context/skills/
     ...                       only if the skill is intentionally Pi-loaded
   prompts/
     forge-swarm.md            canonical Forge body, versioned and hashed

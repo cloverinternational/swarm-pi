@@ -7,7 +7,7 @@ import { currentContextBlocks } from "../10-context/swarm-prompt.ts";
  * (client/conversation_metadata.go) exactly as `swarm -p` and the TUI do:
  * once from client.Execute and once more from the persistence path, the
  * second being a no-op unless the first failed to parse. See
- * .pi/lib/swarm-conversation-metadata.ts for the wire contract.
+ * .pi/lib/state/swarm-conversation-metadata.ts for the wire contract.
  */
 type Pi = any;
 const ENTRY = "pi-swarm-conversation-metadata";

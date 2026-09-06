@@ -2,7 +2,7 @@
  * 1:1 port of the Swarm builtin hooks that produce MODEL-VISIBLE context in
  * `swarm -p`, plus the delivery pipeline that decides where that context
  * lands on the wire. Everything here is pure state; the Pi extension
- * (.pi/extensions/swarm-builtin-hooks.ts) feeds it tool_call / tool_result /
+ * (.pi/lib/runtime/swarm-builtin-hooks.ts) feeds it tool_call / tool_result /
  * prompt events and applies the outputs.
  *
  * Sources of truth (mono/swarm-sdk):

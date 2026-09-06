@@ -45,7 +45,7 @@ export function registerTaskManageExtension(
   const bridged: any[] = [];
   const registrationPi = { ...pi, registerTool: (tool: unknown) => { bridged.push(tool); pi.registerTool(tool); } };
   const manager = registerTaskManage(registrationPi);
-  // Swarm's builtin task hooks (.pi/extensions/swarm-builtin-hooks.ts) read
+  // Swarm's builtin task hooks (.pi/lib/runtime/swarm-builtin-hooks.ts) read
   // task state through this handle; the coordinator below keeps only the
   // task-audit bookkeeping so no second copy of the nudges reaches the model.
   (globalThis as any)[Symbol.for("pi-swarm-task-manager")] = manager;

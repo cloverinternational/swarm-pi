@@ -8,7 +8,7 @@ import { MAIN_REPORTING_DIRECTIVE, SWARM_FLOW_GUIDANCE, assembleForgePrompt, com
 describe("Forge prompt assembly", () => {
   it("serves the live Forge constant rather than the stale documentation copy", () => {
     // Byte-for-byte parity against system_prompt.go is asserted in
-    // swarm-prompt/test; this guards the content the extension exposes.
+    // packages/context/prompt/test; this guards the content the extension exposes.
     expect(forgeSwarmSystemPrompt).toContain("You have access to TaskManage");
     expect(forgeSwarmSystemPrompt).toContain("## Planning and Requirement Discovery");
     expect(forgeSwarmSystemPrompt).not.toContain("task_create");

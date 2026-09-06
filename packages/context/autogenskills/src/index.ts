@@ -17,7 +17,7 @@ export interface Config {
   previewOnly?: boolean; requireReadBeforeWrite?: boolean; curatorRunner?: CuratorRunner; curatorMinRunGapMs?: number;
   curatorIdleDelayMs?: number; curatorConsolidate?: boolean; curatorTimeoutMs?: number; curatorMaxTurns?: number;
   protectSkill?: (name: string) => boolean; accountingExempt?: boolean;
-  /** When false, the manager keeps accounting/curation but emits no model-visible gate/nudge text (Swarm's hooks are delivered by .pi/extensions/swarm-builtin-hooks.ts instead). */
+  /** When false, the manager keeps accounting/curation but emits no model-visible gate/nudge text (Swarm's hooks are delivered by .pi/lib/runtime/swarm-builtin-hooks.ts instead). */
   modelContext?: boolean; skillInvoker?: (name: string, args?: string) => any;
   /** history.go refreshSkill: invoked after every revision transaction for the mutated package name (success or in-transaction failure). */
   afterRevisionMutation?: (name: string) => void; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
@@ -1214,7 +1214,7 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
   };
   const installFooter = (ctx: any) => {
     if (ctx?.mode !== "tui") return;
-    // Pi has a single footer slot, owned by .pi/extensions/conversation-metrics.ts.
+    // Pi has a single footer slot, owned by .pi/extensions/50-ui/conversation-metrics.ts.
     // Contribute a segment to its shared registry instead of calling setFooter,
     // which would silently replace the metrics line (and vice versa) depending on
     // extension load order. The registry is keyed by name, so re-registration on

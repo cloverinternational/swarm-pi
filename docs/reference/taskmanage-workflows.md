@@ -19,4 +19,4 @@ Hosts must pass an explicit autonomy policy before invoking AgentRunner: workspa
 
 ## Production control-plane integration
 
-Pi-Swarm production goal/task/run actions are registered by `.pi/extensions/swarm-runtime.ts` and delegated to the daemon via `DaemonRpcClient`. TaskManage remains the local workflow/session coordinator; it must not substitute a file or fake control plane when daemon configuration is missing. `PI_SWARM_DAEMON_SOCKET` and `PI_SWARM_DAEMON_TOKEN` are required for authoritative actions.
+Pi-Swarm production goal/task/run actions are registered by `.pi/extensions/00-runtime/swarm-runtime.ts` and delegated to the daemon via `DaemonRpcClient`. TaskManage remains the local workflow/session coordinator; it must not substitute a file or fake control plane when daemon configuration is missing. `PI_SWARM_DAEMON_SOCKET` and `PI_SWARM_DAEMON_TOKEN` are required for authoritative actions.

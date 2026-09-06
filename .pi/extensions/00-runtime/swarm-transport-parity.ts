@@ -35,7 +35,7 @@ export function swarmConversationId(now = new Date()): string {
  * Make Pi's OpenAI-compatible request JSON match `swarm -p` at the transport
  * layer: bytewise tool ordering, no `strict`, `max_tokens`, no `store`,
  * `temperature: 0`, `reasoning_effort: "high"`, plain-string user content.
- * See `.pi/lib/swarm-transport-parity.ts` for the per-field rationale.
+ * See `.pi/lib/runtime/swarm-transport-parity.ts` for the per-field rationale.
  */
 export function registerSwarmTransportParity(pi: Pi): void {
   if (registrations.has(pi as object)) return;
