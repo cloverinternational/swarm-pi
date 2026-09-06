@@ -4,6 +4,7 @@ import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
 import thinkingExtension from "../../.pi/extensions/swarm-thinking.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../.pi/lib/swarm-tool-surface.ts";
+import { bashCallComponent } from "../../.pi/lib/swarm-bash.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -28,6 +29,12 @@ function fakePi(entries: any[] = []) {
 }
 
 describe("root Pi TaskManage extension", () => {
+  it("keeps long tool previews within the TUI width", () => {
+    const preview = bashCallComponent("$ " + "x".repeat(400));
+    expect(preview.render(80)[0].length).toBeLessThanOrEqual(80);
+    expect(preview.render(80)[0].endsWith("…")).toBe(true);
+  });
+
   it("is a discoverable default-exported Pi factory", () => {
     const runtime = fakePi();
 
@@ -169,15 +176,27 @@ describe("root Pi TaskManage extension", () => {
     const result: any = await handler({
       systemPrompt: "Pi's existing system instructions\n## Core Principles:\nhost-owned section",
       systemPromptOptions: { cwd: "/workspace/project" },
-    }, {});
+    }, { hasUI: true });
 
     expect(result.systemPrompt).not.toContain("Pi's existing system instructions");
     expect(result.systemPrompt).toContain("You are an expert software engineering assistant");
     expect(result.systemPrompt).toContain("# Delegation (the Task tool)");
     expect(result.systemPrompt.match(/You are an expert software engineering assistant/g)).toHaveLength(1);
-    expect(result.systemPrompt).toContain("Current working directory: /workspace/project");
+    expect(result.systemPrompt).toContain("<current_working_directory>/workspace/project</current_working_directory>");
     // Re-processing an already assembled Forge prompt is idempotent.
-    await expect(handler({ systemPrompt: result.systemPrompt }, {})).resolves.toBeUndefined();
+    await expect(handler({ systemPrompt: result.systemPrompt }, { hasUI: true })).resolves.toBeUndefined();
+    // Headless Pi (`pi -p`) now uses the same Forge/delegation prompt as the
+    // TUI; it remains headless only by omitting interactive swarm-flow text.
+    const headless: any = await handler({ systemPrompt: "base", systemPromptOptions: { cwd: "/workspace/project" } }, { hasUI: false });
+    expect(headless.systemPrompt).toContain("You are an expert software engineering assistant");
+    expect(headless.systemPrompt).toContain("# Delegation (the Task tool)");
+    expect(headless.systemPrompt).toContain("<system_information>");
+    expect(headless.systemPrompt).not.toContain("<swarm_flow_capability>");
+    await expect(handler({ systemPrompt: headless.systemPrompt }, { hasUI: false })).resolves.toBeUndefined();
+    // A headless-shaped prompt must not suppress Forge when the real session
+    // is interactive; -p is a probe, not the interactive prompt contract.
+    const interactiveAfterHeadless: any = await handler({ systemPrompt: headless.systemPrompt }, { hasUI: true });
+    expect(interactiveAfterHeadless.systemPrompt).toContain("You are an expert software engineering assistant");
   });
 
   it("prefers Pi's active context cwd for Forge workspace metadata", async () => {
@@ -187,9 +206,9 @@ describe("root Pi TaskManage extension", () => {
     const result: any = await handler({
       systemPrompt: "base",
       systemPromptOptions: { cwd: "/stale/workspace" },
-    }, { cwd: "/active/workspace" });
-    expect(result.systemPrompt).toContain("Current working directory: /active/workspace");
-    expect(result.systemPrompt).not.toContain("Current working directory: /stale/workspace");
+    }, { cwd: "/active/workspace", hasUI: true });
+    expect(result.systemPrompt).toContain("<current_working_directory>/active/workspace</current_working_directory>");
+    expect(result.systemPrompt).not.toContain("/stale/workspace");
   });
 
   it("renders Swarm-style task rows without operation plumbing", async () => {

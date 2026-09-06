@@ -43,6 +43,77 @@ const taskManage = (operations: any[]) => ({ toolName: "TaskManage", params: { o
 const ok = (call: any) => ({ ...call, failed: false, output: "<result exit_code=\"0\" duration_ms=\"1\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>" });
 
 describe("headless builtin hook pipeline", () => {
+  it("resolves live TaskManage operation keys from returned task IDs", () => {
+    const tasks: HookTask[] = [
+      { id: "1", subject: "first implementation", status: "in_progress", category: "acting" },
+      { id: "2", subject: "second implementation", status: "in_progress", category: "acting" },
+    ];
+    const p = createSwarmBuiltinPipeline({ session: "post-acting-live", tasks: () => tasks });
+    p.startSession(tasks);
+    const result = (key: string, id: string) => p.postTool({
+      toolName: "TaskManage",
+      params: { operations: [{ key, op: "update", taskId: { ref: key }, status: "completed" }] },
+      failed: false,
+      output: JSON.stringify({ status: "succeeded", results: [{ key, status: "succeeded", data: { task: { id } } }] }),
+    });
+    tasks[0].status = "completed";
+    expect(result("first", "1")).toBe("");
+    tasks[1].status = "completed";
+    expect(result("second", "2")).toContain("THE WORK IS NOT DONE UNTIL IT IS VERIFIED AND DOCUMENTED");
+  });
+
+  it("matches Swarm post-acting verification guidance after two acting completions", () => {
+    const tasks: HookTask[] = [
+      { id: "1", subject: "first implementation", status: "in_progress", category: "acting" },
+      { id: "2", subject: "second implementation", status: "in_progress", category: "acting" },
+    ];
+    const p = createSwarmBuiltinPipeline({ session: "post-acting", tasks: () => tasks });
+    p.startSession(tasks);
+    const complete = (taskId: string, failed = false) => p.postTool({
+      toolName: "TaskManage",
+      params: { operations: [{ op: "update", taskId, status: "completed" }] },
+      failed,
+      output: "{}",
+    });
+
+    tasks[0].status = "completed";
+    expect(complete("1")).toBe("");
+    tasks[1].status = "completed";
+    const reminder = complete("2");
+    expect(reminder).toContain("THE WORK IS NOT DONE UNTIL IT IS VERIFIED AND DOCUMENTED");
+    expect(reminder).toContain("Create VERIFYING tasks");
+    expect(reminder).toContain("Create DOCUMENTING tasks");
+    expect(reminder).toContain("Unverified code is broken code.");
+  });
+
+  it("does not trigger post-acting guidance for near-misses", () => {
+    const tasks: HookTask[] = [
+      { id: "1", subject: "one implementation", status: "completed", category: "acting" },
+      { id: "2", subject: "research", status: "completed", category: "researching" },
+    ];
+    const p = createSwarmBuiltinPipeline({ session: "post-acting-near-miss", tasks: () => tasks });
+    const result = (taskId: string, failed = false) => p.postTool({
+      toolName: "TaskManage", params: { operations: [{ op: "update", taskId, status: "completed" }] }, failed, output: "{}",
+    });
+    expect(result("1")).toBe("");
+    expect(result("2")).toBe("");
+    expect(result("1", true)).toBe("");
+  });
+
+  it("suppresses post-acting guidance once verification or documentation exists", () => {
+    const tasks: HookTask[] = [
+      { id: "1", subject: "first implementation", status: "completed", category: "acting" },
+      { id: "2", subject: "second implementation", status: "completed", category: "acting" },
+      { id: "3", subject: "run tests", status: "pending", category: "verifying" },
+    ];
+    const p = createSwarmBuiltinPipeline({ session: "post-acting-follow-up", tasks: () => tasks });
+    const result = (taskId: string) => p.postTool({
+      toolName: "TaskManage", params: { operations: [{ op: "update", taskId, status: "completed" }] }, failed: false, output: "{}",
+    });
+    expect(result("1")).toBe("");
+    expect(result("2")).toBe("");
+  });
+
   it("task-enforcement advises once on the first non-read-only tool without a focused task", () => {
     resetReminderSequences();
     let tasks: HookTask[] = [];
@@ -55,6 +126,47 @@ describe("headless builtin hook pipeline", () => {
     // budget window consumed for the rest of the single-shot run
     expect(p.preTool(bash("touch h && rm h"))).toEqual({ context: "" });
     expect(p.postTool(ok(bash("touch h && rm h")))).toBe("");
+  });
+  it("interactive cadence ticks once per prompt (no message.after_receive), so the 5th prompt is still inside the window", () => {
+    resetReminderSequences();
+    const tick = (p: SwarmHookPipeline) => p.onUserPrompt({ messageAfterReceive: false });
+    const p = createSwarmBuiltinPipeline({ session: "conv", tasks: () => [] });
+    tick(p);
+    expect(p.preTool(bash("printf x > f; rm f")).context).toMatch(/seq="1"/);
+    for (let i = 0; i < 4; i++) { tick(p); expect(p.preTool(bash("seq 1 3000"))).toEqual({ context: "" }); }
+    tick(p); // turn 6: window (interval 5) reopens
+    expect(p.preTool(bash("seq 1 3000")).context).toMatch(/seq="2"/);
+    // Headless ticks twice per prompt (2,4,6,8): the window reopens on the 4th prompt.
+    const h = createSwarmBuiltinPipeline({ session: "conv2", tasks: () => [] });
+    h.onUserPrompt(); h.preTool(bash("seq 1 2"));
+    h.onUserPrompt(); expect(h.preTool(bash("seq 1 2"))).toEqual({ context: "" });
+    h.onUserPrompt(); expect(h.preTool(bash("seq 1 2"))).toEqual({ context: "" });
+    h.onUserPrompt(); expect(h.preTool(bash("seq 1 2")).context).toMatch(/seq="/);
+  });
+  it("task-nudge (user_prompt_submit) claims the reopened window ahead of task-enforcement after multi-step tool activity", () => {
+    resetReminderSequences();
+    const p = createSwarmBuiltinPipeline({ session: "conv", tasks: () => [] });
+    const turn = (prompt: string) => p.onUserPrompt({ messageAfterReceive: false, prompt }).injected;
+    expect(turn("PARITY_CAPTURE bash")).toBe("");
+    p.preTool(bash("printf x > f; rm f")); p.postTool(ok(bash("printf x > f; rm f")));
+    // turn 2 replays the queued pre-tool advisory; turns 3-5 have toolCalls >= 2
+    // but the shared window is closed → no task-nudge.
+    expect(turn("PARITY_CAPTURE bash-empty")).toMatch(/^<system-reminder source="task-enforcement-hook" kind="nudge" seq="1">/);
+    p.preTool(bash("seq 1 3")); p.postTool(ok(bash("seq 1 3")));
+    for (const step of ["bash-notimeout", "bash-cwd", "bash-big"]) {
+      expect(turn(`PARITY_CAPTURE ${step}`)).toBe("");
+      p.preTool(bash("seq 1 3")); p.postTool(ok(bash("seq 1 3")));
+    }
+    expect(turn("PARITY_CAPTURE bash-slow")).toBe('<system-reminder source="task-nudge" kind="nudge" seq="2">[Task Nudge] Multi-step work detected with no active tasks — consider TaskManage.</system-reminder>');
+    expect(p.preTool(bash("seq 1 3"))).toEqual({ context: "" }); // window consumed by task-nudge
+    // Any task at all, or a short imperative / continuation prompt, silences the nudge.
+    const t = createSwarmBuiltinPipeline({ session: "conv3", tasks: () => [{ id: "1", subject: "s", status: "completed" }] });
+    t.onUserPrompt({ messageAfterReceive: false, prompt: "a" }); t.postTool(ok(bash("seq 1"))); t.postTool(ok(bash("seq 1")));
+    expect(t.onUserPrompt({ messageAfterReceive: false, prompt: "b" }).injected).toBe("");
+    const i = createSwarmBuiltinPipeline({ session: "conv4", tasks: () => [] });
+    i.onUserPrompt({ messageAfterReceive: false, prompt: "a" }); i.postTool(ok(bash("seq 1"))); i.postTool(ok(bash("seq 1")));
+    expect(i.onUserPrompt({ messageAfterReceive: false, prompt: "run it" }).injected).toBe("");
+    expect(i.onUserPrompt({ messageAfterReceive: false, prompt: "what next?" }).injected).toMatch(/task-nudge/);
   });
   it("skill review at 6 tool calls, then onboarding budget block at the 6th non-exempt call", () => {
     resetReminderSequences();

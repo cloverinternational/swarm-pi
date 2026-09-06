@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   CapabilityManifestState,
   alignProviderPayload,
-  applySwarmModelCompat,
+  alignProviderPayload, applySwarmModelCompat,
   buildCapabilityManifest,
   collapseUserText,
   firstSentence,
@@ -13,11 +13,27 @@ import {
   swarmToolOrder,
 } from "../../.pi/lib/swarm-transport-parity.ts";
 import { gateActiveTools, swarmSurfaceFor, xaiHasCredentials } from "../../.pi/lib/swarm-tool-gating.ts";
+import { expandHookSlots, replayHookOrder } from "../../.pi/extensions/swarm-transport-parity.ts";
 import { buildContextBlock, discoverAgentsMdPaths, injectContextBlocks, renderSources, trimSourceContent } from "../../.pi/lib/swarm-context.ts";
 import { buildResultXML, bashTruncateOutput, estimateTokens } from "../../.pi/lib/swarm-bash.ts";
 import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
 
 describe("transport parity with swarm -p", () => {
+  it("expands one steered hook slot into user + system parts and flips replayed prompt/hook order", () => {
+    const slot = { role: "custom", customType: "swarm-hook-context", content: "hook", details: { parts: [{ role: "user", text: "hook" }, { role: "system", text: "[BACKGROUND] task_id=bg-1-2 command=x status=completed\n\nBackground command completed successfully (exit code 0)." }] } };
+    const expanded = expandHookSlots([{ role: "toolResult", content: [] }, slot])!;
+    expect(expanded.map(m => [m.role, m.customType, m.content])).toEqual([["toolResult", undefined, []], ["custom", "swarm-hook-context", "hook"], ["custom", "swarm-background-notification", slot.details.parts[1].text]]);
+    expect(((globalThis as any)[Symbol.for("pi-swarm-background-system-texts")] as Set<string>).has(slot.details.parts[1].text)).toBe(true);
+    expect(expandHookSlots([{ role: "custom", customType: "swarm-hook-context", content: "only" }])).toBeUndefined();
+    const hook = { role: "custom", customType: "swarm-hook-context", content: "nudge" };
+    const live = [{ role: "user", content: "p1" }, hook];
+    expect(replayHookOrder(live)).toBeUndefined();
+    // Still the live turn after a tool round-trip: prompt → hook stays.
+    const liveToolRound = [{ role: "user", content: "p1" }, hook, { role: "assistant", content: [{ type: "toolCall", id: "1", name: "Bash", arguments: {} }] }, { role: "toolResult", content: [] }];
+    expect(replayHookOrder(liveToolRound)).toBeUndefined();
+    const replay = [{ role: "user", content: "p1" }, hook, { role: "assistant", content: "ok" }, { role: "user", content: "p2" }, hook];
+    expect(replayHookOrder(replay)!.map(m => m.content)).toEqual(["nudge", "p1", "ok", "p2", "nudge"]);
+  });
   it("orders tools bytewise like Go sort.Strings", () => {
     expect(swarmToolOrder(["bash", "Read", "annoyed", "CronList"])).toEqual(["CronList", "Read", "annoyed", "bash"]);
     expect(swarmToolOrder(["A", "B"])).toBeUndefined();
@@ -43,6 +59,17 @@ describe("transport parity with swarm -p", () => {
     expect(model.compat).toMatchObject({ supportsStrictMode: false, supportsStore: false, maxTokensField: "max_tokens" });
     expect(model.samplingParams).toEqual({ temperature: 0, reasoning_effort: "high" });
     expect(applySwarmModelCompat(model)).toBe(false);
+    // Interactive TUI: no temperature, thinking-budget-derived "medium".
+    expect(applySwarmModelCompat(model, { interactive: true })).toBe(true);
+    expect(model.samplingParams).toEqual({ reasoning_effort: "medium" });
+    expect(applySwarmModelCompat(model, { interactive: true })).toBe(false);
+    expect(applySwarmModelCompat(model)).toBe(true);
+    expect(model.samplingParams).toEqual({ temperature: 0, reasoning_effort: "high" });
+    // User-supplied sampling values are never touched.
+    const user: any = { samplingParams: { temperature: 0.7 } };
+    applySwarmModelCompat(user, { interactive: true });
+    expect(user.samplingParams).toEqual({ temperature: 0.7, reasoning_effort: "medium" });
+    expect(alignProviderPayload({ model: "m", messages: [], max_tokens: 4096 }, { interactive: true })).toEqual({ model: "m", messages: [], max_tokens: 31999 });
   });
   it("collapses text-only user content to a string and leaves images alone", () => {
     expect(collapseUserText([{ role: "user", content: [{ type: "text", text: "hi" }] }])?.[0].content).toBe("hi");
@@ -81,7 +108,7 @@ describe("transport parity with swarm -p", () => {
 describe("tool surface gating", () => {
   it("hides Pi-only tools and mirrors Swarm's environment gates", () => {
     const fixture = new Set(loadSwarmToolSurface().keys());
-    expect(fixture.size).toBe(28);
+    expect(fixture.size).toBe(29);
     const headless = swarmSurfaceFor({ interactive: false, home: "/nonexistent", env: {} });
     expect(headless.has("ask_user_question")).toBe(false);
     expect(headless.has("x_search")).toBe(false);

@@ -94,6 +94,13 @@ describe("Swarm agent orchestration tools", () => {
     expect(result.agents.map((x: any) => x.status)).toEqual(["completed", "completed"]);
   });
 
+  it("uses the standard error envelope for an unknown multi_agent_wait id", async () => {
+    const { tools } = harness(async () => "done");
+    const wait = tools.find(tool => tool.name === "multi_agent_wait");
+    await expect(wait.execute("call_missing", { agent_ids: ["nonexistent"] }))
+      .rejects.toThrow(/^Error executing multi_agent_wait: agent 'nonexistent' not found: agent 'nonexistent' not found \(error_id=err_[a-f0-9]+\)$/);
+  });
+
   it("uses the tool call id, enriched task, and excludes synchronous Subagent runs from tracking", async () => {
     const seen: string[] = [];
     const { tools, logic } = harness(async ctx => { seen.push(ctx.task); return "SUBAGENT_OK"; });

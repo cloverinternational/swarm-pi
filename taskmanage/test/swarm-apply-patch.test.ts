@@ -47,6 +47,28 @@ describe("Swarm apply_patch parity", () => {
     expect(readFileSync(file, "utf8")).toContain("function two() {\n  changed();");
   });
 
+  it("applies anchored repeated context atomically across multiple files", async () => {
+    const ws = root();
+    const first = join(ws, "first.ts"), second = join(ws, "second.ts");
+    const source = "function keep() {\n  same();\n}\nfunction target() {\n  same();\n}\n";
+    writeFileSync(first, source);
+    writeFileSync(second, source);
+    const patch = `*** Begin Patch
+*** Update File: first.ts
+@@ function target() {
+-  same();
++  changed();
+*** Update File: second.ts
+@@ function target() {
+-  same();
++  changed();
+*** End Patch`;
+
+    await expect(applyPatch(patch, { workspacePath: ws })).resolves.toContain("M first.ts\nM second.ts\n");
+    expect(readFileSync(first, "utf8")).toBe("function keep() {\n  same();\n}\nfunction target() {\n  changed();\n}\n");
+    expect(readFileSync(second, "utf8")).toBe("function keep() {\n  same();\n}\nfunction target() {\n  changed();\n}\n");
+  });
+
   it("reports ambiguous and missing context with Swarm text", async () => {
     const ws = root(); writeFileSync(join(ws, "a.txt"), "same\nx\nsame\n");
     await expect(applyPatch("*** Begin Patch\n*** Update File: a.txt\n-same\n+new\n*** End Patch", { workspacePath: ws }))
