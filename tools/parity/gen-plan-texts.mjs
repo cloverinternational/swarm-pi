@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Regenerates .pi/lib/swarm-plan-mode-texts.ts from the Go raw-string
+// Regenerates .pi/lib/context/swarm-plan-mode-texts.ts from the Go raw-string
 // literals in vendor/swarm-sdk so the plan-mode hook texts Pi injects are
 // byte-identical to Swarm's (box-drawing art included).
 import { readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ const esc = s => s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, 
 const breakdown = extract("internal/hooks/builtin/plan_mode_first_tool.go", "ProblemBreakdownPrompt");
 const simulation = extract("internal/hooks/builtin/simulation.go", "SimulationReminderMessage");
 if (simulation.includes("%")) throw new Error("SimulationReminderMessage is a Sprintf format; extend the generator");
-writeFileSync(resolve(root, ".pi/lib/swarm-plan-mode-texts.ts"), `/**
+writeFileSync(resolve(root, ".pi/lib/context/swarm-plan-mode-texts.ts"), `/**
  * GENERATED from vendor/swarm-sdk — do not edit by hand.
  *   internal/hooks/builtin/plan_mode_first_tool.go  ProblemBreakdownPrompt
  *   internal/hooks/builtin/simulation.go            SimulationReminderMessage

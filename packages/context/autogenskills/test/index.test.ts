@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AutoSkillManager, CuratorOrchestrator, registerAutoSkills } from "../src/index.js";
-import { registerAutoSkillsExtension } from "../../../../.pi/extensions/autogenskills.ts";
+import { registerAutoSkillsExtension } from "../../../../.pi/extensions/10-context/autogenskills.ts";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";

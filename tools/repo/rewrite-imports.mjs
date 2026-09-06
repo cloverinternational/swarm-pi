@@ -43,10 +43,32 @@ const moveEntries = Object.entries(moves)
   .map(([o, n]) => [resolve(ROOT, o), resolve(ROOT, n)])
   .sort((a, b) => b[0].length - a[0].length);
 
-function mapPath(abs) {
+function mapExact(abs) {
   for (const [o, n] of moveEntries) {
     if (abs === o) return n;
     if (abs.startsWith(o + sep)) return n + abs.slice(o.length);
+  }
+  return undefined;
+}
+
+/**
+ * Map a resolved specifier target. Specifiers rarely name the file on disk
+ * exactly: NodeNext code writes `./x.js` for `./x.ts`, and some specifiers are
+ * extensionless or point at a directory index. Try the on-disk variants and
+ * translate the result back into the specifier's own spelling.
+ */
+function mapPath(abs) {
+  const direct = mapExact(abs);
+  if (direct) return direct;
+  const variants = [];
+  if (/\.js$/.test(abs)) for (const ext of [".ts", ".tsx", ".mts"]) variants.push([abs.slice(0, -3) + ext, (n) => n.replace(/\.(ts|tsx|mts)$/, ".js")]);
+  if (!/\.[a-z]+$/.test(abs)) {
+    for (const ext of [".ts", ".js", ".mjs"]) variants.push([abs + ext, (n) => n.replace(/\.(ts|js|mjs)$/, "")]);
+    for (const idx of ["index.ts", "index.js"]) variants.push([join(abs, idx), (n) => dirname(n)]);
+  }
+  for (const [candidate, back] of variants) {
+    const mapped = mapExact(candidate);
+    if (mapped) return back(mapped);
   }
   return abs;
 }
@@ -78,7 +100,7 @@ function resolvesToSomething(abs) {
   return false;
 }
 
-const SPEC_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bnew URL\s*\(\s*)(["'`])(\.\.?\/[^"'`\n]*)\2/g;
+const SPEC_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bnew URL\s*\(\s*)(["'`])(\.\.?\/[^"'`\n]*)\2/g;
 
 let rewritten = 0, unresolved = 0, templates = 0;
 for (const file of walk(ROOT)) {

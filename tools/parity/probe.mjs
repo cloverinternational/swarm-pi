@@ -799,12 +799,24 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
 
 /** Pi's discoverExtensionsInDir: top-level *.ts/*.js files plus subdirectories with an index.ts/js. */
 export async function discoverExtensionEntries(dir) {
+  // Mirrors Pi's discoverExtensionsInDir (vendor/pi-mono .../extensions/loader.ts):
+  // direct *.ts|*.js files, then one level of subdirectories resolved through a
+  // package.json "pi.extensions" manifest or an index.ts/index.js. No recursion.
   const entries = [];
   for (const item of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
     const path = join(dir, item.name);
     if (item.isFile() && /\.(ts|js)$/.test(item.name) && !/\.(test|spec)\.(ts|js)$/.test(item.name)) entries.push(path);
-    else if (item.isDirectory()) for (const index of ["index.ts", "index.js"]) if (existsSync(join(path, index))) { entries.push(join(path, index)); break; }
+    else if (item.isDirectory()) {
+      const manifestPath = join(path, "package.json");
+      let declared = [];
+      if (existsSync(manifestPath)) {
+        try { declared = JSON.parse(await readFile(manifestPath, "utf8"))?.pi?.extensions ?? []; } catch { declared = []; }
+      }
+      const resolved = declared.map(rel => join(path, rel)).filter(p => existsSync(p));
+      if (resolved.length) { entries.push(...resolved); continue; }
+      for (const index of ["index.ts", "index.js"]) if (existsSync(join(path, index))) { entries.push(join(path, index)); break; }
+    }
   }
   return entries;
 }

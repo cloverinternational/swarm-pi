@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import extension, { registerTaskManageExtension } from "../../../../.pi/extensions/taskmanage.ts";
-import promptExtension from "../../../../.pi/extensions/swarm-prompt.ts";
-import thinkingExtension from "../../../../.pi/extensions/swarm-thinking.ts";
+import extension, { registerTaskManageExtension } from "../../../../.pi/extensions/30-tools/taskmanage.ts";
+import promptExtension from "../../../../.pi/extensions/10-context/swarm-prompt.ts";
+import thinkingExtension from "../../../../.pi/extensions/10-context/swarm-thinking.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
-import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/swarm-tool-surface.ts";
-import { bashCallComponent } from "../../../../.pi/lib/swarm-bash.ts";
+import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
+import { bashCallComponent } from "../../../../.pi/lib/tools/swarm-bash.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 

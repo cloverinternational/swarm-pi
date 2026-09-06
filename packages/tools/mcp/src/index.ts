@@ -1,4 +1,4 @@
-import { withDefaultToolRenderer } from "../../../../.pi/lib/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../../.pi/lib/runtime/swarm-tool-renderer.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 

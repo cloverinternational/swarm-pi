@@ -3,14 +3,14 @@ import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { goNow, swarmValidateTaskManageParams } from "../src/swarm-validate.js";
-import { bashTruncateOutput, checkAllowedPath, defaultAllowedPaths, resolveWorkdir } from "../../../../.pi/lib/swarm-bash.ts";
-import { PERMISSIVE_PARAMETERS, applySwarmSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/swarm-tool-surface.ts";
-import { alignProviderPayload } from "../../../../.pi/lib/swarm-transport-parity.ts";
-import { SwarmSkillRegistry } from "../../../../.pi/lib/swarm-skill-registry.ts";
-import { readImage } from "../../../../.pi/lib/swarm-read-image.ts";
-import { swarmMessageShapes, trimWireContent } from "../../../../.pi/lib/swarm-transport-parity.ts";
-import { truncateSnapshotMessage } from "../../../../.pi/lib/swarm-apply-patch.ts";
-import { annoyedPublicTitle, annoyedResultXML, publishAnnoyedIssue } from "../../../../.pi/lib/swarm-annoyed-publish.ts";
+import { bashTruncateOutput, checkAllowedPath, defaultAllowedPaths, resolveWorkdir } from "../../../../.pi/lib/tools/swarm-bash.ts";
+import { PERMISSIVE_PARAMETERS, applySwarmSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
+import { alignProviderPayload } from "../../../../.pi/lib/runtime/swarm-transport-parity.ts";
+import { SwarmSkillRegistry } from "../../../../.pi/lib/context/swarm-skill-registry.ts";
+import { readImage } from "../../../../.pi/lib/tools/swarm-read-image.ts";
+import { swarmMessageShapes, trimWireContent } from "../../../../.pi/lib/runtime/swarm-transport-parity.ts";
+import { truncateSnapshotMessage } from "../../../../.pi/lib/tools/swarm-apply-patch.ts";
+import { annoyedPublicTitle, annoyedResultXML, publishAnnoyedIssue } from "../../../../.pi/lib/tools/swarm-annoyed-publish.ts";
 import { goLocalRFC3339 } from "../../schedule/src/tools.js";
 
 describe("OpenAI message shapes (translate.go, stream.go reasoning fallback)", () => {

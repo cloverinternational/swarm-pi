@@ -1,0 +1,17 @@
+{
+  "name": "@pi-swarm/ext-context",
+  "private": true,
+  "description": "Pi-Swarm extension layer 10-context: system prompt, prompt/context selection, plan mode, thinking, skills, inspector. Load order within the layer is this list; layers load in numeric prefix order.",
+  "pi": {
+    "extensions": [
+      "autogenskills.ts",
+      "prompt-context-configure.ts",
+      "swarm-plan-mode.ts",
+      "swarm-prompt.ts",
+      "swarm-skills.ts",
+      "swarm-thinking.ts",
+      "system-inspector.ts",
+      "system-prompts.ts"
+    ]
+  }
+}

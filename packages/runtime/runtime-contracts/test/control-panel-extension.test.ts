@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readdir } from "node:fs/promises";
-import { registerControlPanel } from "../../../../.pi/extensions/control-panel.ts";
+import { registerControlPanel } from "../../../../.pi/extensions/50-ui/control-panel.ts";
 import { InProcessControlPlane } from "../src/control-plane.ts";
 
 describe("control panel adapter", () => {

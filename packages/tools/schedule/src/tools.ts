@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Scheduler } from "./scheduler.js";
-import { withDefaultToolRenderer } from "../../../../.pi/lib/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../../.pi/lib/runtime/swarm-tool-renderer.ts";
 
 interface ToolResult {
   content: Array<{ type: "text"; text: string }>;

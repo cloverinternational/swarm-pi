@@ -1,0 +1,11 @@
+{
+  "name": "@pi-swarm/ext-policy",
+  "private": true,
+  "description": "Pi-Swarm extension layer 20-policy: read-only vendor guard and disk hooks. Load order within the layer is this list; layers load in numeric prefix order.",
+  "pi": {
+    "extensions": [
+      "swarm-disk-hooks.ts",
+      "upstream-readonly.ts"
+    ]
+  }
+}

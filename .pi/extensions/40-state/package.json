@@ -1,0 +1,11 @@
+{
+  "name": "@pi-swarm/ext-state",
+  "private": true,
+  "description": "Pi-Swarm extension layer 40-state: durable session entries: memory history, conversation metadata. Load order within the layer is this list; layers load in numeric prefix order.",
+  "pi": {
+    "extensions": [
+      "memory-history.ts",
+      "swarm-conversation-metadata.ts"
+    ]
+  }
+}

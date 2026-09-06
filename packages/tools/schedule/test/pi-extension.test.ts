@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerScheduleExtension } from "../../../../.pi/extensions/schedule.js";
+import { registerScheduleExtension } from "../../../../.pi/extensions/30-tools/schedule.js";
 
 const roots: string[] = [];
 beforeEach(() => {
