@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export const MEMORY_ENTRY_TYPE = "pi-swarm-memory";
 export const MEMORY_VERSION = 1;

@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@pi-swarm/core": "*",
     "croner": "^10.0.1"
   }
 }

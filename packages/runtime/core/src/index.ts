@@ -64,3 +64,5 @@ export class SwarmRuntime {
   }
   entries(): readonly SwarmEvent[] { return this.journal.entries(); }
 }
+
+export { withDefaultToolRenderer } from "./tool-renderer.js";

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { getSwarmSkillRegistry, type SkillLoaderOptions } from "../../lib/context/swarm-skill-registry.ts";
 import { resolveSkillFile } from "../../../packages/context/skills/src/index.ts";
 import { loadPromptContextConfig, selectionAllows } from "../../lib/context/swarm-prompt-context-config.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export interface SwarmSkillsOptions extends SkillLoaderOptions { watch?: boolean; }
 

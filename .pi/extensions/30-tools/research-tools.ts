@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 

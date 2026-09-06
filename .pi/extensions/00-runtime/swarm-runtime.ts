@@ -6,7 +6,7 @@ import { registerSwarmPrompt } from "../10-context/swarm-prompt.ts";
 import { DaemonRpcClient, createDaemonControlTask, createDaemonGoalLoop } from "../../../packages/runtime/runtime-contracts/src/daemon-rpc.ts";
 import { registerGoalLoop } from "../../../packages/runtime/runtime-contracts/src/goal-loop.ts";
 import { registerControlTaskTools } from "../30-tools/control-task-tools.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type RuntimeState = { initialized: boolean; cwd: string; agents?: AgentManager; policy?: Policy; mcp?: MCPManager; daemon?: DaemonRpcClient; daemonStatus: "configured" | "unavailable"; };
 const runtimeByPi = new WeakMap<object, RuntimeState>();

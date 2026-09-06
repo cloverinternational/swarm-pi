@@ -15,7 +15,7 @@ import {
   validatePlanContent,
   writePlanFile,
 } from "../../lib/context/swarm-plan-mode.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 import { randomUUID } from "node:crypto";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 

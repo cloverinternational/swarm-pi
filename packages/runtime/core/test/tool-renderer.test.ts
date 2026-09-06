@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../src/tool-renderer.ts";
 
 describe("default tool renderer", () => {
   it("renders text and expanded details", () => {

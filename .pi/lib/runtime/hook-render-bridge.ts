@@ -2,7 +2,7 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import { getHookObservations, subscribeHookObservations } from "./hook-observations.ts";
 import { hookRowsVisible } from "./hook-state.ts";
 import { renderHookPresentation } from "./hook-presenter.ts";
-import { withDefaultToolRenderer } from "./swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 const WRAPPED = Symbol.for("pi-swarm-hook-render-wrapper");
 

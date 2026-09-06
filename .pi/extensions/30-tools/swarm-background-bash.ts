@@ -8,7 +8,7 @@ import {
   type ReadBackgroundParams,
 } from "../../lib/tools/swarm-bgprocess.ts";
 import { bashCallComponent, formatBashCall } from "../../lib/tools/swarm-bash.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();

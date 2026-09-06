@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withSwarmToolSurface } from "../../lib/runtime/swarm-tool-surface.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 
 function exaKey() {

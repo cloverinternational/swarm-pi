@@ -1,5 +1,5 @@
 import type { ControlTaskInterface, ID } from "../../../packages/runtime/runtime-contracts/src/control-task.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type Pi = { registerTool(tool: unknown): void };
 const schema = (required: string[], properties: Record<string, unknown>) => ({ type: "object", required, properties });

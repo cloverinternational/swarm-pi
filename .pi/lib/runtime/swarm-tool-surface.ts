@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { withDefaultToolRenderer } from "./swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export interface CanonicalTool { name: string; description: string; parameters: unknown }
 

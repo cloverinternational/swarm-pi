@@ -1,5 +1,5 @@
 import { vaultAdd, vaultList, vaultRemove, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type UI = { input?: (title: string, initial?: string) => Promise<string | undefined>; notify?: (message: string, type?: string) => void };
 type Pi = { registerCommand?: (name: string, spec: { description: string; handler: (args: string, ctx: { ui?: UI }) => Promise<void> }) => void; registerTool?: (tool: unknown) => void };

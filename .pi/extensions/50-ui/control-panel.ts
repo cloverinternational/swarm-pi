@@ -1,5 +1,5 @@
 import type { ControlPlaneInspection } from "../../../packages/runtime/runtime-contracts/src/control-plane.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type Pi = { registerTool(tool: unknown): void; registerCommand?(name: string, spec: { description: string; handler: (args: string, ctx: any) => Promise<void> }): void };
 const schema = { type: "object", additionalProperties: false, properties: {} };

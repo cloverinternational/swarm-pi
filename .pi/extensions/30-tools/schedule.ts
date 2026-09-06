@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { registerScheduleTools, Scheduler, type SchedulerOptions } from "../../../packages/tools/schedule/src/index.ts";
-import { withDefaultToolRenderer } from "../../lib/runtime/swarm-tool-renderer.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export interface ScheduleExtensionAPI {
   getCwd?(): string;
