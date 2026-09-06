@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   CapabilityManifestState,
   alignProviderPayload,
-  alignProviderPayload, applySwarmModelCompat,
+  applySwarmModelCompat,
   buildCapabilityManifest,
   collapseUserText,
   firstSentence,
@@ -17,6 +17,8 @@ import { expandHookSlots, replayHookOrder } from "../../.pi/extensions/swarm-tra
 import { buildContextBlock, discoverAgentsMdPaths, injectContextBlocks, renderSources, trimSourceContent } from "../../.pi/lib/swarm-context.ts";
 import { buildResultXML, bashTruncateOutput, estimateTokens } from "../../.pi/lib/swarm-bash.ts";
 import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
+import { openPromptContextConfigure } from "../../.pi/extensions/prompt-context-configure.ts";
+import { loadPromptContextConfig } from "../../.pi/lib/swarm-prompt-context-config.ts";
 
 describe("transport parity with swarm -p", () => {
   it("expands one steered hook slot into user + system parts and flips replayed prompt/hook order", () => {
@@ -142,6 +144,18 @@ describe("swarm context blocks", () => {
     const { block } = buildContextBlock({ workDir: dir, home: "/nonexistent", now: () => new Date(2026, 8, 5) });
     expect(block).toBe(`<swarmos_cached_context>\nAs you answer the user's questions, you can use the following context:\n<context name="agentsMd">\nrules\n</context>\n<context name="projectName">\n${dir.split("/").pop()}\n</context>\n</swarmos_cached_context>\n\n<swarmos_context>\nAs you answer the user's questions, you can use the following context:\n<context name="currentDate">\n2026-09-05\n</context>\n</swarmos_context>`);
   });
+  it("honors selected sources and rejects explicit files outside the workspace", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-ctx-selection-"));
+    const outside = mkdtempSync(join(tmpdir(), "pi-ctx-outside-"));
+    writeFileSync(join(dir, "AGENTS.md"), "agents rules\n");
+    writeFileSync(join(dir, "selected.md"), "selected file\n");
+    writeFileSync(join(outside, "secret.md"), "secret file\n");
+    const result = buildContextBlock({ workDir: dir, home: "/nonexistent", enabled: { agents_md: false, project_name: false, current_date: false, git_status: false }, files: ["selected.md", "../" + outside.split("/").pop() + "/secret.md"] });
+    expect(result.block).toContain("selected file");
+    expect(result.block).not.toContain("secret file");
+    expect(result.block).not.toContain("agents rules");
+  });
+
   it("discovers hierarchical AGENTS.md files from repository root to cwd", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-agents-"));
     mkdirSync(join(root, ".git"));
@@ -152,6 +166,33 @@ describe("swarm context blocks", () => {
     writeFileSync(join(nested, "AGENTS.md"), "demo rules");
     expect(discoverAgentsMdPaths(nested)).toEqual([join(root, "AGENTS.md"), join(root, "packages", "AGENTS.md"), join(nested, "AGENTS.md")]);
     expect(buildContextBlock({ workDir: nested, home: "/nonexistent" }).block).toContain("root rules\n\npackage rules\n\ndemo rules");
+  });
+});
+
+describe("prompt/context configure parity seams", () => {
+  it("persists source, skill, and tool selections for the next turn", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-configure-"));
+    let active = ["bash", "Read"];
+    const notifications: string[] = [];
+    const categoryChoices = ["Skills", "Tools", "Apply"];
+    const ui = {
+      select: async (title: string, options: string[]) => {
+        if (title.includes("Configure prompt and context")) return "Context";
+        if (title.includes("Configure Context")) return options.find(option => option.endsWith("agents_md"));
+        if (title.includes("Configure Skills")) return options.find(option => option.endsWith("alpha"));
+        if (title.includes("Configure Tools")) return options.find(option => option.endsWith("bash"));
+        return categoryChoices.shift();
+      },
+      input: async () => undefined,
+      notify: (message: string) => notifications.push(message),
+    };
+    await openPromptContextConfigure("", { cwd, ui, getAllTools: () => [{ name: "bash" }, { name: "Read" }], getSkillNames: () => ["alpha", "beta"], setActiveTools: names => { active = names; }, getActiveTools: () => active });
+    const config = loadPromptContextConfig(cwd);
+    expect(config.context?.enabledSources?.agents_md).toBe(false);
+    expect(config.skills).toEqual({ mode: "allowlist", names: ["beta"] });
+    expect(config.tools).toEqual({ mode: "allowlist", names: ["Read"] });
+    expect(active).toEqual(["Read"]);
+    expect(notifications.at(-1)).toContain("applied");
   });
 });
 

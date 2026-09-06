@@ -50,10 +50,9 @@ describe("system-prompt ownership", () => {
     const runtime = fakePi();
     promptExtension(runtime.pi as any);
     const handler = runtime.handlers.get("before_agent_start")![0];
-    // Pi owns native prompt contents; skills remain available through Pi's
-    // canonical Skill loader rather than mutating this explicitly selected prompt.
-    await expect(handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {}))
-      .resolves.toBeUndefined();
+    const result: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {});
+    expect(result.systemPrompt).toContain("Pi base");
+    expect(result.systemPrompt).toContain("<available_skills>");
   });
 
   it("migrates the old active-undefined representation as Pi base", () => {
@@ -79,7 +78,8 @@ describe("system-prompt ownership", () => {
     const runtime = fakePi();
     promptExtension(runtime.pi as any);
     const handler = runtime.handlers.get("before_agent_start")![0];
-    await expect(handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {}))
-      .resolves.toEqual({ systemPrompt: "custom Forge override" });
+    const result: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {});
+    expect(result.systemPrompt).toContain("custom Forge override");
+    expect(result.systemPrompt).toContain("<available_skills>");
   });
 });

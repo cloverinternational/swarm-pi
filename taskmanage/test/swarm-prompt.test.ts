@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MAIN_REPORTING_DIRECTIVE, SWARM_FLOW_GUIDANCE, assembleForgePrompt, comparePromptGolden, fetchWorkspaceExtensions, forgeSwarmSystemPrompt, renderWorkspaceContext, swarmForgeSystemPrompt } from "../../.pi/extensions/swarm-prompt";
+import { MAIN_REPORTING_DIRECTIVE, SWARM_FLOW_GUIDANCE, assembleForgePrompt, comparePromptGolden, currentContextBlocks, fetchWorkspaceExtensions, forgeSwarmSystemPrompt, renderWorkspaceContext, swarmForgeSystemPrompt } from "../../.pi/extensions/swarm-prompt";
 
 describe("Forge prompt assembly", () => {
   it("serves the live Forge constant rather than the stale documentation copy", () => {
@@ -84,5 +84,25 @@ describe("Forge prompt assembly", () => {
     const result = assembleForgePrompt("host", { cwd, contextFiles: ["../secret"] });
     expect(result.contextFiles).toEqual([]);
     expect(comparePromptGolden(result, result.prompt)).toEqual({ equal: true, actualHash: result.hash, goldenHash: result.hash });
+  });
+
+  it("applies explicit-file budgets and canonical file names", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-prompt-files-"));
+    writeFileSync(join(cwd, "selected.md"), "one\ntwo\nthree\nfour\n");
+    const result = assembleForgePrompt("base", { cwd, contextFiles: ["selected.md"], maxContextFileBytes: 8 });
+    expect(result.prompt).toContain('<context name="file:selected.md">');
+    expect(result.prompt).toContain("one\ntwo");
+    expect(result.contextFiles).toContain(join(cwd, "selected.md"));
+  });
+
+  it("uses persisted context selection for conversation metadata", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-prompt-metadata-"));
+    mkdirSync(join(cwd, ".pi"));
+    writeFileSync(join(cwd, "selected.md"), "persisted selection");
+    writeFileSync(join(cwd, ".pi", "prompt-context.json"), JSON.stringify({ version: 1, prompts: [], context: { files: ["selected.md"], enabledSources: { project_name: false } } }));
+    const blocks = currentContextBlocks(cwd, false);
+    expect(blocks.cached).toContain('<context name="file:selected.md">');
+    expect(blocks.cached).toContain("persisted selection");
+    expect(blocks.cached).not.toContain('<context name="projectName">');
   });
 });

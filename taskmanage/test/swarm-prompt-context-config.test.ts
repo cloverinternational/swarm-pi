@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPromptContextConfig, pathInsideWorkspace, savePromptContextConfig } from "../../.pi/lib/swarm-prompt-context-config.ts";
+import { applyPromptContextConfig, openPromptContextConfigure } from "../../.pi/extensions/prompt-context-configure.ts";
 
 const workspace = () => mkdtempSync(join(tmpdir(), "pi-prompt-context-"));
 
@@ -62,5 +63,36 @@ describe("workspace prompt/context configuration", () => {
     // Lexical containment is deliberately only the first validation step; the
     // eventual file loader must realpath and reject this target.
     expect(pathInsideWorkspace(cwd, "linked/secret.md")).toBe(join(cwd, "linked", "secret.md"));
+  });
+
+  it("stages changes until Apply and preserves Cancel", async () => {
+    const cwd = workspace();
+    const choices = ["Context", "● agents", "Done", "Cancel"];
+    const ui = { select: async () => choices.shift(), input: async () => undefined, notify: () => {} };
+    await openPromptContextConfigure("", { cwd, ui, getAllTools: () => [], getSkillNames: () => [] });
+    expect(loadPromptContextConfig(cwd).context).toBeUndefined();
+  });
+
+  it("rolls back persisted config and active tools when activation fails", async () => {
+    const cwd = workspace();
+    const before = { version: 1 as const, prompts: [] };
+    savePromptContextConfig(cwd, before);
+    let active = ["old"];
+    await expect(applyPromptContextConfig(cwd, { version: 1, prompts: [], tools: { mode: "allowlist", names: ["new"] } }, {
+      getActiveTools: () => active,
+      getAllTools: () => [{ name: "all" }],
+      setActiveTools: names => { active = names; if (names[0] === "new") throw new Error("activation failed"); },
+    })).rejects.toThrow("activation failed");
+    expect(loadPromptContextConfig(cwd)).toEqual(before);
+    expect(active).toEqual(["old"]);
+  });
+
+  it("adds only existing regular files inside the workspace", async () => {
+    const cwd = workspace();
+    writeFileSync(join(cwd, "context.md"), "context");
+    const choices = ["Workspace files", "Add workspace file", "Workspace files", "Done", "Apply"];
+    const ui = { select: async () => choices.shift(), input: async () => "context.md", notify: () => {} };
+    await openPromptContextConfigure("", { cwd, ui, getAllTools: () => [], getSkillNames: () => [] });
+    expect(loadPromptContextConfig(cwd).context?.files).toEqual([join(cwd, "context.md")]);
   });
 });

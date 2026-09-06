@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { registerScheduleTools, Scheduler, type SchedulerOptions } from "../../schedule/src/index.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 export interface ScheduleExtensionAPI {
   getCwd?(): string;
@@ -24,7 +25,7 @@ export async function registerScheduleExtension(
       await pi.sendUserMessage(prompt, { deliverAs: "followUp" });
     },
   });
-  registerScheduleTools(pi, scheduler);
+  registerScheduleTools({ ...pi, registerTool: (tool: unknown) => pi.registerTool(withDefaultToolRenderer(tool as any)) }, scheduler);
   await scheduler.start();
   pi.on?.("session_shutdown", () => scheduler.stop());
   return scheduler;

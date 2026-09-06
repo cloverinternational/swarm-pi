@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
 import { goQuote } from "../lib/swarm-bash.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 const DEFAULT_BASE_URL = "https://api.x.ai/v1";
 const DEFAULT_MODEL = "grok-4.3";
@@ -137,6 +138,6 @@ export default function swarmSearchExtension(rawPi: any) {
   // Description + JSON Schema on the wire come from the Swarm capture
   // (fixtures/swarm-conditional-tools.json) and the permissive validator.
   const pi = withSwarmToolSurface(rawPi);
-  pi.registerTool({ name: "xai_web_search", label: "xAI Web Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeWebSearch(p, signal) });
-  pi.registerTool({ name: "x_search", label: "X Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeXSearch(p, signal) });
+  pi.registerTool(withDefaultToolRenderer({ name: "xai_web_search", label: "xAI Web Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeWebSearch(p, signal) }));
+  pi.registerTool(withDefaultToolRenderer({ name: "x_search", label: "X Search", description: "", parameters: { type: "object" }, execute: (_id: string, p: any, signal: AbortSignal) => executeXSearch(p, signal) }));
 }

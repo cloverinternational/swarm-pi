@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { registerHook } from "../hook-state.ts";
 import { getSwarmSkillRegistry } from "../lib/swarm-skill-registry.ts";
 import type { LoadedSkill } from "../../skills/src/index.ts";
 import { autogenMode } from "./autogenskills.ts";
-import { BUILTIN_SOURCES, buildContextBlock, candidateContextPath, discoverAgentsMdPaths, injectContextBlocks, injectSwarmContext } from "../lib/swarm-context.ts";
+import { BUILTIN_SOURCES, DEFAULT_MAX_EXPLICIT_FILE_BYTES, DEFAULT_MAX_EXPLICIT_FILE_LINES, DEFAULT_MAX_EXPLICIT_FILES_BYTES, buildContextBlock, candidateContextPath, discoverAgentsMdPaths, injectContextBlocks, injectSwarmContext } from "../lib/swarm-context.ts";
 
 import {
   UPSTREAM_SOURCE,
@@ -15,6 +15,7 @@ import {
   swarmForgeSystemPrompt,
 } from "../../swarm-prompt/src/index.ts";
 import { resolveActiveSystemPrompt } from "./system-prompts.ts";
+import { loadPromptContextConfig } from "../lib/swarm-prompt-context-config.ts";
 
 export { UPSTREAM_SOURCE, forgeSwarmSystemPrompt, swarmForgeSystemPrompt };
 
@@ -96,6 +97,7 @@ export interface PromptAssemblyOptions {
   autogenSkills?: LoadedSkill[];
   /** autogenskills CreationMode.IsEnabled() (mode != never). Defaults to the project setting. */
   autogenEnabled?: boolean;
+  contextEnabled?: Partial<Record<string, boolean>>;
 }
 export interface PromptAssembly {
   prompt: string;
@@ -283,8 +285,12 @@ export const PROJECT_MEMORY_SOURCES = ["project_claude_md", "project_swarm_md", 
  * alike), honouring the headless --no-project-memory ⇔ --no-context-files gate.
  */
 export function currentContextBlocks(cwd: string, noContextFiles = cliIsolation().noContextFiles): { cached: string; ephemeral: string } {
-  const enabled = noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
-  const context = buildContextBlock({ workDir: resolve(cwd), enabled });
+  const root = resolve(cwd);
+  const config = loadPromptContextConfig(root, undefined, { persistMigration: false });
+  const enabled = noContextFiles
+    ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false]))
+    : config.context?.enabledSources;
+  const context = buildContextBlock({ workDir: root, enabled, files: noContextFiles ? undefined : config.context?.files });
   return { cached: context.cached, ephemeral: context.ephemeral };
 }
 
@@ -308,7 +314,7 @@ export function currentContextBlocks(cwd: string, noContextFiles = cliIsolation(
 export function assembleForgePrompt(_base: string, options: PromptAssemblyOptions = {}): PromptAssembly {
   const workspace = resolveWorkspace(options.cwd);
   const root = workspace.cwd;
-  const max = options.maxContextFileBytes ?? 128 * 1024;
+  const max = options.maxContextFileBytes ?? DEFAULT_MAX_EXPLICIT_FILE_BYTES;
   const provenance: PromptProvenance[] = [];
   const sections: string[] = [];
   const add = (section: string, content: string, origin: string, ref = "", raw = false) => { const value = raw ? content : clean(content); if (!value) return; sections.push(value); provenance.push({ section, origin, ref, hash: hash(value), bytes: Buffer.byteLength(value) }); };
@@ -337,9 +343,30 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
   // the bytes crossing the model boundary match `swarm -p`.
   // discoverContextFiles=false ⇔ Swarm --no-project-memory: only the file
   // sources are excluded; projectName/gitStatus/currentDate still inject.
-  const enabled = options.discoverContextFiles === false ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
-  const context = buildContextBlock({ workDir: root, enabled });
-  const contextPaths = BUILTIN_SOURCES.filter((source) => (enabled?.[source.id] ?? source.enabled)).flatMap((source) => source.id === "agents_md" ? discoverAgentsMdPaths(root) : [candidateContextPath(source.id, root)]).filter((path): path is string => Boolean(path));
+  const enabled = options.discoverContextFiles === false ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : options.contextEnabled;
+  const context = buildContextBlock({
+    workDir: root,
+    enabled,
+    files: options.contextFiles,
+    maxExplicitFileBytes: max,
+    maxExplicitFileLines: DEFAULT_MAX_EXPLICIT_FILE_LINES,
+    maxExplicitFilesBytes: DEFAULT_MAX_EXPLICIT_FILES_BYTES,
+  });
+  const contextPaths = [
+    ...BUILTIN_SOURCES.filter((source) => (enabled?.[source.id] ?? source.enabled)).flatMap((source) => source.id === "agents_md" ? discoverAgentsMdPaths(root) : [candidateContextPath(source.id, root)]),
+    ...(options.contextFiles ?? []).flatMap((path) => {
+      const lexical = resolve(root, path);
+      const rel = relative(root, lexical);
+      if (rel === ".." || rel.startsWith(`..${"/"}`) || isAbsolute(rel)) return [];
+      try {
+        if (!statSync(lexical).isFile()) return [];
+        const realRoot = realpathSync(root);
+        const realFile = realpathSync(lexical);
+        const realRel = relative(realRoot, realFile);
+        return realRel === ".." || realRel.startsWith(`..${"/"}`) || isAbsolute(realRel) ? [] : [realFile];
+      } catch { return []; }
+    }),
+  ].filter((path): path is string => Boolean(path));
   const base = sections.join("\n\n");
   // Startup injection (LoadAndInjectContext): FormatAsXML carries no tags, so
   // SplitContextBlock files everything as ONE ephemeral <swarmos_context>
@@ -401,21 +428,24 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
     const interactive = (ctx as { hasUI?: boolean }).hasUI === true;
     const isolation = cliIsolation();
-    const catalogFor = () => (isolation.noSkills ? "" : getSwarmSkillRegistry(pi as any, { cwd }).catalog(""));
+    const config = loadPromptContextConfig(cwd, undefined, { persistMigration: false });
+    const selectedSkills = config.skills?.mode === "allowlist" ? config.skills.names : undefined;
+    const catalogFor = () => (isolation.noSkills ? "" : getSwarmSkillRegistry(pi as any, { cwd }).catalog("", selectedSkills));
     if (isolation.systemPrompt !== undefined) {
       // Swarm keeps an explicit --system-prompt as the base and still applies
       // skills (prepend, no separator) and context injection on top of it.
       const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
-      const base = injectSwarmContext(isolation.systemPrompt, { workDir: cwd, enabled });
+      const base = injectSwarmContext(isolation.systemPrompt, { workDir: cwd, enabled, files: config.context?.files });
       return { systemPrompt: withSkillCatalog(base, catalogFor()) };
     }
     const selected = resolveActiveSystemPrompt(cwd);
-    // Pi-native and explicitly custom prompts own their exact system-prompt
-    // contents. Leave them untouched; their respective canonical skill loaders
-    // remain responsible for making skills available to the model.
-    if (selected.kind === "pi") return;
-    if (selected.kind === "custom") return { systemPrompt: selected.content };
     const catalog = catalogFor();
+    const selectedBase = selected.kind === "pi" ? event.systemPrompt : selected.kind === "custom" ? selected.content : undefined;
+    if (selectedBase !== undefined) {
+      const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : config.context?.enabledSources;
+      const base = injectSwarmContext(selectedBase, { workDir: cwd, enabled, files: isolation.noContextFiles ? undefined : config.context?.files });
+      return { systemPrompt: withSkillCatalog(base, catalog) };
+    }
     const knownKind = assembledPromptKinds.get(hash(event.systemPrompt));
     if (knownKind === (interactive ? "interactive" : "headless")) return undefined;
     // Already assembled by another prompt layer: keep its content intact.
@@ -429,7 +459,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     if (alreadyAssembled && ((interactive && alreadyAssembled === "interactive") || (!interactive && alreadyAssembled === "headless")) && !forgePrompt) {
       return undefined;
     }
-    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, interactive, headlessForge: !interactive, discoverContextFiles: !isolation.noContextFiles, autogenSkills: interactive ? [] : getSwarmSkillRegistry(pi as any, { cwd }).list(), ...event.swarmPrompt });
+    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, interactive, headlessForge: !interactive, discoverContextFiles: !isolation.noContextFiles, contextEnabled: config.context?.enabledSources, contextFiles: config.context?.files, autogenSkills: interactive ? [] : getSwarmSkillRegistry(pi as any, { cwd }).list(), ...event.swarmPrompt });
     const systemPrompt = withSkillCatalog(assembly.prompt, catalog);
     assembledPromptKinds.set(hash(systemPrompt), interactive ? "interactive" : "headless");
     return { systemPrompt };

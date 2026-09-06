@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 export const MEMORY_ENTRY_TYPE = "pi-swarm-memory";
 export const MEMORY_VERSION = 1;
@@ -125,7 +126,7 @@ export default function memoryHistoryExtension(pi: any): void {
     sessionEntries = ctx?.sessionManager?.getEntries?.() ?? [];
     history.load(sessionEntries);
   });
-  pi.registerTool?.({ name: "memory_history", label: "Memory History", description: "Durable, redacted, workspace/session-scoped memory and history retrieval.", parameters: schema, async execute(_id: string, params: any) {
+  pi.registerTool?.(withDefaultToolRenderer({ name: "memory_history", label: "Memory History", description: "Durable, redacted, workspace/session-scoped memory and history retrieval.", parameters: schema, async execute(_id: string, params: any) {
     try {
       if (params.operation === "remember") {
         const entry = history.remember(params.text ?? "", { ...scope, namespace: params.namespace ?? scope.namespace }, params.tags ?? [], "memory_history");
@@ -141,5 +142,5 @@ export default function memoryHistoryExtension(pi: any): void {
       const result = params.operation === "replay" ? history.replay(requested) : history.search(params.query ?? "", requested, params.limit ?? 20);
       return { content: [{ type: "text", text: JSON.stringify(result) }], details: {} };
     } catch (error) { return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: {} }; }
-  } });
+  } }));
 }

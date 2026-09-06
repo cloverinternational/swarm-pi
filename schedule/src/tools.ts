@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Scheduler } from "./scheduler.js";
+import { withDefaultToolRenderer } from "../../.pi/lib/swarm-tool-renderer.ts";
 
 interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -40,7 +41,7 @@ export interface ScheduleToolAPI {
 }
 
 export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler): void {
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "CronCreate",
     label: "Create schedule",
     description: "Schedule a prompt to run at a future time - either recurring on a cron schedule, or once at a specific time. Uses standard 5-field cron. Pass durable: true to persist to disk; otherwise session-only.",
@@ -68,9 +69,9 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
         message: `Scheduled ${details.type} task ${task.id} (${details.human_schedule}). ${persistence}.`,
       }), null, 2));
     }),
-  });
+  }));
 
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "CronList",
     label: "List schedules",
     description: "List all scheduled cron jobs. Shows task ID, cron expression, schedule type (recurring/one-shot), and persistence mode (durable/session-only).",
@@ -95,9 +96,9 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
       }
       return text({ total_tasks: tasks.length, tasks }, `${output}\n${JSON.stringify(details, null, 2)}`);
     }),
-  });
+  }));
 
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "CronDelete",
     label: "Delete schedule",
     description: "Cancel a scheduled cron job by ID. Removes it from the scheduler and from disk if it was a durable (persisted) task.",
@@ -112,9 +113,9 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
       await scheduler.remove(params.id);
       return text(sorted({ id: params.id, message: `Cancelled scheduled task ${params.id}` }));
     }),
-  });
+  }));
 
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "ScheduleWakeup",
     label: "Schedule wakeup",
     description: "Schedule a prompt to run after a delay. Used for dynamic scheduling where the model decides when to resume.",
@@ -139,5 +140,5 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
         message: `Scheduled wakeup ${task.id} in ${task.delay} (at ${goClock(task.nextFireAt)}).`,
       }));
     }),
-  });
+  }));
 }

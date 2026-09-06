@@ -8,6 +8,7 @@ import {
   type ReadBackgroundParams,
 } from "../lib/swarm-bgprocess.ts";
 import { bashCallComponent, formatBashCall } from "../lib/swarm-bash.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -61,7 +62,7 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   pi.on?.("agent_start", () => { running = true; });
   pi.on?.("agent_end", () => { running = false; pending.push(...midRun.splice(0)); wake(); });
 
-  pi.registerTool?.({
+  pi.registerTool?.(withDefaultToolRenderer({
     name: "Bash",
     label: "Bash",
     description: fixtures.get("Bash")!.description,
@@ -75,8 +76,8 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
         return text(result.text, result.details);
       } catch (e) { return fail(String((e as Error).message ?? e)); }
     },
-  });
-  pi.registerTool?.({
+  }));
+  pi.registerTool?.(withDefaultToolRenderer({
     name: "ReadBackgroundCommand",
     label: "ReadBackgroundCommand",
     description: fixtures.get("ReadBackgroundCommand")!.description,
@@ -92,7 +93,7 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
         return fail(message);
       }
     },
-  });
+  }));
 }
 
 export default function swarmBackgroundBashExtension(pi: Pi): void {

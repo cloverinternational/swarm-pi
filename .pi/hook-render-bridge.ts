@@ -2,6 +2,7 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import { getHookObservations, subscribeHookObservations } from "./hook-observations.ts";
 import { hookRowsVisible } from "./hook-state.ts";
 import { renderHookPresentation } from "./hook-presenter.ts";
+import { withDefaultToolRenderer } from "./lib/swarm-tool-renderer.ts";
 
 const WRAPPED = Symbol.for("pi-swarm-hook-render-wrapper");
 
@@ -31,6 +32,7 @@ class HookRowsComponent extends Container {
 
 export function wrapToolForHookRows(tool: any): any {
   if (!tool || tool[WRAPPED]) return tool;
+  tool = withDefaultToolRenderer(tool);
   trace("renderer-wrapper-created", { tool: tool.name });
   const originalCall = tool.renderCall;
   const originalResult = tool.renderResult;

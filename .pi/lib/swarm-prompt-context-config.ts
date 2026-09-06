@@ -14,11 +14,22 @@ export interface PromptContextConfig {
   tools?: { mode: "default" | "allowlist"; names: string[] };
 }
 
+export type SelectionConfig = { mode: "default" | "allowlist"; names: string[] };
+
 export const CONFIG_FILE = ".pi/prompt-context.json";
 export const LEGACY_PROMPT_FILE = ".pi/system-prompts.json";
 
 const clean = (value: string) => value.replace(/\r\n/g, "\n").trim();
 const unique = (values: unknown[]) => [...new Set(values.filter((v): v is string => typeof v === "string" && v.trim() !== "").map(v => v.trim()))];
+
+/** Apply persisted selection without making default mode destructive. */
+export function effectiveSelection<T extends string>(available: readonly T[], selection?: SelectionConfig): T[] {
+  return selection?.mode === "allowlist" ? available.filter(name => selection.names.includes(name)) : [...available];
+}
+
+export function selectionAllows(name: string, selection?: SelectionConfig): boolean {
+  return selection?.mode !== "allowlist" || selection.names.includes(name);
+}
 
 export function promptContextConfigPath(cwd: string): string { return join(resolve(cwd), CONFIG_FILE); }
 export function legacyPromptPath(cwd: string): string { return join(resolve(cwd), LEGACY_PROMPT_FILE); }
@@ -67,7 +78,7 @@ function legacyConfig(cwd: string): PromptContextConfig | undefined {
 }
 
 /** Load, migrate, and normalize the workspace configuration without deleting legacy state. */
-export function loadPromptContextConfig(cwd: string, onRepair?: (message: string) => void): PromptContextConfig {
+export function loadPromptContextConfig(cwd: string, onRepair?: (message: string) => void, options: { persistMigration?: boolean } = {}): PromptContextConfig {
   const path = promptContextConfigPath(cwd);
   const hadConfig = existsSync(path);
   const parsed = hadConfig ? readJSON(path) : undefined;
@@ -76,7 +87,7 @@ export function loadPromptContextConfig(cwd: string, onRepair?: (message: string
     const legacy = legacyConfig(cwd);
     if (legacy) {
       config = legacy;
-      atomicWrite(path, config);
+      if (options.persistMigration !== false) atomicWrite(path, config);
       onRepair?.("Migrated .pi/system-prompts.json to .pi/prompt-context.json.");
     }
   } else if (parsed === undefined || (parsed as any)?.version !== 1) {
@@ -90,7 +101,7 @@ export function loadPromptContextConfig(cwd: string, onRepair?: (message: string
   if (legacy) {
     const names = new Set(config.prompts.map(p => p.name));
     const missing = legacy.prompts.filter(p => !names.has(p.name));
-    if (missing.length) { config = { ...config, prompts: [...config.prompts, ...missing] }; atomicWrite(path, config); }
+    if (missing.length) { config = { ...config, prompts: [...config.prompts, ...missing] }; if (options.persistMigration !== false) atomicWrite(path, config); }
   }
   return config;
 }

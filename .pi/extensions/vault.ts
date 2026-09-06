@@ -1,4 +1,5 @@
 import { vaultAdd, vaultList, vaultRemove, type VaultRuntime } from "../lib/swarm-vault-tools.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 type UI = { input?: (title: string, initial?: string) => Promise<string | undefined>; notify?: (message: string, type?: string) => void };
 type Pi = { registerCommand?: (name: string, spec: { description: string; handler: (args: string, ctx: { ui?: UI }) => Promise<void> }) => void; registerTool?: (tool: unknown) => void };
@@ -22,7 +23,7 @@ const toolRegistrations = new WeakSet<object>();
 export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
   if (toolRegistrations.has(pi as object)) return;
   toolRegistrations.add(pi as object);
-  pi.registerTool?.({
+  pi.registerTool?.(withDefaultToolRenderer({
     name: "vault",
     label: "Credential vault",
     description: "Store, list, or remove global credentials in the transparent local vault. Secrets are not encrypted; the user assumes all risk.",
@@ -33,7 +34,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
       if (input?.action === "remove") return text(await vaultRemove(input, vault));
       return text({ success: false, error: "action must be add, list, or remove" });
     },
-  });
+  }));
 }
 
 export function registerVault(pi: Pi, vault?: VaultRuntime): void {

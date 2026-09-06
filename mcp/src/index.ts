@@ -1,3 +1,4 @@
+import { withDefaultToolRenderer } from "../../.pi/lib/swarm-tool-renderer.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -46,7 +47,7 @@ export function createClient(m:MCPManifest, closed=true): MCPClient { const erro
 
 export class MCPManager { private clients=new Map<string,MCPClient>(); private discovered=new Map<string,MCPTool[]>(); constructor(private manifests:MCPManifest[], private opts:{closed?:boolean; registerTool?:(tool:unknown)=>void}={}) { for(const m of manifests){const errs=validateManifest(m,opts.closed??true); if(errs.length) throw new MCPError("config",`${m.id}: ${errs.join("; ")}`); } }
   manifestsList(){return this.manifests.map(m=>({...m, headers:undefined, oauth:m.oauth?{tokenEnv:m.oauth.tokenEnv,scopes:m.oauth.scopes}:undefined}));}
-  async discover(id:string){const m=this.manifests.find(x=>x.id===id); if(!m)throw new MCPError("config",`unknown MCP server ${id}`); if(this.discovered.has(id))return this.discovered.get(id)!; const c=createClient(m,this.opts.closed??true); await c.initialize(); const tools=allowedTools(m,await c.listTools()); this.clients.set(id,c); this.discovered.set(id,tools); for(const t of tools)this.opts.registerTool?.({name:`mcp__${id}__${t.name}`,label:t.name,description:t.description??`MCP tool ${t.name}`,parameters:t.inputSchema??{type:"object"},execute:(_call:string,args:unknown,signal?:AbortSignal)=>c.callTool(t.name,args,signal)}); return tools; }
+  async discover(id:string){const m=this.manifests.find(x=>x.id===id); if(!m)throw new MCPError("config",`unknown MCP server ${id}`); if(this.discovered.has(id))return this.discovered.get(id)!; const c=createClient(m,this.opts.closed??true); await c.initialize(); const tools=allowedTools(m,await c.listTools()); this.clients.set(id,c); this.discovered.set(id,tools); for(const t of tools)this.opts.registerTool?.(withDefaultToolRenderer({name:`mcp__${id}__${t.name}`,label:t.name,description:t.description??`MCP tool ${t.name}`,parameters:t.inputSchema??{type:"object"},execute:(_call:string,args:unknown,signal?:AbortSignal)=>c.callTool(t.name,args,signal)})); return tools; }
   async call(server:string,tool:string,args:unknown,signal?:AbortSignal){if(!this.discovered.has(server))await this.discover(server); const c=this.clients.get(server)!; if(!this.discovered.get(server)!.some(t=>t.name===tool))throw new MCPError("denied",`tool ${tool} is not allowed`); return c.callTool(tool,args,signal);}
   async close(){await Promise.all([...this.clients.values()].map(c=>c.close())); this.clients.clear();}
 }

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmSkills } from "../../.pi/extensions/swarm-skills.ts";
+import { savePromptContextConfig } from "../../.pi/lib/swarm-prompt-context-config.ts";
 
 function makeSkill(root: string) {
   const dir = join(root, "probe-skill");
@@ -40,5 +41,22 @@ describe("Pi skill progressive disclosure", () => {
     expect(traversal.isError).toBe(true);
     const missing = await view.execute("missing", { name: "does-not-exist" });
     expect(missing.isError).toBe(true);
+  });
+
+  it("applies the persisted skill allowlist to inspection and viewing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-skill-exposure-"));
+    makeSkill(root);
+    const other = join(root, "other-skill");
+    mkdirSync(other, { recursive: true });
+    writeFileSync(join(other, "SKILL.md"), "---\nname: other-skill\ndescription: Other\n---\nOther instructions");
+    savePromptContextConfig(root, { version: 1, prompts: [], skills: { mode: "allowlist", names: ["probe-skill"] } });
+    const tools = new Map<string, any>();
+    const pi = { getCwd: () => root, registerTool: (tool: any) => tools.set(tool.name, tool), on() {}, registerCommand() {} };
+    registerSwarmSkills(pi, { closed: true, cliPaths: [root] });
+    const listed = await tools.get("skills_list").execute("list", {});
+    expect(listed.content[0].text).toContain("probe-skill");
+    expect(listed.content[0].text).not.toContain("other-skill");
+    const hidden = await tools.get("skill_view").execute("view", { name: "other-skill" });
+    expect(hidden.isError).toBe(true);
   });
 });

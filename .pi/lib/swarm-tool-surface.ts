@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withDefaultToolRenderer } from "./swarm-tool-renderer.ts";
 
 export interface CanonicalTool { name: string; description: string; parameters: unknown }
 
@@ -55,7 +56,8 @@ export const PERMISSIVE_PARAMETERS = { type: "object" } as const;
 /** Overlay Swarm's canonical description onto a Pi tool definition by name and relax its validator. */
 export function applySwarmSurface<T extends { name: string; description?: string; parameters?: unknown }>(tool: T): T {
   const canonical = loadSwarmCanonicalTools().get(tool.name);
-  return (canonical ? { ...tool, description: canonical.description, parameters: { ...PERMISSIVE_PARAMETERS } } : tool) as T;
+  const surfaced = canonical ? { ...tool, description: canonical.description, parameters: { ...PERMISSIVE_PARAMETERS } } : tool;
+  return withDefaultToolRenderer(surfaced) as T;
 }
 
 /**

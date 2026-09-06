@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 import { newErrorID } from "../lib/swarm-bash.ts";
 
 function exaKey() {
@@ -21,18 +22,23 @@ const schema = {
   type: "object", required: ["query"], additionalProperties: false,
   properties: {
     query: { type: "string", description: "Search query" },
-    num_results: { type: "integer", minimum: 1, maximum: 20 },
-    search_type: { type: "string", enum: ["auto", "neural", "fast", "instant", "deep-lite", "deep"] },
+    max_results: { type: "integer", minimum: 1, maximum: 20 },
+    type: { type: "string", enum: ["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"] },
     category: { type: "string" },
     allowed_domains: { type: "array", items: { type: "string" }, maxItems: 10 },
+    blocked_domains: { type: "array", items: { type: "string" }, maxItems: 10 },
     excluded_domains: { type: "array", items: { type: "string" }, maxItems: 10 },
     start_published_date: { type: "string" }, end_published_date: { type: "string" },
+    user_location: { type: "string", minLength: 2, maxLength: 2 },
+    moderation: { type: "boolean" },
+    additional_queries: { type: "array", items: { type: "string" }, maxItems: 10 },
+    system_prompt: { type: "string", maxLength: 4000 },
   },
 } as const;
 
 export default function exaSearchExtension(rawPi: any) {
   const pi = withSwarmToolSurface(rawPi);
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "websearch", label: "Web Search (Exa)",
     description: "Search the web using Exa AI, matching Swarm's websearch tool. Requires EXA_API_KEY or ~/.swarmos/credentials.json providers.Exa.api_key. Returns concise highlights and source URLs.",
     parameters: schema,
@@ -45,7 +51,10 @@ export default function exaSearchExtension(rawPi: any) {
       if (params.query === "") invalid("query cannot be empty");
       if (Buffer.byteLength(params.query) > 1000) invalid("query exceeds maximum length of 1000 characters");
       if (typeof params.max_results === "number" && (params.max_results < 1 || params.max_results > 20)) invalid("max_results must be between 1 and 20");
-      if ("allowed_domains" in params && "blocked_domains" in params) invalid("allowed_domains and blocked_domains cannot both be specified in the same request");
+      const hasDomains = (key: string) => Array.isArray(params?.[key]) && params[key].some((v: any) => typeof v === "string" && v.trim());
+      if (hasDomains("allowed_domains") && (hasDomains("blocked_domains") || hasDomains("excluded_domains"))) invalid("allowed_domains and blocked_domains cannot both be specified in the same request");
+      if (hasDomains("blocked_domains") && hasDomains("excluded_domains")) invalid("blocked_domains and excluded_domains cannot both be specified in the same request");
+      if (params.category && ["company", "people"].includes(params.category) && ((hasDomains("blocked_domains") || hasDomains("excluded_domains")) || params.start_published_date || params.end_published_date)) invalid("category company/people does not support excluded domains or publication date filters");
       if (typeof params.type === "string" && params.type !== "" && !["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"].includes(params.type)) invalid(`invalid search type ${JSON.stringify(params.type)}; must be one of: auto, neural, fast, instant, deep-lite, deep, deep-reasoning, deep-max`);
       // websearch.New: EXA_API_KEY selects the Exa backend, otherwise the
       // Anthropic OAuth backend reads ~/.swarm/config/oauth/anthropic.json
@@ -68,7 +77,7 @@ export default function exaSearchExtension(rawPi: any) {
       }
       return runExa(key, params, signal);
     },
-  });
+  }));
 }
 
 async function runExa(key: string, params: any, signal: AbortSignal) {
@@ -76,7 +85,8 @@ async function runExa(key: string, params: any, signal: AbortSignal) {
       // Prefer the allow-list if both are supplied. This keeps permissive model
       // tool calls from becoming provider validation failures.
       const allowedDomains = Array.isArray(params.allowed_domains) ? params.allowed_domains.filter((v: any) => typeof v === "string" && v.trim()) : [];
-      const excludedDomains = allowedDomains.length ? [] : (Array.isArray(params.excluded_domains) ? params.excluded_domains.filter((v: any) => typeof v === "string" && v.trim()) : []);
+      const blockedDomains = Array.isArray(params.blocked_domains) ? params.blocked_domains.filter((v: any) => typeof v === "string" && v.trim()) : [];
+      const excludedDomains = Array.isArray(params.excluded_domains) ? params.excluded_domains.filter((v: any) => typeof v === "string" && v.trim()) : [];
       // The tool caller may supply optional fields as empty strings. Exa rejects
       // empty date strings ("Invalid date format"), so normalize those away and
       // validate dates before sending the request.
@@ -89,12 +99,16 @@ async function runExa(key: string, params: any, signal: AbortSignal) {
       const startPublishedDate = optionalDate(params.start_published_date);
       const endPublishedDate = optionalDate(params.end_published_date);
       const body: any = {
-        query, type: params.search_type ?? "auto", numResults: params.num_results ?? 10,
+        query, type: params.type ?? "auto", numResults: params.max_results ?? 10,
         category: params.category,
         includeDomains: allowedDomains.length ? allowedDomains : undefined,
-        excludeDomains: excludedDomains.length ? excludedDomains : undefined,
+        excludeDomains: blockedDomains.length ? blockedDomains : (excludedDomains.length ? excludedDomains : undefined),
+        userLocation: params.user_location,
+        moderation: params.moderation,
+        additionalQueries: Array.isArray(params.additional_queries) && params.additional_queries.length ? params.additional_queries : undefined,
+        systemPrompt: params.system_prompt,
         startPublishedDate, endPublishedDate,
-        contents: { highlights: { numSentences: 5, highlightsPerUrl: 3, query } },
+        contents: { highlights: { query, maxCharacters: 4000 } },
       };
       const clean = (value: any): any => {
         if (Array.isArray(value)) return value.length ? value : undefined;
@@ -108,7 +122,7 @@ async function runExa(key: string, params: any, signal: AbortSignal) {
       const endpoint = `${process.env.EXA_BASE_URL ?? "https://api.exa.ai"}/search`;
       const request = (payload: any) => fetch(endpoint, {
         method: "POST",
-        headers: { "x-api-key": key, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify(payload), signal,
       });
       let response: Response;

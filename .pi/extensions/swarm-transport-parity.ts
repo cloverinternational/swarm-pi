@@ -9,6 +9,7 @@ import {
 import { gateActiveTools } from "../lib/swarm-tool-gating.ts";
 import { loadSwarmCanonicalTools } from "../lib/swarm-tool-surface.ts";
 import { HOOK_SLOT_TYPE, type HookSlotPart } from "../lib/swarm-builtin-hooks-runtime.ts";
+import { effectiveSelection, loadPromptContextConfig } from "../lib/swarm-prompt-context-config.ts";
 
 type Pi = any;
 
@@ -45,7 +46,15 @@ export function registerSwarmTransportParity(pi: Pi): void {
   let interactive = false;
   const alignTools = () => {
     const active: string[] = pi.getActiveTools?.() ?? [];
-    const gated = gateActiveTools(active, { interactive }) ?? active;
+    const available: string[] = (pi.getAllTools?.() ?? []).map((tool: any) => tool.name).filter((name: any): name is string => typeof name === "string");
+    const configured = loadPromptContextConfig(pi.getCwd?.() ?? process.cwd(), undefined, { persistMigration: false }).tools;
+    // Default mode preserves Pi's current runtime selection. An allowlist is
+    // authoritative and may re-enable a tool after a prior selection changed
+    // the active set; restore-defaults explicitly restores all registrations.
+    const selected = configured?.mode === "allowlist"
+      ? effectiveSelection(available.length ? available : active, configured)
+      : active;
+    const gated = gateActiveTools(selected, { interactive }) ?? selected;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
   };

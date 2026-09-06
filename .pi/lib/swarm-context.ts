@@ -13,8 +13,8 @@
  * (no MCP sources, no user overrides, no nested INDEX.md tracking).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, openSync, readSync, closeSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { existsSync, openSync, readSync, closeSync, readFileSync, statSync, realpathSync } from "node:fs";
+import { basename, join, relative, resolve, isAbsolute } from "node:path";
 
 export const CACHED_START = "<swarmos_cached_context>";
 export const CACHED_END = "</swarmos_cached_context>";
@@ -24,6 +24,9 @@ export const EPHEMERAL_END = "</swarmos_context>";
 export const DEFAULT_MAX_SOURCE_CHARS = 4000;
 export const DEFAULT_MAX_SOURCE_LINES = 200;
 export const DEFAULT_MAX_TOTAL_CHARS = 20000;
+export const DEFAULT_MAX_EXPLICIT_FILE_BYTES = 128 * 1024;
+export const DEFAULT_MAX_EXPLICIT_FILE_LINES = 4000;
+export const DEFAULT_MAX_EXPLICIT_FILES_BYTES = 512 * 1024;
 
 export type CachePolicy = "cached" | "ephemeral";
 export interface SourceSpec { id: string; name: string; enabled: boolean; cache: CachePolicy }
@@ -48,8 +51,13 @@ export interface ContextOptions {
   maxSourceChars?: number;
   maxSourceLines?: number;
   maxTotalChars?: number;
+  maxExplicitFileBytes?: number;
+  maxExplicitFileLines?: number;
+  maxExplicitFilesBytes?: number;
   /** Override enabled flags by source id (mirrors user config). */
   enabled?: Partial<Record<string, boolean>>;
+  /** Explicit workspace files selected in prompt-context configuration. */
+  files?: string[];
 }
 
 // Go strings.TrimSpace trims Unicode whitespace; JS trim() is a superset that
@@ -173,6 +181,34 @@ export function loadSourceContent(spec: SourceSpec, options: ContextOptions): st
   }
 }
 
+function explicitFiles(options: ContextOptions): Array<{ name: string; content: string }> {
+  const root = resolve(options.workDir);
+  const maxBytes = options.maxExplicitFileBytes && options.maxExplicitFileBytes > 0 ? options.maxExplicitFileBytes : DEFAULT_MAX_EXPLICIT_FILE_BYTES;
+  const maxLines = options.maxExplicitFileLines && options.maxExplicitFileLines > 0 ? options.maxExplicitFileLines : DEFAULT_MAX_EXPLICIT_FILE_LINES;
+  const maxTotal = options.maxExplicitFilesBytes && options.maxExplicitFilesBytes > 0 ? options.maxExplicitFilesBytes : DEFAULT_MAX_EXPLICIT_FILES_BYTES;
+  let remaining = maxTotal;
+  return [...new Set(options.files ?? [])].sort().flatMap((candidate) => {
+    if (remaining <= 0) return [];
+    const lexical = resolve(root, candidate);
+    const rel = relative(root, lexical);
+    if (rel === ".." || rel.startsWith(`..${"/"}`) || isAbsolute(rel)) return [];
+    try {
+      if (!statSync(lexical).isFile()) return [];
+      const realRoot = realpathSync(root);
+      const realFile = realpathSync(lexical);
+      const realRel = relative(realRoot, realFile);
+      if (realRel === ".." || realRel.startsWith(`..${"/"}`) || isAbsolute(realRel)) return [];
+      const raw = readFileSync(realFile, "utf8");
+      const boundedLines = raw.replace(/\n+$/, "").split("\n").slice(0, maxLines).join("\n");
+      const bytes = Math.min(Buffer.byteLength(boundedLines), maxBytes, remaining);
+      if (bytes <= 0) return [];
+      const content = Buffer.from(boundedLines).subarray(0, bytes).toString("utf8");
+      remaining -= Buffer.byteLength(content);
+      return [{ name: `file:${rel || basename(lexical)}`, content }];
+    } catch { return []; }
+  });
+}
+
 /** orchestrator.go trimSourceContent. Byte-based like Go's len()/slicing. */
 export function trimSourceContent(content: string, maxChars: number, maxLines: number): { text: string; truncated: boolean } {
   let truncated = false;
@@ -231,6 +267,7 @@ export function buildContextBlock(options: ContextOptions): { cached: string; ep
     if (trimSpace(content) === "") continue;
     (spec.cache === "ephemeral" ? ephemeralSources : cachedSources).push({ name: spec.name, content });
   }
+  cachedSources.push(...explicitFiles(options));
   let cached = renderSources(cachedSources, maxSourceChars, maxSourceLines);
   let ephemeral = renderSources(ephemeralSources, maxSourceChars, maxSourceLines);
   let remaining = maxTotalChars;

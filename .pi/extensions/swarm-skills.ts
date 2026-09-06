@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { getSwarmSkillRegistry, type SkillLoaderOptions } from "../lib/swarm-skill-registry.ts";
 import { resolveSkillFile } from "../../skills/src/index.ts";
+import { loadPromptContextConfig, selectionAllows } from "../lib/swarm-prompt-context-config.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 export interface SwarmSkillsOptions extends SkillLoaderOptions { watch?: boolean; }
 
@@ -9,6 +11,8 @@ export function registerSwarmSkills(pi: any, options: SwarmSkillsOptions = {}) {
   // Closed mode remains explicit and only admits the configured CLI paths.
   const registry = getSwarmSkillRegistry(pi, { ...options, cwd: options.cwd ?? pi.getCwd?.() ?? process.cwd(), closed: options.closed ?? (process.env.SWARM_SKILLS_CLOSED === "1"), autogenDir: options.autogenDir ?? process.env.SWARM_AUTOGEN_DIR ?? undefined, allowedNames: options.allowedNames ?? options.allowedSkills, allowedSkills: options.allowedSkills ?? options.allowedNames });
   let current = registry.refresh();
+  const selected = () => loadPromptContextConfig(options.cwd ?? pi.getCwd?.() ?? process.cwd(), undefined, { persistMigration: false }).skills;
+  const visible = () => current.skills.filter(skill => selectionAllows(skill.name, selected()));
   const refresh = () => { current = registry.refresh(); };
   if (options.watch) registry.loader.watch(refresh);
   pi.on?.("session_start", refresh);
@@ -17,28 +21,28 @@ export function registerSwarmSkills(pi: any, options: SwarmSkillsOptions = {}) {
   // systemPrompt writer here can overwrite the Forge assembly.
   pi.registerCommand?.("skill", { description: "List discovered Swarm skills and their sources", handler: async (_args: string, ctx: any) => {
     current = registry.refresh();
-    const text = current.skills.map(s => `${s.name} [${s.source}] — ${s.description}`).join("\n") || "No skills discovered";
+    const text = visible().map(s => `${s.name} [${s.source}] — ${s.description}`).join("\n") || "No skills discovered";
     ctx.ui?.notify?.(text, "info");
   }});
   pi.registerCommand?.("swarm-skills", { description: "List discovered Swarm skills", handler: async (args: string, ctx: any) => {
     current = registry.refresh();
     const requested = args.trim();
     const skill = requested ? registry.find(requested) : undefined;
-    ctx.ui?.notify?.(skill ? `${skill.name} [${skill.source}]\n${skill.description}` : current.skills.map(s => `${s.name} [${s.source}] — ${s.description}`).join("\n") || "No skills discovered", "info");
+    ctx.ui?.notify?.(skill && selectionAllows(skill.name, selected()) ? `${skill.name} [${skill.source}]\n${skill.description}` : visible().map(s => `${s.name} [${s.source}] — ${s.description}`).join("\n") || "No skills discovered", "info");
   }});
   // Expose progressive disclosure directly, like Hermes: metadata is visible in
   // the prompt, while full instructions and support files are loaded on demand.
-  pi.registerTool?.({
+  pi.registerTool?.(withDefaultToolRenderer({
     name: "skills_list",
     label: "List skills",
     description: "List available skills with metadata. Use skill_view to load one.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     execute: async () => {
       current = registry.refresh();
-      return { content: [{ type: "text", text: JSON.stringify({ skills: current.skills.filter(s => !s.disableModelInvocation).map(s => ({ name: s.name, description: s.description, source: s.source, supportFiles: s.supportFiles.map(path => path.slice(s.dir.length + 1)) })) }) }], details: {} };
+      return { content: [{ type: "text", text: JSON.stringify({ skills: visible().filter(s => !s.disableModelInvocation).map(s => ({ name: s.name, description: s.description, source: s.source, supportFiles: s.supportFiles.map(path => path.slice(s.dir.length + 1)) })) }) }], details: {} };
     },
-  });
-  pi.registerTool?.({
+  }));
+  pi.registerTool?.(withDefaultToolRenderer({
     name: "skill_view",
     label: "View skill",
     description: "Load a skill's SKILL.md or one of its support files.",
@@ -49,7 +53,7 @@ export function registerSwarmSkills(pi: any, options: SwarmSkillsOptions = {}) {
     execute: async (_id: string, params: { name: string; file_path?: string }) => {
       current = registry.refresh();
       const skill = registry.find(params.name);
-      if (!skill || skill.disableModelInvocation) return { content: [{ type: "text", text: JSON.stringify({ success: false, error: `skill not found: ${params.name}` }) }], isError: true, details: {} };
+      if (!skill || !selectionAllows(skill.name, selected()) || skill.disableModelInvocation) return { content: [{ type: "text", text: JSON.stringify({ success: false, error: `skill not found: ${params.name}` }) }], isError: true, details: {} };
       try {
         const path = resolveSkillFile(skill, params.file_path ?? "SKILL.md");
         const content = readFileSync(path, "utf8");
@@ -59,7 +63,7 @@ export function registerSwarmSkills(pi: any, options: SwarmSkillsOptions = {}) {
         return { content: [{ type: "text", text: JSON.stringify({ success: false, error: message }) }], isError: true, details: {} };
       }
     },
-  });
+  }));
   return { loader: registry.loader, registry, getResult: () => current };
 }
 

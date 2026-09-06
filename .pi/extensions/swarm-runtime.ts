@@ -6,6 +6,7 @@ import { registerSwarmPrompt } from "./swarm-prompt.ts";
 import { DaemonRpcClient, createDaemonControlTask, createDaemonGoalLoop } from "../../runtime-contracts/src/daemon-rpc.ts";
 import { registerGoalLoop } from "../../runtime-contracts/src/goal-loop.ts";
 import { registerControlTaskTools } from "./control-task-tools.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 type RuntimeState = { initialized: boolean; cwd: string; agents?: AgentManager; policy?: Policy; mcp?: MCPManager; daemon?: DaemonRpcClient; daemonStatus: "configured" | "unavailable"; };
 const runtimeByPi = new WeakMap<object, RuntimeState>();
@@ -27,7 +28,7 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
   state.daemon = daemon;
   registerGoalLoop(pi, daemon ? createDaemonGoalLoop(daemon) : unavailable("goal/loop"));
   registerControlTaskTools(pi, daemon ? createDaemonControlTask(daemon) : unavailable("goal/task/run"));
-  pi.registerTool?.({ name: "daemon_status", label: "daemon status", description: "Show production daemon configuration status.", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: JSON.stringify({ status: state.daemonStatus, configured }) }], details: { status: state.daemonStatus, configured } }) });
+  pi.registerTool?.(withDefaultToolRenderer({ name: "daemon_status", label: "daemon status", description: "Show production daemon configuration status.", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: JSON.stringify({ status: state.daemonStatus, configured }) }], details: { status: state.daemonStatus, configured } }) }));
   runtimeByPi.set(pi as object, state);
 
   // Establish prompt and resource policy before feature registration.
@@ -40,7 +41,7 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
   state.agents = registerAgents(pi, new AgentManager({ cwd, concurrency: 4, runner: createPiRunner(pi) }));
   pi.on?.("session_shutdown", () => { state.mcp?.close(); state.daemon?.close(); });
   const manifests = pi.mcpManifests ?? [];
-  if (Array.isArray(manifests)) state.mcp = new MCPManager(manifests, { closed: options.closed ?? true, registerTool: tool => pi.registerTool(tool) });
+  if (Array.isArray(manifests)) state.mcp = new MCPManager(manifests, { closed: options.closed ?? true, registerTool: tool => pi.registerTool(withDefaultToolRenderer(tool as any)) });
   pi.registerCommand?.("swarm-runtime", { description: "Inspect integrated Pi-Swarm runtime", handler: async (_args: string, ctx: any) => ctx.ui?.notify?.(`Pi-Swarm runtime active at ${cwd}; mcp=${manifests.length}`, "info") });
   return state;
 }

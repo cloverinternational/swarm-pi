@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { lstatSync } from "node:fs";
 import { runLegacyConfigMigration } from "./swarm-configmigrate.ts";
 import { SkillLoader, generateRankedAvailableSkillsXML, loadSkillFromDir, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
+import { effectiveSelection } from "./swarm-prompt-context-config.ts";
 
 /** Canonical registry shared by discovery, Forge catalogues, and Skill invocation. */
 export class SwarmSkillRegistry {
@@ -49,7 +50,10 @@ export class SwarmSkillRegistry {
   list() { return this.result.skills; }
   find(name: string) { return this.result.skills.find(s => s.name === name); }
   /** skills_manager.go GetPromptContextForQuery ranks loader.List() unfiltered: disable-model-invocation skills still appear in <available_skills> (only the Skill tool refuses them). */
-  catalog(query = "") { return generateRankedAvailableSkillsXML(rankSkillsForContext(this.result.skills, query)); }
+  catalog(query = "", allowed?: readonly string[]) {
+    const skills = allowed ? effectiveSelection(this.result.skills, { mode: "allowlist", names: [...allowed] }) : this.result.skills;
+    return generateRankedAvailableSkillsXML(rankSkillsForContext(skills, query));
+  }
   /**
    * tools/skilltools/skill_tool.go Invoke: resolve, refuse
    * disable-model-invocation, prefix "Base directory for this skill: <Path>"

@@ -15,6 +15,7 @@ import {
   validatePlanContent,
   writePlanFile,
 } from "../lib/swarm-plan-mode.ts";
+import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 import { randomUUID } from "node:crypto";
 import { newErrorID } from "../lib/swarm-bash.ts";
 
@@ -103,7 +104,7 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
   const planConfig: PlanFileConfig = { workspace: cwd };
   const canonicalPlanPath = () => planFilePath(planConfig, processSessionId(), join(process.env.SWARM_HOME || join(homedir(), ".swarm"), "conversations"));
 
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "enter_plan_mode",
     label: "Enter Plan Mode",
     description: "Enter Plan Mode to explore, resolve user-dependent decisions, write a plan, and submit it for approval. Plan Mode does not change normal permissions.",
@@ -115,9 +116,9 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
       try { if (!controller.isActive()) controller.enter(); return textResult(enterPlanToolResult(cwd), controller.snapshotOf()); }
       catch (error) { return errorResult(error); }
     },
-  });
+  }));
 
-  pi.registerTool({
+  pi.registerTool(withDefaultToolRenderer({
     name: "exit_plan_mode",
     label: "Exit Plan Mode",
     description: "Submit a workspace-local Markdown plan for approval. Use plan_file or inline plan, never both. Rejection returns feedback and keeps Plan Mode active.",
@@ -170,7 +171,7 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
       controller.finishApproval(response);
       return textResult(exitPlanApprovedResult(finalPlan, response.clearContext ?? false), controller.snapshotOf());
     },
-  });
+  }));
 
   pi.registerCommand?.("plan-mode", { description: "Inspect current Swarm Plan Mode state", handler: async (_args, ctx) => { ctx.ui?.notify?.(JSON.stringify(controller.snapshotOf(), null, 2), "info"); } });
   return controller;
