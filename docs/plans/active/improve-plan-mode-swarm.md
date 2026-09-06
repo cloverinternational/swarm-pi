@@ -40,7 +40,7 @@ not explicitly preserve the approved/edited plan for subsequent enforcement.
 - `docs/plans/active/improve-plan-mode-swarm.md`
   - This implementation plan and acceptance record.
 
-Do not modify `upstream/`; it is reference material only.
+Do not modify `vendor/`; it is reference material only.
 
 ## Implementation steps
 
@@ -108,5 +108,5 @@ Do not modify `upstream/`; it is reference material only.
   context-clearance state.
 - A hydrated active snapshot preserves plan ID, history, interaction, and
   first-tool state without duplicate injections.
-- No source under `upstream/` is changed, and any remaining Pi/Swarm mismatch
+- No source under `vendor/` is changed, and any remaining Pi/Swarm mismatch
   is named as a bounded adapter limitation.

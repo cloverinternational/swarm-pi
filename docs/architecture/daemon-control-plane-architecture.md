@@ -334,10 +334,10 @@ redaction.
 - `runtime-contracts/README.md`
 - `docs/architecture/modular-pi-architecture.md`,
   `docs/reference/pi-missing-tools-and-ecosystem.md`
-- `upstream/swarm-sdk/internal/tools/builtin/{cron_scheduler,schedule_wakeup}.go`
-- `upstream/swarm-sdk/harness/schedules.go`
+- `vendor/swarm-sdk/internal/tools/builtin/{cron_scheduler,schedule_wakeup}.go`
+- `vendor/swarm-sdk/harness/schedules.go`
 - upstream Pi extension/session references under
-  `upstream/pi-mono/packages/coding-agent`
+  `vendor/pi-mono/packages/coding-agent`
 - upstream scheduler/tool contract discovery: Swarm daemon REST/MCP patterns
   and typed schedule/task lifecycle APIs.
 

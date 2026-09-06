@@ -19,9 +19,9 @@ registry in two phases:
 
 Evidence:
 
-- `upstream/swarm-sdk/internal/skills/loader.go:13–25, 36–80`
-- `upstream/swarm-sdk/internal/skills/loader.go:83–107`
-- `upstream/swarm-sdk/internal/skills/registry.go:16–35, 129–183`
+- `vendor/swarm-sdk/internal/skills/loader.go:13–25, 36–80`
+- `vendor/swarm-sdk/internal/skills/loader.go:83–107`
+- `vendor/swarm-sdk/internal/skills/registry.go:16–35, 129–183`
 
 Search paths have policy implications:
 
@@ -76,7 +76,7 @@ the current behavior explicit:
 - `AutoActivate` is a no-op;
 - skills are invoked on demand through the skill tool.
 
-Evidence: `upstream/swarm-sdk/internal/skills/loader.go:186–239`.
+Evidence: `vendor/swarm-sdk/internal/skills/loader.go:186–239`.
 
 This means the Pi port should not recreate trigger-based implicit prompt
 activation as a second mechanism. Use Pi's on-demand skill/resource model, and
@@ -95,7 +95,7 @@ defines three modes:
 | manual | skill creation works, automatic nudges do not |
 | auto | metrics, nudges, creation, patching, and curator behavior are active |
 
-Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/service.go:15–24`.
+Evidence: `vendor/swarm-sdk/internal/skills/autogenskills/service.go:15–24`.
 
 The service tracks turn, tool-call, error, resolved-error, nudge, and
 skill-created metrics. It exposes lifecycle hooks, programmatic creation,
@@ -121,7 +121,7 @@ The `SkillFactory` is the only supported creation path. It:
 - registers the new skill immediately;
 - increments creation metrics.
 
-Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/factory.go:213–300`.
+Evidence: `vendor/swarm-sdk/internal/skills/autogenskills/factory.go:213–300`.
 
 `SkillManage` adds stronger review controls:
 
@@ -133,7 +133,7 @@ Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/factory.go:213–300
 - `history` and `undo` preserve reversible revisions;
 - `review` records that no mutation was needed.
 
-Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/skillmanage.go:18–79,
+Evidence: `vendor/swarm-sdk/internal/skills/autogenskills/skillmanage.go:18–79,
 99–150`.
 
 Pi implementation requirement:
@@ -177,7 +177,7 @@ patch
 consolidate
 ```
 
-Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/curator.go:17–70`.
+Evidence: `vendor/swarm-sdk/internal/skills/autogenskills/curator.go:17–70`.
 
 The curator does not mean “automatically rewrite whatever looks similar.”
 Pinned entries are protected, archival is recoverable, consolidation must
@@ -198,7 +198,7 @@ tool execution. It:
 - asks for patch/umbrella extension/support-file preservation;
 - emits a durable reminder through the hook budget.
 
-Evidence: `upstream/swarm-sdk/internal/skills/autogenskills/hook.go:15–25,
+Evidence: `vendor/swarm-sdk/internal/skills/autogenskills/hook.go:15–25,
 44–79, 90–208, 223–278`.
 
 The Pi translation is a `tool_result` observer plus `turn_end`/task-state
@@ -268,8 +268,8 @@ Swarm deliberately consolidates task operations behind one structured
 
 Evidence:
 
-- `upstream/swarm-sdk/internal/tools/ii/task_manage.go:10–115`
-- `upstream/swarm-sdk/internal/tools/ii/task_operation.go:11–107`
+- `vendor/swarm-sdk/internal/tools/ii/task_manage.go:10–115`
+- `vendor/swarm-sdk/internal/tools/ii/task_operation.go:11–107`
 
 ### Transaction semantics
 
@@ -283,7 +283,7 @@ manager and commits all changes only if every operation succeeds. On failure:
 - operation-key registrations are not leaked;
 - persistence failure rolls the candidate state back.
 
-Evidence: `upstream/swarm-sdk/internal/tools/ii/task_manage.go:197–350`.
+Evidence: `vendor/swarm-sdk/internal/tools/ii/task_manage.go:197–350`.
 
 This is stronger than a typical todo extension. The Pi port must preserve the
 wire-level batch result and transactional behavior even if the TUI is simpler.
@@ -304,9 +304,9 @@ The task store also enforces:
 
 Evidence:
 
-- `upstream/swarm-sdk/internal/tools/ii/task_manage.go:150–191,
+- `vendor/swarm-sdk/internal/tools/ii/task_manage.go:150–191,
   264–324`
-- `upstream/swarm-sdk/internal/taskstore/tree.go:20–29, 31–59`
+- `vendor/swarm-sdk/internal/taskstore/tree.go:20–29, 31–59`
 
 ### Hook interaction
 

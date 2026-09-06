@@ -167,7 +167,7 @@ matrix. Continue until the mismatch ledger is empty.
 
 ## Change safety and ripples
 
-- Preserve the existing dirty worktree and do not edit `upstream/`.
+- Preserve the existing dirty worktree and do not edit `vendor/`.
 - Keep probe outputs in disposable directories and redact request bodies from
   chat/logs because prompts may contain sensitive context.
 - Prompt changes affect token/cache behavior and all model decisions.

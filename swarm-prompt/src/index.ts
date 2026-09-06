@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
  * parses Go source or markdown at runtime: `scripts/sync.mjs` regenerates the
  * assets from upstream, and `test/index.test.ts` fails if they drift.
  *
- * Upstream: upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go
+ * Upstream: vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go
  */
 const asset = (name: string): string =>
   readFileSync(new URL(`../assets/${name}`, import.meta.url), "utf8");
@@ -24,7 +24,7 @@ export const swarmForgeSystemPrompt: string =
 
 /** Provenance reference recorded by prompt-assembling extensions. */
 export const UPSTREAM_SOURCE =
-  "upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go";
+  "vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go";
 
 export interface SwarmPromptPreset {
   /** Display name, matching the TUI's builtin prompt entry. */

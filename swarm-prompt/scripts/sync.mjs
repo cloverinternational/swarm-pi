@@ -1,13 +1,13 @@
 /**
  * Regenerate the vendored prompt assets from the upstream Swarm TUI source.
- * Run with `npm --prefix swarm-prompt run sync` after refreshing upstream/.
+ * Run with `npm --prefix swarm-prompt run sync` after refreshing vendor/.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseGoStringConst } from "./go-const.mjs";
 
 const goSource = new URL(
-  "../../upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go",
+  "../../vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go",
   import.meta.url,
 );
 const source = readFileSync(goSource, "utf8");

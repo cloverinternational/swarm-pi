@@ -1,6 +1,6 @@
 # Absurd + Pi integration contract
 
-Verified 2026-09-05 against npm and the checked-in `upstream/pi-mono` snapshot.
+Verified 2026-09-05 against npm and the checked-in `vendor/pi-mono` snapshot.
 
 ## Absurd SDK
 

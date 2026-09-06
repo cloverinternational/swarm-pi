@@ -3,7 +3,7 @@
 Status: research inventory. No third-party Pi package has been installed or
 trusted by this repository.
 
-This report compares the source-focused mirrors in `upstream/` with the public
+This report compares the source-focused mirrors in `vendor/` with the public
 Pi ecosystem observed on 2026-08-31. GitHub star counts below are discovery
 signals, not quality or security ratings. They can change and should be
 rechecked before adoption.
@@ -42,7 +42,7 @@ Swarm-specific capabilities:
 The local Pi mirror contains these built-in coding tools:
 
 ```text
-upstream/pi-mono/packages/coding-agent/src/core/tools/
+vendor/pi-mono/packages/coding-agent/src/core/tools/
   bash.ts
   edit.ts
   edit-diff.ts
@@ -56,9 +56,9 @@ upstream/pi-mono/packages/coding-agent/src/core/tools/
 The local SDK documentation also defines `tools`, `excludeTools`,
 `customTools`, and extension-registered tools:
 
-- `upstream/pi-mono/packages/coding-agent/docs/sdk.md:474–475`
-- `upstream/pi-mono/packages/coding-agent/docs/sdk.md:551–559`
-- `upstream/pi-mono/packages/coding-agent/docs/packages.md:169–185`
+- `vendor/pi-mono/packages/coding-agent/docs/sdk.md:474–475`
+- `vendor/pi-mono/packages/coding-agent/docs/sdk.md:551–559`
+- `vendor/pi-mono/packages/coding-agent/docs/packages.md:169–185`
 
 The important security boundary is explicit in Pi's package documentation:
 extensions and skills execute with broad host access and must be reviewed
@@ -71,7 +71,7 @@ The Swarm snapshot contains substantially more than its Forge filesystem
 catalog. Relevant tool families are visible under:
 
 ```text
-upstream/swarm-sdk/internal/tools/
+vendor/swarm-sdk/internal/tools/
   advanced
   browser
   builtin
@@ -92,8 +92,8 @@ upstream/swarm-sdk/internal/tools/
 ### 1. Authorization and sandboxing — genuine gap
 
 Swarm's tool contract carries required capabilities in
-`upstream/swarm-sdk/internal/tools/tool.go:80–86`, with policy evaluation in
-`upstream/swarm-sdk/internal/tools/permission_engine.go`. Pi's
+`vendor/swarm-sdk/internal/tools/tool.go:80–86`, with policy evaluation in
+`vendor/swarm-sdk/internal/tools/permission_engine.go`. Pi's
 `tool_call` event can block or mutate a call, but the extension API is not a
 host security boundary.
 
@@ -119,7 +119,7 @@ equivalent to Swarm authorization.
 Pi's public site states that Pi does not ship subagents and recommends
 extensions or process orchestration. Swarm has subagent, background-manager,
 wait, steering, and deterministic child-binding behavior under
-`upstream/swarm-sdk/internal/tools/builtin/` and related agent packages.
+`vendor/swarm-sdk/internal/tools/builtin/` and related agent packages.
 
 Required addition:
 

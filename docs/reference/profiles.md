@@ -12,7 +12,7 @@ provenance (`sha256:<hex>`), and `provenance` records package identity without
 secret values.
 
 The model follows the upstream SDK's closed catalog and redacted provenance
-rules (`upstream/swarm-sdk/harness/catalog.go`, `supplychain.go`, and
+rules (`vendor/swarm-sdk/harness/catalog.go`, `supplychain.go`, and
 `plan.go`). This slice is deliberately host-agnostic: workspace/process/network
 sandboxing remains a host policy and must be enforced before execution.
 

@@ -1,6 +1,6 @@
 # Modular Pi architecture for Swarm
 
-This document turns the Swarm SDK/TUI source snapshot in `upstream/swarm-sdk`
+This document turns the Swarm SDK/TUI source snapshot in `vendor/swarm-sdk`
 into a staged Pi extension architecture. It is a design boundary document, not
 yet an implementation.
 
@@ -23,7 +23,7 @@ behavior belongs in extensions, skills, prompt templates, or external tools:
 
 The local Pi snapshot confirms these contracts:
 
-- `upstream/pi-mono/packages/coding-agent/src/core/extensions/types.ts:431–490`
+- `vendor/pi-mono/packages/coding-agent/src/core/extensions/types.ts:431–490`
   defines typed tool schemas, execution, progress, and `renderCall` /
   `renderResult`.
 - `.../types.ts:1118–1253` defines the ExtensionAPI lifecycle, registration,

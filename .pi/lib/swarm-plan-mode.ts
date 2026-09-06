@@ -3,7 +3,7 @@
  *
  * This module is deliberately host-independent. Pi/TUI adapters should depend on
  * these contracts; this core must not import Pi, BubbleTea, or filesystem UI code.
- * The lifecycle mirrors upstream/swarm-sdk/internal/plan and its first-tool hook.
+ * The lifecycle mirrors vendor/swarm-sdk/internal/plan and its first-tool hook.
  */
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, renameSync, writeFileSync } from "node:fs";

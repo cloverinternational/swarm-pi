@@ -132,7 +132,7 @@ The regenerated recording duration is 40.84 seconds.
 
 ## Targeted autogenskills and curator parity
 
-The repository's `upstream/swarm-sdk` snapshot contains the authoritative
+The repository's `vendor/swarm-sdk` snapshot contains the authoritative
 autogenskills package and tests, but intentionally omits
 `tests/agent/mocks`, so that mirror cannot compile its test package in
 isolation. The targeted Go checks were therefore run from the complete local

@@ -10,9 +10,9 @@ and official Pi documentation:
 - <https://pi.dev/docs/latest/rpc>
 
 The local Pi source is pinned in
-[`upstream/pi-mono`](/home/swarm/Work/Pi-Swarm/upstream/pi-mono), and the
+[`vendor/pi-mono`](/home/swarm/Work/Pi-Swarm/vendor/pi-mono), and the
 Swarm source is pinned in
-[`upstream/swarm-sdk`](/home/swarm/Work/Pi-Swarm/upstream/swarm-sdk).
+[`vendor/swarm-sdk`](/home/swarm/Work/Pi-Swarm/vendor/swarm-sdk).
 
 ## Bottom line
 
@@ -33,22 +33,22 @@ Build only the Swarm semantic layer around them:
 ### Swarm behavior
 
 Swarm’s Forge prompt is the `forgeSwarmSystemPrompt` documented in
-`upstream/swarm-sdk/swarm-tui/docs/FORGE_SWARM_SYSTEM_PROMPT.md:7–19` and
+`vendor/swarm-sdk/swarm-tui/docs/FORGE_SWARM_SYSTEM_PROMPT.md:7–19` and
 implemented in
-`upstream/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go`.
+`vendor/swarm-sdk/swarm-tui/internal/chat/settings/system_prompt.go`.
 The runtime can prepend workspace facts through `RenderWorkspaceContext`.
 
 Non-harness TUI startup can apply an active user prompt, provider-specific
 instructions, and context files such as `CLAUDE.md`, `SWARM.md`, and
 `AGENTS.md`; see
-`upstream/swarm-sdk/swarm-tui/internal/chat/app_init.go:1850–1895`.
+`vendor/swarm-sdk/swarm-tui/internal/chat/app_init.go:1850–1895`.
 
 Closed harness mode is different. `harness.Compile` resolves and hashes the
 prompt into an immutable plan, and `client.WithHarnessPlan` disables ambient
 prompt/config/tool/skill/plugin discovery:
 
-- `upstream/swarm-sdk/harness/plan.go:20–220`
-- `upstream/swarm-sdk/client/harness_option.go:57–83`
+- `vendor/swarm-sdk/harness/plan.go:20–220`
+- `vendor/swarm-sdk/client/harness_option.go:57–83`
 
 ### Pi equivalent
 
@@ -101,13 +101,13 @@ instructions and alter cache behavior.
 
 Swarm separates tool registration, active exposure, authorization, invocation,
 outcome, rendering, and persistence. The core tool permission interface is
-`upstream/swarm-sdk/internal/tools/tool.go:80–86`; the permission engine is
+`vendor/swarm-sdk/internal/tools/tool.go:80–86`; the permission engine is
 `internal/tools/permission_engine.go:1–90`.
 
 Forge filesystem tools and their registration live under
-`upstream/swarm-sdk/internal/tools/forge`. TUI render registration is separate
+`vendor/swarm-sdk/internal/tools/forge`. TUI render registration is separate
 from execution in
-`upstream/swarm-sdk/swarm-tui/internal/chat/app_init.go:899–911`.
+`vendor/swarm-sdk/swarm-tui/internal/chat/app_init.go:899–911`.
 
 ### Pi equivalent
 
@@ -122,13 +122,13 @@ Use Pi’s native `ToolDefinition`:
 Evidence:
 
 - local type contract:
-  `upstream/pi-mono/packages/coding-agent/src/core/extensions/types.ts:431–490`;
+  `vendor/pi-mono/packages/coding-agent/src/core/extensions/types.ts:431–490`;
 - public registration/runtime methods:
   `.../types.ts:1118–1253`;
 - loader implementation:
   `.../core/extensions/loader.ts:180–305`;
 - official examples and renderer rules:
-  `upstream/pi-mono/packages/coding-agent/docs/extensions.md:1251–1308`,
+  `vendor/pi-mono/packages/coding-agent/docs/extensions.md:1251–1308`,
   `:1703–1710`, and `:1882–1888`.
 
 Do not register renamed copies of Pi's built-in tools. Pi's native filesystem,
@@ -167,7 +167,7 @@ Swarm has a typed event vocabulary beginning with `BeforeAgent`,
 `ToolBeforeExecute`, and `ToolAfterExecute`:
 
 - event definitions:
-  `upstream/swarm-sdk/internal/hooks/hook_events.go:1–90`;
+  `vendor/swarm-sdk/internal/hooks/hook_events.go:1–90`;
 - registration and policy:
   `.../internal/hooks/manager.go:15–165` and `:235–410`;
 - event execution:
@@ -198,9 +198,9 @@ tool outcomes.
 | lifecycle cleanup | `session_shutdown` | Close bridges and discard stale runtime objects |
 
 Pi’s local `ExtensionAPI` event declarations are in
-`upstream/pi-mono/packages/coding-agent/src/core/extensions/types.ts:1125–1160`.
+`vendor/pi-mono/packages/coding-agent/src/core/extensions/types.ts:1125–1160`.
 Pi’s agent session installs tool interception in
-`upstream/pi-mono/packages/coding-agent/src/core/agent-session.ts:390–435`.
+`vendor/pi-mono/packages/coding-agent/src/core/agent-session.ts:390–435`.
 
 ### Important Pi semantics
 

@@ -3,10 +3,13 @@ import { registerHook } from "../hook-state.ts";
 
 const MUTATING_TOOLS = /^(?:write|edit|apply_patch|delete|remove|move|rename|mkdir|touch|rm|cp|mv|patch)$/i;
 
+/** Vendored read-only reference trees live under vendor/ (formerly upstream/). */
+const VENDOR_DIR = "vendor";
+
 function containsUpstreamTarget(value: unknown, root: string): boolean {
   if (typeof value !== "string") return false;
-  const upstream = path.resolve(root, "upstream");
-  const candidates = value.match(/(?:^|[\s"'`=])((?:\.\/)?upstream(?:[\/][^\s"'`;&|]*)?|\/(?:[^\s"'`;&|]*[\/])upstream(?:[\/][^\s"'`;&|]*)?)/g) ?? [];
+  const upstream = path.resolve(root, VENDOR_DIR);
+  const candidates = value.match(/(?:^|[\s"'`=])((?:\.\/)?vendor(?:[\/][^\s"'`;&|]*)?|\/(?:[^\s"'`;&|]*[\/])vendor(?:[\/][^\s"'`;&|]*)?)/g) ?? [];
   return candidates.some(match => {
     const candidate = match.trim().replace(/^['"`]/, "");
     const resolved = path.resolve(root, candidate);
@@ -25,7 +28,7 @@ export default function upstreamReadonlyExtension(pi: any): void {
     const command = input && typeof input === "object" ? (input as any).command : undefined;
     const target = fields.some(value => containsUpstreamTarget(value, root)) || containsUpstreamTarget(command, root);
     if (target && (MUTATING_TOOLS.test(tool) || /^(?:bash|shell|execute|run)/i.test(tool))) {
-      return { block: true, reason: "upstream/ is read-only; make changes in a local path instead." };
+      return { block: true, reason: "vendor/ is read-only; make changes in a local path instead." };
     }
     return undefined;
   });
