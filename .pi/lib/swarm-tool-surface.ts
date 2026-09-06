@@ -27,19 +27,67 @@ export function loadSwarmToolSurface(path = FIXTURE): Map<string, CanonicalTool>
 
 export function swarmToolNames(): string[] { return [...loadSwarmToolSurface().keys()]; }
 
-/** Overlay Swarm's canonical description/parameters onto a Pi tool definition by name. */
+/**
+ * Swarm never validates tool arguments against the advertised JSON Schema:
+ * each Go tool decodes/validates its own input and reports its own prose
+ * (registry_impl.go Validate → "validation failed for X: …", or a plain
+ * result such as bash running an empty command). Pi validates against
+ * `tool.parameters` before any hook runs (pi-agent-core prepareToolCall) and
+ * reports `Validation failed for tool "X": …`. To keep the model-visible
+ * error paths identical, canonical tools register with this permissive
+ * validator schema and the canonical schema is overlaid on the wire by
+ * `overlaySwarmToolSchemas` (before_provider_request).
+ */
+export const PERMISSIVE_PARAMETERS = { type: "object" } as const;
+
+/** Overlay Swarm's canonical description onto a Pi tool definition by name and relax its validator. */
 export function applySwarmSurface<T extends { name: string; description?: string; parameters?: unknown }>(tool: T): T {
   const canonical = loadSwarmToolSurface().get(tool.name);
   if (!canonical) return tool;
-  return { ...tool, description: canonical.description, parameters: structuredClone(canonical.parameters) };
+  return { ...tool, description: canonical.description, parameters: { ...PERMISSIVE_PARAMETERS } };
 }
 
+/**
+ * Replace `tools[].function.parameters` (and description) with the canonical
+ * Swarm schema for every tool Swarm knows. Returns undefined when nothing
+ * changed. Anthropic-shaped payloads (`input_schema`) are handled too.
+ */
+export function overlaySwarmToolSchemas<T extends { tools?: unknown }>(payload: T): T | undefined {
+  const tools = payload?.tools;
+  if (!Array.isArray(tools) || tools.length === 0) return undefined;
+  const surface = loadSwarmToolSurface();
+  let changed = false;
+  const next = tools.map((tool: any) => {
+    const fn = tool?.function;
+    if (fn && typeof fn === "object") {
+      const canonical = surface.get(fn.name);
+      if (!canonical) return tool;
+      if (fn.description === canonical.description && JSON.stringify(fn.parameters) === JSON.stringify(canonical.parameters)) return tool;
+      changed = true;
+      return { ...tool, function: { ...fn, description: canonical.description, parameters: structuredClone(canonical.parameters) } };
+    }
+    if (typeof tool?.name === "string" && "input_schema" in tool) {
+      const canonical = surface.get(tool.name);
+      if (!canonical) return tool;
+      if (tool.description === canonical.description && JSON.stringify(tool.input_schema) === JSON.stringify(canonical.parameters)) return tool;
+      changed = true;
+      return { ...tool, description: canonical.description, input_schema: structuredClone(canonical.parameters) };
+    }
+    return tool;
+  });
+  return changed ? { ...payload, tools: next } : undefined;
+}
+
+/** Unwraps a `withSwarmToolSurface` proxy so registries keyed by the Pi instance stay stable. */
+export const RAW_PI = Symbol.for("pi-swarm-raw-pi");
+export const rawPi = <P extends object>(pi: P): P => ((pi as any)[RAW_PI] as P | undefined) ?? pi;
 /** Return a `pi` facade whose registerTool applies the Swarm surface overlay. */
 export function withSwarmToolSurface<P extends { registerTool?: (tool: any) => void }>(pi: P): P {
   if (!pi.registerTool) return pi;
   const original = pi.registerTool.bind(pi);
   return new Proxy(pi, {
     get(target, prop, receiver) {
+      if (prop === RAW_PI) return rawPi(target);
       if (prop === "registerTool") return (tool: any) => original(applySwarmSurface(tool));
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? value.bind(target) : value;

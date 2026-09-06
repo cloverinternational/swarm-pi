@@ -67,13 +67,23 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
     executionMode: "parallel",
     parameters: { ...objectSchema, properties: {} },
     execute: executable(async () => {
+      // Swarm cron_list.go Run: text block + "\n" + MarshalIndent of a
+      // map[string]any (keys sorted at every level; no next_fire_at).
       const tasks = scheduler.list().map((task) => scheduler.describe(task));
-      const details = { total_tasks: tasks.length, tasks };
-      if (!tasks.length) return text(details, `No scheduled tasks.\n\n${JSON.stringify(details, null, 2)}`);
-      const lines = tasks.map((task) =>
-        `  ${task.id}: ${task.human_schedule} (${task.type}, ${task.persistence})\n    Cron: ${task.cron}\n    Next: ${task.next_fire_at}`,
-      );
-      return text(details, `Scheduled Tasks (${tasks.length} total):\n\n${lines.join("\n\n")}\n\n${JSON.stringify(details, null, 2)}`);
+      const sorted = (value: Record<string, unknown>) => Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+      const taskInfos = tasks.map(({ next_fire_at: _next, ...info }) => sorted(info));
+      const details = sorted({ total_tasks: tasks.length, tasks: taskInfos });
+      let output = "";
+      if (!tasks.length) output += "No scheduled tasks.\n";
+      else {
+        output += `Scheduled Tasks (${tasks.length} total):\n\n`;
+        for (const info of taskInfos) {
+          output += `  ${info.id}: ${info.human_schedule} (${info.type}, ${info.persistence})\n    Cron: ${info.cron}\n`;
+          if (info.agent_id !== undefined) output += `    Agent: ${info.agent_id}\n`;
+          output += "\n";
+        }
+      }
+      return text({ total_tasks: tasks.length, tasks }, `${output}\n${JSON.stringify(details, null, 2)}`);
     }),
   });
 

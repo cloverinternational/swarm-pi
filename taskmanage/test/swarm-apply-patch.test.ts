@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { applyPatch, parsePatch, undoFile } from "../../.pi/lib/swarm-apply-patch.ts";
 import { readImage } from "../../.pi/lib/swarm-read-image.ts";
 import extension from "../../.pi/extensions/swarm-fs-tools.ts";
-import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
+import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../.pi/lib/swarm-tool-surface.ts";
 
 const roots: string[] = [];
 const root = () => { const p = mkdtempSync(join(tmpdir(), "swarm-patch-")); roots.push(p); return p; };
@@ -80,7 +80,8 @@ describe("Swarm apply_patch parity", () => {
     for (const name of ["apply_patch", "Undo", "Read"]) {
       const actual = tools.find(t => t.name === name), expected = loadSwarmToolSurface().get(name)!;
       expect(actual.description).toBe(expected.description);
-      expect(JSON.stringify(actual.parameters)).toBe(JSON.stringify(expected.parameters));
+      expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(expected.parameters));
     }
   });
 });

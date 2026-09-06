@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   EXPECTED_PRIMARY_REQUESTS,
+  TOOL_SCRIPTS,
   canonicalizeRequest,
   captureParity,
   diffJson,
+  expectedPrimaryRequests,
   primarySystemPrompt,
   promptSliceEvidence,
   sharedPromptPrefix,
@@ -152,3 +154,22 @@ test("unknown capture profiles are rejected before launching either runtime", as
     /unknown parity profile: invalid/,
   );
 });
+
+// Builtin hook context (task enforcement/maintenance, skill budget + review,
+// sleep/stdin blockers, annoyance nudge) and every non-bash tool's result
+// envelope + error path must also be byte-identical, not only the 3-request
+// base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
+for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default")) {
+  test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
+    const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
+    try {
+      const result = await captureParity({ profile: "project", scenario, workspace: resolve("."), output });
+      assert.equal(result.pi.requests.length, expectedPrimaryRequests(scenario));
+      assert.equal(result.swarm.requests.length, expectedPrimaryRequests(scenario));
+      assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+      assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+    } finally {
+      await rm(output, { recursive: true, force: true });
+    }
+  }, { timeout: 180_000 });
+}

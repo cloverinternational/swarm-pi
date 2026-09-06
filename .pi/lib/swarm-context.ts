@@ -68,8 +68,37 @@ function candidatePaths(id: string, workDir: string, home: string): string[] {
   }
 }
 
+const agentsCandidates = (dir: string) => [join(dir, ".swarm", "AGENTS.md"), join(dir, ".claude", "AGENTS.md"), join(dir, "AGENTS.md")];
+const isFile = (path: string) => { try { return statSync(path).isFile(); } catch { return false; } };
+
+/** Discover scoped instruction files from repository root to the current directory. */
+export function discoverAgentsMdPaths(workDir: string): string[] {
+  const cwd = resolve(workDir);
+  let root = cwd;
+  for (;;) {
+    if (isFile(join(root, ".git")) || (() => { try { return statSync(join(root, ".git")).isDirectory(); } catch { return false; } })()) break;
+    const parent = resolve(root, "..");
+    if (parent === root) { root = cwd; break; }
+    root = parent;
+  }
+  const chain: string[] = [];
+  let dir = cwd;
+  for (;;) {
+    chain.push(dir);
+    if (dir === root) break;
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return chain.reverse().flatMap(directory => {
+    const candidate = agentsCandidates(directory).find(isFile);
+    return candidate ? [candidate] : [];
+  });
+}
+
 /** First existing candidate path for a file source, or undefined. */
 export function candidateContextPath(id: string, workDir: string, home = process.env.HOME ?? ""): string | undefined {
+  if (id === "agents_md") return discoverAgentsMdPaths(workDir).at(-1);
   return candidatePaths(id, workDir, home).find(candidate => { try { statSync(candidate); return true; } catch { return false; } });
 }
 
@@ -119,12 +148,17 @@ export function loadSourceContent(spec: SourceSpec, options: ContextOptions): st
   const now = options.now ?? (() => new Date());
   switch (spec.id) {
     case "global_claude_md": case "global_swarm_md": case "project_claude_md":
-    case "project_swarm_md": case "agents_md": case "index_md": {
+    case "project_swarm_md": case "index_md": {
       const path = candidatePaths(spec.id, options.workDir, home).find(candidate => { try { statSync(candidate); return true; } catch { return false; } });
       if (!path) return "";
       try {
         return spec.id === "index_md" ? readFileTrimmedLimited(path, DEFAULT_MAX_SOURCE_CHARS) : trimSpace(readFileSync(path, "utf8"));
       } catch { return ""; }
+    }
+    case "agents_md": {
+      return discoverAgentsMdPaths(options.workDir).map(path => {
+        try { return readFileSync(path, "utf8"); } catch { return ""; }
+      }).filter(content => trimSpace(content) !== "").join("\n\n");
     }
     case "git_status": return gitStatus(options.workDir);
     case "project_name": {

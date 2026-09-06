@@ -1,3 +1,4 @@
+import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../.pi/lib/swarm-tool-surface.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,7 +29,8 @@ describe("Swarm history and vault surfaces", () => {
     for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_approve", "vault_exec", "vault_list", "vault_two_person_status"]) {
       const actual = registered.find((x) => x.name === name), wanted = fixture.find((x: any) => x.function.name === name).function;
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
-      expect(JSON.stringify(actual.parameters)).toBe(JSON.stringify(wanted.parameters));
+      expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name, description: actual.description, parameters: actual.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(wanted.parameters));
     }
   });
 
@@ -65,7 +67,9 @@ describe("Swarm history and vault surfaces", () => {
     expect(JSON.stringify(listed)).not.toContain("super-secret");
     expect(await vaultAdd({ id: "token", kind: "env_var", allowedCommands: ["printenv *"] }, rt)).toMatchObject({ success: true, metadataOnly: true });
     const stored = await readFile(rt.path, "utf8");
-    expect(stored).not.toContain("super-secret");
+    // vault/transparent.go disk format: version "2" is cleartext by design
+    // (the "transparent" store), keyed by credential id with injectTarget.
+    expect(JSON.parse(stored)).toMatchObject({ version: "2", credentials: { token: { kind: "env_var", value: "super-secret", injectMethod: "env", injectTarget: "TEST_PI_SECRET", allowedCommands: ["printenv *"] } } });
     const ran = await vaultExec({ credentialId: "token", command: "printenv", args: ["TEST_PI_SECRET"] }, rt);
     expect(ran).toMatchObject({ status: "ok", exitCode: 0, stdout: "[REDACTED]\n", redactedCount: 1, safeToParse: false });
   });

@@ -13,7 +13,7 @@ import {
   swarmToolOrder,
 } from "../../.pi/lib/swarm-transport-parity.ts";
 import { gateActiveTools, swarmSurfaceFor, xaiHasCredentials } from "../../.pi/lib/swarm-tool-gating.ts";
-import { buildContextBlock, injectContextBlocks, renderSources, trimSourceContent } from "../../.pi/lib/swarm-context.ts";
+import { buildContextBlock, discoverAgentsMdPaths, injectContextBlocks, renderSources, trimSourceContent } from "../../.pi/lib/swarm-context.ts";
 import { buildResultXML, bashTruncateOutput, estimateTokens } from "../../.pi/lib/swarm-bash.ts";
 import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
 
@@ -114,6 +114,17 @@ describe("swarm context blocks", () => {
     writeFileSync(join(dir, "AGENTS.md"), "rules\n");
     const { block } = buildContextBlock({ workDir: dir, home: "/nonexistent", now: () => new Date(2026, 8, 5) });
     expect(block).toBe(`<swarmos_cached_context>\nAs you answer the user's questions, you can use the following context:\n<context name="agentsMd">\nrules\n</context>\n<context name="projectName">\n${dir.split("/").pop()}\n</context>\n</swarmos_cached_context>\n\n<swarmos_context>\nAs you answer the user's questions, you can use the following context:\n<context name="currentDate">\n2026-09-05\n</context>\n</swarmos_context>`);
+  });
+  it("discovers hierarchical AGENTS.md files from repository root to cwd", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-agents-"));
+    mkdirSync(join(root, ".git"));
+    const nested = join(root, "packages", "demo");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(root, "AGENTS.md"), "root rules");
+    writeFileSync(join(root, "packages", "AGENTS.md"), "package rules");
+    writeFileSync(join(nested, "AGENTS.md"), "demo rules");
+    expect(discoverAgentsMdPaths(nested)).toEqual([join(root, "AGENTS.md"), join(root, "packages", "AGENTS.md"), join(nested, "AGENTS.md")]);
+    expect(buildContextBlock({ workDir: nested, home: "/nonexistent" }).block).toContain("root rules\n\npackage rules\n\ndemo rules");
   });
 });
 

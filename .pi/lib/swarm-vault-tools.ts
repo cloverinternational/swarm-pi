@@ -9,17 +9,50 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 type AnyMap = Record<string, any>;
 type RecordFile = { version: 1; credentials: Record<string, AnyMap> };
 export interface VaultRuntime { path?: string; configured?: boolean; locked?: boolean }
 const kinds = new Set(["api_key", "bearer_token", "ssh_key", "aws_access_key", "aws_secret_key", "password", "env_var"]);
-export const defaultPiVaultPath = () => resolve(process.env.HOME ?? process.cwd(), ".swarm/vault/pi-vault.json");
+/**
+ * Swarm's global transparent store (vault/autoload.go DefaultAutoLoadPaths).
+ * vault_unlock.go AutoLoadInto installs a provider only when this file
+ * exists; otherwise the NoOp provider stays and every vault tool reports
+ * "vault is locked". Pi mirrors that: absent file ⇒ locked.
+ */
+export const defaultPiVaultPath = () => resolve(process.env.HOME ?? process.cwd(), ".swarm/vault/credentials.json");
 const empty = (): RecordFile => ({ version: 1, credentials: {} });
-async function load(rt: VaultRuntime): Promise<RecordFile> { try { return JSON.parse(await readFile(rt.path ?? defaultPiVaultPath(), "utf8")); } catch { return empty(); } }
-async function save(rt: VaultRuntime, data: RecordFile) { const path = rt.path ?? defaultPiVaultPath(); await mkdir(dirname(path), { recursive: true, mode: 0o700 }); const tmp = `${path}.${process.pid}.tmp`; await writeFile(tmp, JSON.stringify(data, null, 2), { mode: 0o600 }); await rename(tmp, path); }
-const locked = (rt: VaultRuntime) => rt.locked === true || rt.configured === false;
+// vault/transparent.go disk format (version "2" cleartext; "1" base64 values).
+const fromDisk = (id: string, tc: AnyMap, version: string): AnyMap => ({
+  id, name: tc.name ?? "", kind: tc.kind, scope: tc.scope || "global",
+  secretBase64: version === "1" ? String(tc.value ?? "") : Buffer.from(String(tc.value ?? "")).toString("base64"),
+  allowedTools: tc.allowedTools ?? [], allowedCommands: tc.allowedCommands ?? [], allowedHosts: tc.allowedHosts ?? [], tags: tc.tags ?? [],
+  target: tc.injectTarget ?? "", ...(tc.expiresAt ? { expiresAt: tc.expiresAt } : {}),
+});
+const toDisk = (c: AnyMap): AnyMap => ({
+  kind: c.kind, value: Buffer.from(c.secretBase64 ?? "", "base64").toString(),
+  ...(c.allowedTools?.length ? { allowedTools: c.allowedTools } : {}), ...(c.allowedCommands?.length ? { allowedCommands: c.allowedCommands } : {}), ...(c.allowedHosts?.length ? { allowedHosts: c.allowedHosts } : {}), ...(c.tags?.length ? { tags: c.tags } : {}),
+  injectMethod: c.kind === "ssh_key" || c.target?.startsWith("/") ? "file" : "env", ...(c.target ? { injectTarget: c.target } : {}),
+  ...(c.scope ? { scope: c.scope } : {}), ...(c.expiresAt ? { expiresAt: c.expiresAt } : {}), ...(c.name ? { name: c.name } : {}),
+});
+async function load(rt: VaultRuntime): Promise<RecordFile> {
+  try {
+    const disk = JSON.parse(await readFile(rt.path ?? defaultPiVaultPath(), "utf8"));
+    if (disk?.version === 1 && disk.credentials) return disk; // pre-transparent Pi format
+    const version = String(disk?.version ?? "2");
+    return { version: 1, credentials: Object.fromEntries(Object.entries(disk?.credentials ?? {}).map(([id, tc]) => [id, fromDisk(id, tc as AnyMap, version)])) };
+  } catch { return empty(); }
+}
+async function save(rt: VaultRuntime, data: RecordFile) {
+  const path = rt.path ?? defaultPiVaultPath(); await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const disk = { version: "2", updatedAt: new Date().toISOString(), credentials: Object.fromEntries(Object.entries(data.credentials).map(([id, c]) => [id, toDisk(c)])) };
+  const tmp = `${path}.${process.pid}.tmp`; await writeFile(tmp, JSON.stringify(disk, null, 2), { mode: 0o600 }); await rename(tmp, path);
+}
+// An explicit `path` is a configured store (NewTransparentStorage accepts a
+// not-yet-existing file); the autoload default only installs when it exists.
+const locked = (rt: VaultRuntime) => rt.locked === true || rt.configured === false || (rt.locked === undefined && rt.configured === undefined && rt.path === undefined && !existsSync(defaultPiVaultPath()));
 const sensitive = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function validSSH(s: string) {
   return ["-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----", "-----BEGIN DSA PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----", "-----BEGIN ENCRYPTED PRIVATE KEY-----"].some((marker) => s.includes(marker));

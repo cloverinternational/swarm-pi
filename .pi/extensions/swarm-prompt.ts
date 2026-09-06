@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { registerHook } from "../hook-state.ts";
 import { getSwarmSkillRegistry } from "../lib/swarm-skill-registry.ts";
-import { BUILTIN_SOURCES, buildContextBlock, candidateContextPath, injectSwarmContext } from "../lib/swarm-context.ts";
+import { BUILTIN_SOURCES, buildContextBlock, candidateContextPath, discoverAgentsMdPaths, injectSwarmContext } from "../lib/swarm-context.ts";
 
 import {
   UPSTREAM_SOURCE,
@@ -110,7 +110,7 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
   // sources are excluded; projectName/gitStatus/currentDate still inject.
   const enabled = options.discoverContextFiles === false ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
   const context = buildContextBlock({ workDir: root, enabled });
-  const contextPaths = BUILTIN_SOURCES.filter((source) => (enabled?.[source.id] ?? source.enabled)).map((source) => candidateContextPath(source.id, root)).filter((path): path is string => Boolean(path));
+  const contextPaths = BUILTIN_SOURCES.filter((source) => (enabled?.[source.id] ?? source.enabled)).flatMap((source) => source.id === "agents_md" ? discoverAgentsMdPaths(root) : [candidateContextPath(source.id, root)]).filter((path): path is string => Boolean(path));
   add("context", context.block, "swarm-context", contextPaths.join(","));
   const prompt = sections.join("\n\n");
   return { prompt, hash: hash(prompt), workspace, provenance, contextFiles: contextPaths };

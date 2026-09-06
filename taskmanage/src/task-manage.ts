@@ -8,6 +8,33 @@ export type NoteType = typeof NOTE_TYPES[number];
 export type Mode = "sequential" | "atomic";
 export type Ref = string | { ref: string; field?: "taskId" };
 
+/**
+ * Swarm's TaskManage (internal/tools/ii/task_operation.go) renders the batch
+ * envelope from structs (declaration order: status, results[]{key, op, status,
+ * data}) but every task view (`data.task`, `data.tasks[]`) is a
+ * `map[string]any`, which encoding/json emits with bytewise-sorted keys at
+ * every level. Mirror that at the serialisation boundary so the model reads
+ * identical bytes from both runtimes.
+ */
+const sortKeysDeep = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) out[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+  return out;
+};
+export function goMapOrdered<T extends { results?: Array<{ data?: unknown }> }>(batch: T): T {
+  if (!Array.isArray(batch?.results)) return batch;
+  return { ...batch, results: batch.results.map(entry => {
+    const data = entry?.data as { task?: unknown; tasks?: unknown } | undefined;
+    if (!data || typeof data !== "object") return entry;
+    const next: Record<string, unknown> = { ...data };
+    if ("task" in data) next.task = sortKeysDeep(data.task);
+    if ("tasks" in data) next.tasks = sortKeysDeep(data.tasks);
+    return { ...entry, data: next };
+  }) };
+}
+
 export interface AuditEvent {
   action: "created" | "updated" | "tool";
   at: string;
@@ -23,6 +50,8 @@ export interface Task {
   metadata?: Record<string, unknown>; parentTaskId?: string; owner_id?: string; status: Status;
   active?: boolean; dependsOn: string[]; notes: string[]; createdAt: string; updatedAt: string;
   typed_notes?: TaskNote[]; audit_events?: AuditEvent[];
+  /** Swarm TodoManager per-owner sequence counter (shared_state.go AddTodo). */
+  sequence?: number;
 }
 export interface Operation {
   key: string; op: "create" | "update" | "get" | "list"; taskId?: Ref; subject?: string;
@@ -39,6 +68,8 @@ export interface OperationEvent {
   data: { mode: Mode; status: Batch["status"]; results: Result[]; at: string };
 }
 import { replayLatest, snapshot, type VersionedSnapshot } from "./persistence.js";
+import { goNow, swarmValidateTaskManageParams } from "./swarm-validate.js";
+import { randomBytes } from "node:crypto";
 
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
 export interface State { nextId: number; tasks: Task[]; keys: Record<string, string> }
@@ -505,7 +536,9 @@ export class TaskManager {
       const blocks = [...(op.addBlocks ?? [])].map(target);
       if (blocks.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:blocks.find(x=>typeof x!=="string") as Failure};
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
-      const now = new Date().toISOString(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now };
+      const owner = op.owner_id ?? "";
+      const sequence = this.state.tasks.filter(t => (t.owner_id ?? "") === owner).reduce((max, t) => Math.max(max, t.sequence ?? 0), 0) + 1;
+      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
       this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {
@@ -563,7 +596,7 @@ export class TaskManager {
     }
     const mergedMetadata: Record<string, unknown> | undefined = op.metadata === undefined ? task.metadata : { ...(task.metadata ?? {}), ...clone(op.metadata) };
     if (op.metadata) for (const [key, value] of Object.entries(op.metadata)) if (value === null) delete (mergedMetadata as Record<string, unknown>)[key];
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:new Date().toISOString() });
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
       // Explicit false is applied after the focus transition.
@@ -620,9 +653,13 @@ export class TaskManager {
       ...(task.dependsOn.length ? {depends_on: [...task.dependsOn]} : {}),
       ...(this.blockedBy(task.id).length ? {blocks: this.blockedBy(task.id)} : {}),
       ...(task.owner_id !== undefined ? {owner_id: task.owner_id} : {}),
+      ...(task.sequence ? {sequence: task.sequence} : {}),
       ...(task.parentTaskId !== undefined ? {parent_id: task.parentTaskId} : {}),
       ...(task.notes.length ? {notes: [...task.notes]} : {}),
       created_at: task.createdAt, updated_at: task.updatedAt,
+      // TodoItem.LastSeen is a time.Time: omitempty never elides a struct, so
+      // the zero value is always rendered (taskstore sync sets it elsewhere).
+      last_seen: "0001-01-01T00:00:00Z",
     };
     if (includeAudit) {
       if (task.audit_events) result.audit_events = task.audit_events.map(event => ({
@@ -673,9 +710,13 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
     execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
+      // registry_impl.go runs TaskManageTool.Validate before Execute and
+      // reports failures as a tool error, not a failed batch.
+      const invalid = swarmValidateTaskManageParams(params);
+      if (invalid !== undefined) throw new Error(`Error executing TaskManage: validation failed for TaskManage: ${invalid} (error_id=err_${randomBytes(10).toString("hex")})`);
       const batch = manager.execute(params,signal);
       refreshWidget(ctx);
-      return { content:[{type:"text",text:JSON.stringify(batch)}] };
+      return { content:[{type:"text",text:JSON.stringify(goMapOrdered(batch))}] };
     } });
   return manager;
 }

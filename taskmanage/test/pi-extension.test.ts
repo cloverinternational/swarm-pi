@@ -3,7 +3,7 @@ import extension, { registerTaskManageExtension } from "../../.pi/extensions/tas
 import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
 import thinkingExtension from "../../.pi/extensions/swarm-thinking.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
-import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
+import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../.pi/lib/swarm-tool-surface.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -36,21 +36,24 @@ describe("root Pi TaskManage extension", () => {
     expect(runtime.tools).toHaveLength(1);
     expect(runtime.tools.find((tool: any) => tool.name === "ask_user_question")).toBeUndefined();
     // The model-facing contract is Swarm's canonical TaskManage definition
-    // (tools/parity/fixtures/swarm-tools.json); Pi's internal schema may carry
-    // extra runtime-validated fields that are never advertised.
+    // (tools/parity/fixtures/swarm-tools.json), overlaid on the wire by
+    // before_provider_request; the registered validator stays permissive so
+    // the tool validates its own input exactly like Swarm's Go tool.
     const canonical = loadSwarmToolSurface().get("TaskManage")!;
     expect(runtime.tools[0]).toMatchObject({
       name: "TaskManage",
       description: canonical.description,
-      parameters: canonical.parameters,
+      parameters: PERMISSIVE_PARAMETERS,
       promptSnippet: expect.any(String),
       renderCall: expect.any(Function),
       renderResult: expect.any(Function),
     });
+    expect(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: "TaskManage", description: "", parameters: runtime.tools[0].parameters } }] })!.tools[0].function.parameters).toEqual(canonical.parameters);
     expect(runtime.handlers.get("session_start")).toHaveLength(2);
-    expect(runtime.handlers.get("tool_call")).toHaveLength(1);
-    expect(runtime.handlers.get("tool_result")).toHaveLength(1);
-    expect(runtime.handlers.get("turn_end")).toHaveLength(1);
+    // Swarm builtin pipeline (first) + task-audit coordinator (second).
+    expect(runtime.handlers.get("tool_call")).toHaveLength(2);
+    expect(runtime.handlers.get("tool_result")).toHaveLength(2);
+    expect(runtime.handlers.get("turn_end")).toHaveLength(2);
   });
 
   it("validates questions, denies headless approvals, and emits updates", async () => {
@@ -110,34 +113,38 @@ describe("root Pi TaskManage extension", () => {
     expect(payload.results[0].data.tasks[0].subject).toBe("Build adapter");
   });
 
-  it("injects queued advisory guidance at before_agent_start", async () => {
+  it("embeds the task-enforcement advisory into the successful tool result like agent_tools.go", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "advise" });
-    const toolCall = runtime.handlers.get("tool_call")![0];
-    await toolCall({ toolName: "write", input: {} }, {});
     const beforeStart = runtime.handlers.get("before_agent_start")![0];
-    await expect(beforeStart({ prompt: "continue", systemPrompt: "base" }, {})).resolves.toMatchObject({
-      message: { customType: "swarm-task-hook", content: expect.stringContaining("No active task"), display: false },
-    });
+    await beforeStart({ prompt: "do it", systemPrompt: "base" }, {}); // advances the meta-nudge cadence clock
+    const toolCall = runtime.handlers.get("tool_call")![0];
+    await expect(toolCall({ toolName: "write", toolCallId: "w1", input: {} }, {})).resolves.toBeUndefined();
+    const toolResult = runtime.handlers.get("tool_result")![0];
+    const patched: any = await toolResult({ toolName: "write", toolCallId: "w1", input: {}, content: [{ type: "text", text: "Wrote 1 file" }], isError: false }, {});
+    expect(patched.content[0].text).toBe('<system-reminder source="task-enforcement-hook" kind="nudge" seq="1">No active task is focused; consider a TaskManage create/update before multi-step work.</system-reminder>\n\n---\n\nWrote 1 file');
+    // one budgeted nudge per turn window: the next call is silent
+    await toolCall({ toolName: "write", toolCallId: "w2", input: {} }, {});
+    await expect(toolResult({ toolName: "write", toolCallId: "w2", input: {}, content: [{ type: "text", text: "x" }], isError: false }, {})).resolves.toBeUndefined();
   });
 
-  it("covers the full Pi task lifecycle: block, activate, audit, and completion guidance", async () => {
+  it("covers the full Pi task lifecycle: block, activate, audit", async () => {
     const runtime = fakePi();
     registerTaskManageExtension(runtime.pi, { enforcementMode: "block" });
     const before = runtime.handlers.get("tool_call")![0];
-    expect(await before({ toolName: "write", toolCallId: "blocked", input: {} }, {})).toMatchObject({ block: true });
+    const blocked: any = await before({ toolName: "write", toolCallId: "blocked", input: {} }, {});
+    expect(blocked).toMatchObject({ block: true });
+    expect(blocked.reason.startsWith("Tool 'write' blocked by hook: <system-reminder source=\"task-enforcement-hook\" kind=\"block\" seq=\"")).toBe(true);
+    expect(blocked.reason).toContain("[TASK ENFORCEMENT - BLOCKED] YOU CANNOT EXECUTE ANY TOOL WITHOUT A TASK");
 
     const tool = runtime.tools.find((candidate: any) => candidate.name === "TaskManage");
     await tool.execute("create", { operations: [{ key: "work", op: "create", subject: "Do work" }] });
-    const after = runtime.handlers.get("tool_result")![0];
-    await after({ toolName: "TaskManage", toolCallId: "create-result", input: { operations: [{ key: "work", op: "create", subject: "Do work" }] }, result: { status: "succeeded", results: [{ key: "work", op: "create", status: "succeeded", data: { task: { id: "1" } } }] } }, {});
-    const guidance = runtime.handlers.get("before_agent_start")![0];
-    expect(await guidance({ prompt: "continue", systemPrompt: "base" }, {})).toMatchObject({ message: { content: expect.stringContaining("Update it") } });
-
+    // pending only: still blocked (Swarm requires an in_progress + active focus)
+    expect(await before({ toolName: "write", toolCallId: "blocked2", input: {} }, {})).toMatchObject({ block: true });
     await tool.execute("activate", { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] });
-    await after({ toolName: "TaskManage", toolCallId: "activate-result", input: { operations: [{ key: "activate", op: "update", taskId: "1", status: "in_progress", active: true }] }, result: { status: "succeeded", results: [{ key: "activate", op: "update", status: "succeeded", data: { task: { id: "1" } } }] } }, {});
-    expect(await guidance({ prompt: "continue", systemPrompt: "base" }, {})).toMatchObject({ message: { content: expect.stringContaining("ACTIVE") } });
+    expect(await before({ toolName: "write", toolCallId: "ok", input: {} }, {})).toBeUndefined();
 
+    const after = runtime.handlers.get("tool_result")![1];
     await after({ toolName: "bash", toolCallId: "audit", input: { command: "pwd" }, result: {}, isError: false }, {});
     const audited = await tool.execute("audit-get", { operations: [{ key: "get", op: "get", taskId: "1", include_audit: true }] });
     expect(JSON.parse(audited.content[0].text).results[0].data.task.audit_events).toEqual(expect.arrayContaining([

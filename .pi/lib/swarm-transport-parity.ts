@@ -33,6 +33,7 @@
 
 export const SWARM_TEMPERATURE = 0;
 export const SWARM_REASONING_EFFORT = "high";
+import { overlaySwarmToolSchemas } from "./swarm-tool-surface.ts";
 
 /** internal/provider/openai/models.go ChatCompletionRequest field order. */
 export const SWARM_CHAT_REQUEST_KEY_ORDER = [
@@ -100,7 +101,10 @@ export function alignProviderPayload<T extends Record<string, unknown>>(payload:
   // message already carries its provider role.
   const collapsed = Array.isArray(payload.messages) ? collapseUserText(payload.messages as MessageLike[]) : undefined;
   const withMessages = collapsed ? { ...payload, messages: collapsed } : payload;
-  const withSchemas = swarmToolSchemaKeyOrder(withMessages) ?? withMessages;
+  // Canonical Swarm schemas replace the permissive validator schemas the
+  // tools register with (see swarm-tool-surface.ts PERMISSIVE_PARAMETERS).
+  const withCanonical = overlaySwarmToolSchemas(withMessages) ?? withMessages;
+  const withSchemas = swarmToolSchemaKeyOrder(withCanonical) ?? withCanonical;
   const ordered = swarmPayloadKeyOrder(withSchemas);
   if (ordered) return ordered;
   return withSchemas === payload ? undefined : withSchemas;

@@ -86,6 +86,24 @@ export function wrapReminder(source: string, kind: string, seq: number, body: st
   return `<system-reminder source="${esc}" kind="${kind}" seq="${seq}">${body.trim()}</system-reminder>`;
 }
 
+/** hooks/format.go reminderKind: inferred from source + content. */
+export function reminderKind(source: string, content: string): "review" | "block" | "nudge" | "context" {
+  const lower = `${source} ${content}`.toLowerCase();
+  if (lower.includes("skill review") || lower.includes("autogenskills")) return "review";
+  if (lower.includes("block") || lower.includes("enforcement")) return "block";
+  if (lower.includes("nudge") || lower.includes("reminder")) return "nudge";
+  return "context";
+}
+
+/** hooks/format.go FormatHookContext for plain (non-canonical) hook text. */
+export function formatHookContext(hookName: string, content: string): string {
+  const trimmed = content.trim();
+  if (trimmed === "") return "";
+  if (trimmed.startsWith("<system-reminder ") && trimmed.includes(" source=\"") && trimmed.includes(" kind=\"") && trimmed.includes(" seq=\"")) return trimmed;
+  const name = hookName || "hook";
+  return wrapReminder(name, reminderKind(name, trimmed), nextReminderSeq(name), trimmed);
+}
+
 /** hooks/format.go NextReminderSeq — process-local per source. */
 const sequences = new Map<string, number>();
 export function nextReminderSeq(source: string): number {
@@ -126,7 +144,12 @@ export function classifyFriction(result: ToolResultLike): Friction | undefined |
   const type = (result.details as any)?.error_type ?? (result.details as any)?.errorType;
   if (type === "tool.batch_blocked" || type === "tool.blocked_by_hook") return undefined;
   if (result.isError !== true) return "clean";
-  const reason = evidenceFor(result.toolName, resultText(result.content));
+  const text = resultText(result.content);
+  // Pi renders a tool_call block as createErrorToolResult(reason) with no
+  // details, so Swarm's structured tool.blocked_by_hook disposition is only
+  // recoverable from the agent_tools.go prefix that hook blocks produce.
+  if (text.startsWith(`Tool '${result.toolName}' blocked by hook: `)) return undefined;
+  const reason = evidenceFor(result.toolName, text);
   const category = failureFrictionCategory(reason);
   return { toolName: result.toolName, category, fingerprint: frictionFingerprint(category, failureFingerprint(reason)) };
 }

@@ -2,6 +2,7 @@ import { boundedHistoryJSON, historyGet, historyRootFromContext, historySearch }
 import { vaultAdd, vaultApprove, vaultExec, vaultJSONXML, vaultList, vaultTwoPersonStatus, type VaultRuntime } from "../lib/swarm-vault-tools.ts";
 import { newErrorID } from "../lib/swarm-bash.ts";
 import { applySwarmSurface } from "../lib/swarm-tool-surface.ts";
+import { sortKeysDeep } from "../lib/swarm-transport-parity.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -9,7 +10,8 @@ const names = ["HistorySearch", "HistoryGet", "vault_add", "vault_approve", "vau
 const labels: Record<string, string> = Object.fromEntries(names.map((name) => [name, name]));
 
 function okay(value: unknown, xml = false) {
-  const text = xml ? vaultJSONXML(value) : JSON.stringify(value);
+  // history.go jsonResult marshals a map[string]any → keys sorted at every level.
+  const text = xml ? vaultJSONXML(value) : JSON.stringify(sortKeysDeep(value));
   return { content: [{ type: "text", text }], details: value };
 }
 function failed(name: string, error: unknown) {

@@ -10,6 +10,8 @@ import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
 export interface AutoSkillsExtensionOptions extends Config {}
 
 const settingsFile = (cwd: string) => join(resolve(cwd), ".pi", "swarm-settings.json");
+/** ${SWARM_SESSION_ID} substitution source for Skill invocations (skill_tool.go sessionIDGetter). */
+let sessionId = "";
 function autogenMode(cwd: string): Config["mode"] {
   const env = process.env.SWARM_AUTOGEN_MODE as Config["mode"] | undefined;
   if (env && ["never", "manual", "auto"].includes(env)) return env;
@@ -67,19 +69,24 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
   return registerAutoSkills(pi, {
     ...options,
     budgetWidget: undefined,
+    // Model-visible budget blocks and skill-review nudges are emitted by the
+    // Swarm builtin hook pipeline (.pi/extensions/swarm-builtin-hooks.ts) in
+    // HooksManager priority order; this manager keeps accounting + curation.
+    modelContext: false,
     dir,
     previewOnly: options.previewOnly ?? process.env.SWARM_AUTOGEN_PREVIEW === "1",
     requireReadBeforeWrite: options.requireReadBeforeWrite ?? process.env.SWARM_AUTOGEN_REQUIRE_VIEW === "1",
     accountingExempt: options.accountingExempt ?? process.env.SWARM_AUTOGEN_ACCOUNTING_EXEMPT === "1",
     curatorRunner,
     skillInvoker: (name, args) => {
-      const skill = getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).invoke(name, args);
-      return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions };
+      const skill = getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).invoke(name, args, sessionId);
+      return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions, text: skill.text };
     },
   });
 }
 
 export default function autogenskillsExtension(pi: any) {
+  pi.on?.("session_start", (_event: unknown, ctx: any) => { sessionId = ctx?.sessionManager?.getSessionId?.() ?? ""; });
   // Swarm autogen is enabled by default, but remains isolated from Pi's
   // native skill ecosystem. Persisted project settings or the environment can
   // disable it without exposing generated skills to Pi discovery.

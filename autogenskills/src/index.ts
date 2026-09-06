@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { appendFileSync } from "node:fs";
+import { SKILL_MANAGE_ACTIONS, renderSkillManageError, renderSkillManageResult, unknownActionText } from "./swarm-render.js";
 
 export type Mode = "never" | "manual" | "auto";
 export type TriggerReason = "manual" | "tool_call_threshold" | "error_resolution" | "llm_nudge";
@@ -15,7 +16,9 @@ export interface Config {
   staleAfterDays?: number; archiveAfterDays?: number; lockTimeoutMs?: number; reviewHook?: ReviewHook;
   previewOnly?: boolean; requireReadBeforeWrite?: boolean; curatorRunner?: CuratorRunner; curatorMinRunGapMs?: number;
   curatorIdleDelayMs?: number; curatorConsolidate?: boolean; curatorTimeoutMs?: number; curatorMaxTurns?: number;
-  protectSkill?: (name: string) => boolean; accountingExempt?: boolean; skillInvoker?: (name: string, args?: string) => any; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
+  protectSkill?: (name: string) => boolean; accountingExempt?: boolean;
+  /** When false, the manager keeps accounting/curation but emits no model-visible gate/nudge text (Swarm's hooks are delivered by .pi/extensions/swarm-builtin-hooks.ts instead). */
+  modelContext?: boolean; skillInvoker?: (name: string, args?: string) => any; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
 }
 export interface Metrics { turns: number; toolCalls: number; errors: number; resolved: number; nudges: number; nudgeIgnores: number; reviews: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; }
 export interface ReviewHook { (event: { action: string; name?: string; revision?: string; reason?: string }): void }
@@ -94,7 +97,7 @@ export class AutoSkillManager {
   // direct mutations subject to the normal budget while making the advertised
   // recovery path (blocked tool -> SkillManage(create)) usable.
   private onboardingRecoveryArmed = false;
-  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"] };
+  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt" | "modelContext">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"] };
   constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
     const home = process.env.HOME ?? process.cwd();
     const mode = config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never";
@@ -112,6 +115,8 @@ export class AutoSkillManager {
       curatorConsolidate: config.curatorConsolidate ?? false, curatorTimeoutMs: Math.max(1000, config.curatorTimeoutMs ?? 5 * 60 * 1000),
       curatorMaxTurns: Math.max(1, config.curatorMaxTurns ?? 8), reviewHook: config.reviewHook,
       curatorRunner: config.curatorRunner, protectSkill: config.protectSkill, accountingExempt: config.accountingExempt ?? false, budgetWidget: config.budgetWidget,
+      modelContext: config.modelContext ?? true,
+      skillInvoker: config.skillInvoker,
     };
     this.mergeCuratorState();
   }
@@ -160,7 +165,10 @@ export class AutoSkillManager {
   }
   private parse(name: string): Skill {
     const root = this.packageRoot(name);
-    if (!root || root !== this.dir(name)) throw new Error(`active skill ${name} does not exist`);
+    // history.go: a package that is neither active nor archived reports
+    // "not found in active or archived packages"; an archived one is not active.
+    if (!root) throw new Error(`autogenskills: skill ${JSON.stringify(name)} not found in active or archived packages`);
+    if (root !== this.dir(name)) throw new Error(`active skill ${name} does not exist`);
     const content = readFileSync(join(root, "SKILL.md"), "utf8"), match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
     if (!match) throw new Error(`invalid SKILL.md for ${name}`);
     const fields: Record<string,string> = {}; for (const line of match[1].split("\n")) { const i = line.indexOf(":"); if (i > 0) fields[line.slice(0,i).trim()] = line.slice(i+1).trim(); }
@@ -402,7 +410,7 @@ export class AutoSkillManager {
   }
   private assertEnabled() { if (this.config.mode === "never") throw new Error("autogenerated skills are disabled (mode=never)"); }
   private assertMutationAllowed(action: string) {
-    if (this.config.mode !== "auto" || action === "review") return;
+    if (this.config.mode !== "auto" || action === "review" || !this.config.modelContext) return;
     const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget;
     // Creating the missing onboarding skill is the escape hatch advertised by
     // the budget gate.  Blocking it makes the gate impossible to recover from.
@@ -669,7 +677,7 @@ export class AutoSkillManager {
     }
     // Upstream LifecycleHook emits this review guidance from the post-tool
     // event. Return text to the Pi adapter, which patches tool_result content.
-    if (success && !isSkill && (this.state.skillReviewCalls ?? 0) > this.config.nudgeInterval) {
+    if (this.config.modelContext && success && !isSkill && (this.state.skillReviewCalls ?? 0) > this.config.nudgeInterval) {
       this.state.skillReviewCalls = 0;
       this.state.nudges++;
       this.commit();
@@ -880,7 +888,7 @@ export class AutoSkillManager {
     // Bash has no command-level exemption. Every Bash invocation counts.
   }
   gateTool(toolName: string, input: any = {}): { block?: true; message?: string; reason?: string } | undefined {
-    if (this.config.mode !== "auto") return;
+    if (this.config.mode !== "auto" || !this.config.modelContext) return;
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!n || this.isExempt(toolName, input)) return;
     // No Bash command filter: even read-only Bash calls are budgeted.
@@ -952,7 +960,7 @@ export class AutoSkillManager {
       this.state.nudges++;
       if (!message) message = this.state.reviewRequired ? "Autogen review required before mutation. Call SkillManage(action=\"review\") or use a reusable skill." : `Review reusable learning class-first: patch an existing skill or add a support file before creating one. Existing skills: ${this.list().map(s=>s.name).join(", ") || "none"}. A no-mutation review is valid.`;
     }
-    this.commit(); return message;
+    this.commit(); return this.config.modelContext ? message : undefined;
   }
 }
 
@@ -1074,18 +1082,37 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
   });
   register("session_shutdown", () => curator.dispose());
   pi.registerTool({ name: "Skill", label: "Invoke skill", description: "Invoke a matching reusable skill before performing the task. The skill instructions are returned for you to follow.", parameters: skillSchema, async execute(_id: string, params: any) {
+    // Swarm SkillTool (skilltools/skill_tool.go): Validate → "skill parameter
+    // is required" (double error_id via registry wrapping); the result is the
+    // rendered skill content; failures are tool errors with sdkerr suffixes.
+    const errorId = () => `err_${randomBytes(10).toString("hex")}`;
+    const name = typeof params?.skill === "string" ? params.skill : "";
+    if (name === "") throw new Error(`Error executing Skill: validation failed for Skill: skill parameter is required (error_id=${errorId()}) (error_id=${errorId()})`);
     try {
-      const args = params.args ?? "";
-      const invoked = manager.config.skillInvoker ? manager.config.skillInvoker(params.skill, args) : manager.invokeSkill(params.skill, args);
+      const args = typeof params?.args === "string" ? params.args : "";
+      const invoked = manager.config.skillInvoker ? manager.config.skillInvoker(name, args) : manager.invokeSkill(name, args);
       const result = invoked instanceof Promise ? await invoked : invoked;
-      if (manager.config.skillInvoker) manager.recordSkillInvocation(params.skill, result.version ?? "unknown");
-      return { content: [{ type: "text", text: JSON.stringify(result) }], details: {} }; }
+      if (manager.config.skillInvoker) manager.recordSkillInvocation(name, result.version ?? "unknown");
+      return { content: [{ type: "text", text: typeof result.text === "string" ? result.text : JSON.stringify(result) }], details: { skill: result.skill, version: result.version, path: result.path } }; }
     catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      return { content: [{ type: "text", text: JSON.stringify({ error: message }) }], isError: true, details: { code: "skill_not_found", message } };
+      throw new Error(`Error executing Skill: ${message} (error_id=${errorId()})`);
     }
   } });
-  pi.registerTool({ name: "SkillManage", label: "Manage autogenerated skills", description: "Create, review, patch, inspect, and archive reusable autogenerated skill packages. Prefer patching an existing umbrella; never overwrite skills.", parameters: skillManageSchema, async execute(_id: string, params: any) { try { return { content: [{ type: "text", text: JSON.stringify(manager.execute(params)) }], details: {} }; } catch (e) { return { content: [{ type: "text", text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true, details: {} }; } } });
+  // Model-visible output is Swarm's SkillManageTool prose (skillmanage.go), not
+  // Pi's structured result; the structured result stays in details for the UI.
+  pi.registerTool({ name: "SkillManage", label: "Manage autogenerated skills", description: "Create, review, patch, inspect, and archive reusable autogenerated skill packages. Prefer patching an existing umbrella; never overwrite skills.", parameters: skillManageSchema, async execute(_id: string, params: any) {
+    const action = String(params?.action ?? "");
+    const text = (value: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text", text: value }], details });
+    if (!SKILL_MANAGE_ACTIONS.includes(action)) return text(unknownActionText(action));
+    try { const result = manager.execute(params); return text(renderSkillManageResult(action, params, result), { result }); }
+    catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const prose = renderSkillManageError(action, params, message);
+      if (prose !== undefined) return text(prose, { error: message });
+      return { content: [{ type: "text", text: JSON.stringify({ error: message }) }], isError: true, details: {} };
+    }
+  } });
   pi.registerCommand?.("curator", {
     description: "Preview or apply autogenerated-skill curator maintenance",
     handler: async (args: string, ctx: any) => {

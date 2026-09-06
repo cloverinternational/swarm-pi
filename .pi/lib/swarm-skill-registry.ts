@@ -23,11 +23,28 @@ export class SwarmSkillRegistry {
   list() { return this.result.skills; }
   find(name: string) { return this.result.skills.find(s => s.name === name); }
   catalog(query = "") { return generateRankedAvailableSkillsXML(rankSkillsForContext(this.result.skills.filter(s => !s.disableModelInvocation), query)); }
-  invoke(name: string, args = "") {
+  /**
+   * skilltools/skill_tool.go Invoke: resolve, refuse disable-model-invocation,
+   * prefix "Base directory for this skill: <dir>" for on-disk skills, then
+   * SubstituteArguments ({{N}} positional; named {{arg}} kept for Pi callers)
+   * and SubstituteVariables (${SWARM_SKILL_DIR}, ${SWARM_SESSION_ID}).
+   */
+  invoke(name: string, args = "", sessionId = "") {
     const skill = this.find(name);
-    if (!skill) throw new Error(`skill not found: ${name}`);
-    if (skill.disableModelInvocation) throw new Error(`skill invocation is disabled: ${name}`);
-    return { ...skill, instructions: args ? skill.instructions.replaceAll("{{arg}}", args) : skill.instructions };
+    if (!skill) throw new Error(`skill ${JSON.stringify(name)} not found in registry`);
+    if (skill.disableModelInvocation) throw new Error(`skill ${JSON.stringify(name)} cannot be used with the Skill tool due to disable-model-invocation`);
+    const builtin = skill.source === "builtin";
+    const path = builtin ? skill.location : skill.dir;
+    let content = skill.instructions;
+    if (content === "") return { ...skill, instructions: content, text: `Skill ${JSON.stringify(name)} has no instructions content.` };
+    if (!builtin) content = `Base directory for this skill: ${path}\n\n${content}`;
+    if (args) {
+      const values = args.split(/\s+/).filter(Boolean);
+      content = content.replaceAll("{{arg}}", args);
+      content = content.replace(/\{\{(\d+)\}\}/g, (match, n) => { const i = Number(n); return i >= 1 && i <= values.length ? values[i - 1] : match; });
+    }
+    content = content.replaceAll("${SWARM_SKILL_DIR}", path).replaceAll("${SWARM_SESSION_ID}", sessionId);
+    return { ...skill, instructions: content, text: content };
   }
 }
 export type { LoadedSkill, SkillLoaderOptions, SkillLoadResult };

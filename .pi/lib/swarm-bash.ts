@@ -14,9 +14,9 @@
  */
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, openSync, closeSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 
 export const SWARM_BASH_DESCRIPTION =
   "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds for every command; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
@@ -62,6 +62,14 @@ function goQuote(value: string): string {
 export const mergeOutput = (stdout: string, stderr: string) => (stderr.length === 0 ? stdout : stdout.length === 0 ? stderr : stdout + "\n" + stderr);
 
 export interface Truncation { output: string; outputPath: string; truncated: boolean }
+/** os.CreateTemp(dir, "bash-full-*.txt"): the "*" becomes a random uint32 in decimal. */
+function createTempLikeGo(dir: string, prefix: string, suffix: string): string {
+  for (let attempt = 0; attempt < 10_000; attempt++) {
+    const name = join(dir, `${prefix}${randomBytes(4).readUInt32LE(0)}${suffix}`);
+    try { closeSync(openSync(name, "wx", 0o600)); return name; } catch (e: any) { if (e?.code !== "EEXIST") throw e; }
+  }
+  throw new Error("createTemp: too many attempts");
+}
 /** bash.go bashTruncateOutput: 2000-line and 12,500-token caps, full output spilled to disk. */
 export function bashTruncateOutput(output: string, tempRoot = tmpdir()): Truncation {
   const maxLines = 2000, maxTokens = 12_500;
@@ -69,7 +77,7 @@ export function bashTruncateOutput(output: string, tempRoot = tmpdir()): Truncat
   if (lineCount <= maxLines && estimateTokens(output) <= maxTokens) return { output, outputPath: "", truncated: false };
   const dir = join(tempRoot, "swarm-tool-output");
   let outputPath = "";
-  try { mkdirSync(dir, { recursive: true }); outputPath = join(mkdtempSync(join(dir, "bash-full-")), "bash-full.txt"); writeFileSync(outputPath, output); } catch { outputPath = ""; }
+  try { mkdirSync(dir, { recursive: true, mode: 0o755 }); outputPath = createTempLikeGo(dir, "bash-full-", ".txt"); writeFileSync(outputPath, output); } catch { outputPath = ""; }
   const hint = `Full output saved to: ${outputPath}\nUse \`sed -n 'START,ENDp' FILE\` to view sections, or \`rg PATTERN FILE\` to search within it.`;
   if (lineCount > maxLines) {
     const lines = output.split("\n");
@@ -119,9 +127,61 @@ export function invalidCwdMessage(reason: string, errorId = newErrorID()): strin
   return `Error executing bash: ${reason} (error_id=${errorId})`;
 }
 
-export function resolveWorkdir(cwd: string | undefined, defaultCwd: string): { dir: string } | { error: string } {
+/**
+ * swarm-tui sdk_integration.go builtinAllowedPaths: [workspaceRoot, /tmp,
+ * ~/.swarmos] (the TUI overrides path_guard.go defaultAllowedPaths; note the
+ * legacy `.swarmos` spelling). `--allow-all-paths` makes the list empty.
+ */
+export function defaultAllowedPaths(workspaceRoot = process.cwd(), home = homedir()): string[] {
+  return [resolve(workspaceRoot), "/tmp", join(home, ".swarmos")];
+}
+
+/** path_guard.go resolvePathForCheck: EvalSymlinks via the nearest existing ancestor. */
+export function resolvePathForCheck(absPath: string): string {
+  const cleaned = resolve(absPath);
+  if (!isAbsolute(cleaned)) throw new Error("path must be absolute");
+  try { return realpathSync(cleaned); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
+  let current = cleaned;
+  for (;;) {
+    let exists = false;
+    try { statSync(current); exists = true; } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
+    if (exists) {
+      const resolvedCurrent = realpathSync(current);
+      if (current === cleaned) return resolvedCurrent;
+      return join(resolvedCurrent, relative(current, cleaned));
+    }
+    const parent = dirname(current);
+    if (parent === current) return cleaned;
+    current = parent;
+  }
+}
+
+const pathWithinRoot = (root: string, target: string) => {
+  const rel = relative(root, target);
+  if (rel === "") return true;
+  if (rel === "..") return false;
+  return !rel.startsWith(`..${"/"}`) && !isAbsolute(rel);
+};
+
+/** path_guard.go checkAllowedPath: undefined when allowed, else Swarm's error text. */
+export function checkAllowedPath(absPath: string, allowedPaths: readonly string[]): string | undefined {
+  if (allowedPaths.length === 0) return undefined;
+  let resolvedTarget: string;
+  try { resolvedTarget = resolvePathForCheck(absPath); } catch (e) { return `failed to resolve path: ${String((e as Error).message ?? e)}`; }
+  for (const allowed of allowedPaths) {
+    if (!allowed) continue;
+    let resolvedAllowed: string;
+    try { resolvedAllowed = resolvePathForCheck(resolve(allowed)); } catch { continue; }
+    if (pathWithinRoot(resolvedAllowed, resolvedTarget)) return undefined;
+  }
+  return `Path not allowed (not_allowed): ${absPath}`;
+}
+
+export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
+  const denied = checkAllowedPath(abs, allowedPaths);
+  if (denied) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
   return { dir: abs };

@@ -1,3 +1,4 @@
+import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../.pi/lib/swarm-tool-surface.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -30,7 +31,8 @@ describe("Swarm agent orchestration tools", () => {
     for (const tool of tools) {
       const fixture: any = fixtures.get(tool.name);
       expect(tool.description).toBe(fixture.description);
-      expect(JSON.stringify(tool.parameters)).toBe(JSON.stringify(fixture.parameters));
+      expect(tool.parameters).toEqual(PERMISSIVE_PARAMETERS);
+      expect(JSON.stringify(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } }] })!.tools[0].function.parameters)).toBe(JSON.stringify(fixture.parameters));
     }
     expect(tools.some(t => t.name === "Agent" || t.name === "AgentControl")).toBe(false);
   });

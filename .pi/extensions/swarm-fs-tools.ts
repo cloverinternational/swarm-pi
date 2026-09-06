@@ -16,6 +16,14 @@ export function registerSwarmFSTools(pi: Pi): void {
   registrations.add(pi as object);
   // Load eagerly so a missing/corrupt parity fixture fails extension startup.
   loadSwarmToolSurface();
+  // Swarm's headless broker (--approval-mode auto) approves every file-read
+  // path; the interactive TUI would prompt the user, which Pi cannot mirror,
+  // so only headless sessions skip FSRead's workspace boundary.
+  let headless = false;
+  pi.on?.("session_start", (_event: unknown, ctx: any) => { headless = ctx?.hasUI === false; });
+  // registry_impl.go: Validate failures are sdkerr-wrapped a second time.
+  const validation = (name: string, message: string): never =>
+    error(name, `validation failed for ${name}: ${message} (error_id=${newErrorID()})`);
   pi.registerTool?.(applySwarmSurface({
     name: "apply_patch", label: "apply_patch", description: "", parameters: {},
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
@@ -37,9 +45,11 @@ export function registerSwarmFSTools(pi: Pi): void {
   pi.registerTool?.(applySwarmSurface({
     name: "Read", label: "Read", description: "", parameters: {},
     async execute(_id: string, params: any, _signal: AbortSignal | undefined, _update: unknown, ctx: any) {
+      const filePath = params?.file_path ?? params?.file ?? params?.path ?? params?.filename;
+      if (filePath === undefined || filePath === null) return validation("Read", "file_path is required");
+      if (typeof filePath !== "string") return validation("Read", "file_path must be a string");
       try {
-        const filePath = params?.file_path ?? params?.file ?? params?.path ?? params?.filename;
-        const content = readImage(filePath, ctx?.cwd ?? pi.getCwd?.() ?? process.cwd());
+        const content = readImage(filePath, ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), headless);
         return { content, details: {} };
       } catch (e) { return error("Read", (e as Error).message); }
     },

@@ -6,6 +6,7 @@
  * the first substantive user message. Conversation IDs are Pi session IDs.
  */
 import { readFile, readdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, isAbsolute, parse, resolve } from "node:path";
 
 export interface HistoryRuntime { root: string; cwd: string }
@@ -81,6 +82,9 @@ async function loadSessions(runtime: HistoryRuntime): Promise<Session[]> {
   // Reuse Pi's existing engine when its UI peer dependency is available. The
   // small fallback keeps pure-logic/unit-test consumers independent of pi-tui.
   let listed: any[];
+  // Swarm's session store simply has nothing to list when the directory does
+  // not exist yet; never surface ENOENT from the Pi engine or the fallback.
+  if (!existsSync(runtime.root)) return [];
   try {
     const { HistorySearchEngine } = await import("../extensions/history-search.ts");
     const engine = new HistorySearchEngine({ root: runtime.root, includeCurrent: true });

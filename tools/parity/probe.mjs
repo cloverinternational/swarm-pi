@@ -8,12 +8,112 @@ import { spawn } from "node:child_process";
 
 const GENERATED_ID_KEYS = new Set(["tool_call_id"]);
 const PROBE_PROMPT = "PARITY_CAPTURE";
-/** Tool calls the scripted model issues, indexed by how many tool results it has seen. */
-const TOOL_SCRIPT = [
-  { id: "call_parity_probe", command: "printf parity-probe" },
-  { id: "call_parity_probe_fail", command: "printf out; printf err >&2; exit 3" },
-];
-export const EXPECTED_PRIMARY_REQUESTS = TOOL_SCRIPT.length + 1;
+/**
+ * Tool calls the scripted model issues, indexed by how many tool results it
+ * has seen. "default" covers the success + failure envelopes; "hooks" runs
+ * long enough to cross Swarm's builtin hook thresholds (task nudges after
+ * turn > 1 && toolCalls >= 2, repeated identical failures, a workspace write)
+ * so hook-injected context is compared too.
+ */
+export const TOOL_SCRIPTS = {
+  default: [
+    { id: "call_parity_probe", command: "printf parity-probe" },
+    { id: "call_parity_probe_fail", command: "printf out; printf err >&2; exit 3" },
+  ],
+  hooks: [
+    { id: "call_h1", command: "printf one" },
+    { id: "call_h2", command: "printf two" },
+    { id: "call_h3", command: "printf out; printf err >&2; exit 3" },
+    { id: "call_h4", command: "printf out; printf err >&2; exit 3" },
+    { id: "call_h5", command: "printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write" },
+    { id: "call_h6", command: "sleep 0.2; printf six" },
+    { id: "call_h7", command: "printf seven" },
+    { id: "call_h8", command: "printf eight" },
+    // pre-tool hook families: protected-branch (read-only git escape vs
+    // mutating shell op), stdin-conflict (pipe + heredoc), and the task hooks
+    // (state created through TaskManage, then more tool calls).
+    { id: "call_h9", command: "git status --short | head -1" },
+    { id: "call_h10", command: "git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe" },
+    { id: "call_h11", command: "printf hi | cat <<'EOF'\nx\nEOF" },
+    { id: "call_h12", tool: "TaskManage", args: { operations: [{ key: "t", op: "create", subject: "parity probe task", status: "in_progress", active: true }] } },
+    { id: "call_h13", command: "printf thirteen" },
+    { id: "call_h14", command: "printf fourteen" },
+    { id: "call_h15", tool: "TaskManage", args: { operations: [{ key: "t", op: "list" }] } },
+  ],
+  // Task-enforcement advisory on the first mutating call (embedded into the
+  // tool result), then a focused task, the autogenskills [SKILL REVIEW] at 6
+  // tool calls, the onboarding-budget block at the 6th non-exempt call and
+  // its incrementing seq on every later call, task-maintenance silence while
+  // the meta-nudge window is consumed, and exempt calls passing through.
+  budget: [
+    { id: "call_b1", command: "printf x > .parity-b && rm .parity-b" },
+    { id: "call_b2", command: "printf y > .parity-b && rm .parity-b" },
+    { id: "call_b3", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "budget probe", category: "acting", status: "in_progress", active: true }] } },
+    { id: "call_b4", command: "printf 1 > .parity-b && rm .parity-b" },
+    { id: "call_b5", command: "printf 2 > .parity-b && rm .parity-b" },
+    { id: "call_b6", command: "printf 3 > .parity-b && rm .parity-b" },
+    { id: "call_b7", command: "printf 4 > .parity-b && rm .parity-b" },
+    { id: "call_b8", command: "printf 5 > .parity-b && rm .parity-b" },
+    { id: "call_b9", command: "printf 6 > .parity-b && rm .parity-b" },
+    { id: "call_b10", command: "printf 7 > .parity-b && rm .parity-b" },
+    { id: "call_b11", command: "git status --short | head -1" },
+    { id: "call_b12", tool: "TaskManage", args: { operations: [{ key: "a", op: "update", taskId: "1", status: "completed" }] } },
+    { id: "call_b13", command: "printf 8 > .parity-b && rm .parity-b" },
+  ],
+  // Task focused BEFORE any mutating call: the meta-nudge window is still
+  // free, so the autogenskills lifecycle [SKILL REVIEW] (post, priority 91)
+  // claims it at the 6th tool call; a failing call in between exercises the
+  // lifecycle's error path next to the annoyance nudge; then the block.
+  review: [
+    { id: "call_r1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "review probe", status: "in_progress", active: true }] } },
+    { id: "call_r2", tool: "TaskManage", args: { operations: [{ key: "a", op: "list" }] } },
+    { id: "call_r3", command: "printf 1 > .parity-r && rm .parity-r" },
+    { id: "call_r4", command: "printf out; printf err >&2; exit 3" },
+    { id: "call_r5", command: "printf 2 > .parity-r && rm .parity-r" },
+    { id: "call_r6", command: "printf 3 > .parity-r && rm .parity-r" },
+    { id: "call_r7", command: "printf 4 > .parity-r && rm .parity-r" },
+    { id: "call_r8", command: "printf 5 > .parity-r && rm .parity-r" },
+    { id: "call_r9", command: "printf 6 > .parity-r && rm .parity-r" },
+    { id: "call_r10", tool: "SkillManage", args: { action: "list" } },
+    { id: "call_r11", command: "printf 7 > .parity-r && rm .parity-r" },
+  ],
+  // Non-bash tool result envelopes and error paths: Read (ok/missing/range),
+  // apply_patch (add/update/delete/bad patch), TaskManage validation
+  // failures, SkillManage view/errors, listing tools with empty state, bash
+  // cwd/description/truncation variants, and Undo without a snapshot.
+  tools: [
+    { id: "call_t1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "tools probe", status: "in_progress", active: true }] } },
+    { id: "call_t2", tool: "Read", args: { file_path: "AGENTS.md" } },
+    { id: "call_t3", tool: "Read", args: { file_path: "/nonexistent/parity.txt" } },
+    { id: "call_t4", tool: "Read", args: { file_path: "AGENTS.md", offset: 2, limit: 3 } },
+    { id: "call_t5", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Add File: .parity-tools.txt\n+one\n+two\n*** End Patch" } },
+    { id: "call_t6", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Update File: .parity-tools.txt\n@@\n one\n-two\n+three\n*** End Patch" } },
+    { id: "call_t7", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Update File: .parity-tools.txt\n@@\n-missing\n+x\n*** End Patch" } },
+    { id: "call_t8", tool: "apply_patch", args: { input: "*** Begin Patch\n*** Delete File: .parity-tools.txt\n*** End Patch" } },
+    { id: "call_t9", tool: "apply_patch", args: { input: "not a patch" } },
+    { id: "call_t10", tool: "TaskManage", args: { operations: [{ key: "b", op: "update", taskId: "999", status: "completed" }] } },
+    { id: "call_t11", tool: "TaskManage", args: { operations: [{ key: "c", op: "create", subject: "" }] } },
+    { id: "call_t12", tool: "TaskManage", args: { operations: [{ key: "d", op: "get", taskId: "1" }, { key: "e", op: "list" }] } },
+    { id: "call_t13", tool: "SkillManage", args: { action: "view", name: "swarm-skill" } },
+    { id: "call_t14", tool: "SkillManage", args: { action: "bogus" } },
+    { id: "call_t15", tool: "SkillManage", args: { action: "view", name: "does-not-exist" } },
+    { id: "call_t16", tool: "SkillManage", args: { action: "patch" } },
+    { id: "call_t17", tool: "Skill", args: { skill: "swarm-skill" } },
+    { id: "call_t18", tool: "Skill", args: { skill: "does-not-exist" } },
+    { id: "call_t19", tool: "CronList", args: {} },
+    { id: "call_t20", tool: "vault_list", args: {} },
+    { id: "call_t21", tool: "HistorySearch", args: { query: "zzz-parity-none", limit: 1 } },
+    { id: "call_t22", tool: "Undo", args: { path: "/nonexistent/parity.txt" } },
+    { id: "call_t23", command: "printf hi", cwd: "/nonexistent-cwd" },
+    { id: "call_t24", command: "printf hi", description: "say \"hi\"", timeout_seconds: 5 },
+    { id: "call_t25", command: "seq 1 2500" },
+    { id: "call_t26", command: "printf '\\033[31mred\\033[0m'" },
+    { id: "call_t27", tool: "bash", args: {} },
+    { id: "call_t28", tool: "Read", args: {} },
+  ],
+};
+export const expectedPrimaryRequests = (scenario = "default") => TOOL_SCRIPTS[scenario].length + 1;
+export const EXPECTED_PRIMARY_REQUESTS = expectedPrimaryRequests("default");
 const CLEAN_SYSTEM_PROMPT = "You are a parity capture agent.";
 
 function stableObject(value) {
@@ -43,7 +143,10 @@ export function canonicalizeRequest(request) {
           .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
           // annoyance-nudge fingerprints hash the failure text, which
           // contains the random error_id above, so they are per-run too.
-          .replace(/(Fingerprint: ")[0-9a-f]{32}(")/g, "$1<fingerprint>$2");
+          .replace(/(Fingerprint: ")[0-9a-f]{32}(")/g, "$1<fingerprint>$2")
+          // Task timestamps (RFC3339Nano) and bash spill files are per-run.
+          .replace(/"(created_at|updated_at|completed_at)":"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
+          .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt");
       }
       return value;
     }
@@ -84,7 +187,9 @@ export function wireFingerprint(rawText) {
     })
     .replace(/ duration_ms=\\"\d+\\"/g, ' duration_ms=\\"<ms>\\"')
     .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
-    .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2");
+    .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2")
+    .replace(/\\"(created_at|updated_at|completed_at)\\":\\"\d{4}-\d\d-\d\dT[^\\"]+\\"/g, '\\"$1\\":\\"<ts>\\"')
+    .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt");
 }
 
 export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
@@ -223,7 +328,7 @@ function openAIChunk(model, delta, finishReason = null) {
   };
 }
 
-async function startRecorder() {
+async function startRecorder(script = TOOL_SCRIPTS.default) {
   const requests = [];
   const rawRequests = [];
   const server = createServer(async (req, res) => {
@@ -249,15 +354,16 @@ async function startRecorder() {
     // carries the success envelope and the "Error executing bash" envelope
     // respectively, so both result shapes are compared on the wire.
     const toolResults = Array.isArray(body.messages) ? body.messages.filter(message => message?.role === "tool").length : 0;
-    const step = TOOL_SCRIPT[toolResults];
-    if (step && (body.tools ?? []).some(tool => tool?.function?.name === "bash")) {
+    const step = script[toolResults];
+    const stepTool = step?.tool ?? "bash";
+    if (step && (body.tools ?? []).some(tool => tool?.function?.name === stepTool)) {
       emit(openAIChunk(body.model, {
         role: "assistant",
         tool_calls: [{
           index: 0,
           id: step.id,
           type: "function",
-          function: { name: "bash", arguments: JSON.stringify({ command: step.command }) },
+          function: { name: stepTool, arguments: JSON.stringify(step.args ?? { command: step.command, ...(step.cwd ? { cwd: step.cwd } : {}), ...(step.description ? { description: step.description } : {}), ...(step.timeout_seconds ? { timeout_seconds: step.timeout_seconds } : {}) }) },
         }],
       }));
       emit(openAIChunk(body.model, {}, "tool_calls"));
@@ -305,8 +411,8 @@ async function run(command, args, options) {
   });
 }
 
-async function capturePi(workspace, scratch, profile) {
-  const recorder = await startRecorder();
+async function capturePi(workspace, scratch, profile, script, maxTurns = 0) {
+  const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "pi-home");
     const agentDir = join(home, ".pi", "agent");
@@ -349,7 +455,7 @@ async function capturePi(workspace, scratch, profile) {
     args.push("--approve");
     // --clean-agent also means --no-hooks on the Swarm side; Pi-Swarm's hook
     // groups read PI_SWARM_NO_HOOKS (see .pi/hook-state.ts).
-    const hookEnv = profile === "clean" ? { PI_SWARM_NO_HOOKS: "1" } : {};
+    const hookEnv = { ...(profile === "clean" ? { PI_SWARM_NO_HOOKS: "1" } : {}), ...(maxTurns > 0 ? { PI_SWARM_MAX_TURNS: String(maxTurns) } : {}) };
     args.push(PROBE_PROMPT);
     const processResult = await run("pi", args, {
       cwd: workspace,
@@ -369,8 +475,8 @@ async function capturePi(workspace, scratch, profile) {
   }
 }
 
-async function captureSwarm(workspace, scratch, profile, projectSystemPrompt) {
-  const recorder = await startRecorder();
+async function captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns = 0) {
+  const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "swarm-home");
     await mkdir(home, { recursive: true });
@@ -382,7 +488,10 @@ async function captureSwarm(workspace, scratch, profile, projectSystemPrompt) {
       "--api-key-env", "PARITY_API_KEY",
       "-m", "parity-model",
       "--max-tokens", "4096",
-      "--max-turns", "3",
+      // Swarm -p default is 0 (unlimited); the probe passes the same limit to
+      // both sides (Pi via PI_SWARM_MAX_TURNS) so the turn-limit path can be
+      // compared without introducing an asymmetry.
+      "--max-turns", String(maxTurns),
       "--workspace", workspace,
       "--output-format", "stream-json",
     ];
@@ -418,17 +527,21 @@ export async function captureParity(options = {}) {
   const workspace = resolve(options.workspace ?? process.cwd());
   const output = resolve(options.output ?? join(workspace, ".parity"));
   const profile = options.profile ?? "clean";
+  const scenario = options.scenario ?? "default";
+  if (!TOOL_SCRIPTS[scenario]) throw new Error(`unknown parity scenario: ${scenario}`);
+  const script = TOOL_SCRIPTS[scenario];
+  const maxTurns = Number(options.maxTurns ?? 0) || 0;
   if (profile !== "clean" && profile !== "project") {
     throw new Error(`unknown parity profile: ${profile}`);
   }
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-"));
   try {
-    const pi = await capturePi(workspace, scratch, profile);
+    const pi = await capturePi(workspace, scratch, profile, script, maxTurns);
     const piArtifacts = requestArtifacts(pi.requests, PROBE_PROMPT);
     const projectSystemPrompt = profile === "project"
       ? sharedPromptPrefix(primarySystemPrompt(pi.requests))
       : undefined;
-    const swarm = await captureSwarm(workspace, scratch, profile, projectSystemPrompt);
+    const swarm = await captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns);
     const swarmArtifacts = requestArtifacts(swarm.requests, PROBE_PROMPT);
     const sharedPrompt = projectSystemPrompt ? {
       bytes: Buffer.byteLength(projectSystemPrompt),
@@ -476,7 +589,7 @@ export async function captureParity(options = {}) {
       writeFile(join(output, "pi.ndjson"), pi.process.stdout),
       writeFile(join(output, "swarm.ndjson"), swarm.process.stdout),
     ]);
-    return { profile, output, mismatches, mismatchCategories, wire, pi: piArtifacts, swarm: swarmArtifacts };
+    return { profile, scenario, maxTurns, output, mismatches, mismatchCategories, wire, pi: piArtifacts, swarm: swarmArtifacts };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -492,9 +605,13 @@ async function main() {
     workspace: valueAfter("--workspace"),
     output: valueAfter("--output"),
     profile: valueAfter("--profile"),
+    scenario: valueAfter("--scenario"),
+    maxTurns: valueAfter("--max-turns"),
   });
   process.stdout.write(`${JSON.stringify({
     profile: result.profile,
+    scenario: result.scenario,
+    maxTurns: result.maxTurns,
     output: result.output,
     mismatchCount: result.mismatches.length,
     mismatchCategories: result.mismatchCategories,

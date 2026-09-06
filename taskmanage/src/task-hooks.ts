@@ -12,6 +12,8 @@ export interface HookConfig {
   nudgeToolThreshold?: number;
   maintenanceToolThreshold?: number;
   isSubagent?: (ctx: unknown) => boolean;
+  /** Keep audit/state bookkeeping but never return model-visible messages or blocks. */
+  silent?: boolean;
 }
 export interface HookEvent { type: string; [key: string]: any }
 export interface HookContext { sessionManager?: { getEntries(): readonly unknown[]; getBranch?(): readonly unknown[] }; [key: string]: any }
@@ -124,6 +126,7 @@ const sharedBySession = new WeakMap<object, SharedNudgeState>();
 export class TaskHooksCoordinator {
   readonly config: Required<Pick<HookConfig, "nudgeInterval" | "nudgeToolThreshold" | "maintenanceToolThreshold">> & { enforcementMode: EnforcementMode };
   private readonly isSubagent?: (ctx: unknown) => boolean;
+  private readonly silent: boolean;
   private state: HookState = stateFrom([]);
   private prompt = "";
   private shared: SharedNudgeState;
@@ -134,6 +137,7 @@ export class TaskHooksCoordinator {
     this.config = { enforcementMode: config.enforcementMode ?? "advise", nudgeInterval: config.nudgeInterval ?? 5,
       nudgeToolThreshold: config.nudgeToolThreshold ?? 2, maintenanceToolThreshold: config.maintenanceToolThreshold ?? 8 };
     this.isSubagent = config.isSubagent;
+    this.silent = config.silent === true;
     const owner = pi as object;
     this.shared = sharedByPi.get(owner) ?? { lastNudgeTurn: 0, budget: this.state.nudgeBudget };
     sharedByPi.set(owner, this.shared);
@@ -170,6 +174,11 @@ export class TaskHooksCoordinator {
     return candidates.map(find).find(Boolean);
   }
   on(event: HookEvent, ctx: HookContext = {}): any {
+    const decision = this.dispatch(event, ctx);
+    if (this.silent) { this.pendingMessages = []; return undefined; }
+    return decision;
+  }
+  private dispatch(event: HookEvent, ctx: HookContext = {}): any {
     if (event.type === "session_start") {
       this.state = stateFrom(ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? []);
       if (ctx.sessionManager && typeof ctx.sessionManager === "object") {
