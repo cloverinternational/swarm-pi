@@ -49,6 +49,21 @@ export const skillManageSchema = {
   },
 } as const;
 
+/** Go filepath.Clean for slash paths ("" → "."). */
+export function goCleanPath(value: string): string {
+  if (value === "") return ".";
+  const rooted = value.startsWith("/");
+  const parts: string[] = [];
+  for (const part of value.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") { if (parts.length && parts[parts.length - 1] !== "..") parts.pop(); else if (!rooted) parts.push(".."); continue; }
+    parts.push(part);
+  }
+  const out = (rooted ? "/" : "") + parts.join("/");
+  return out === "" ? "." : out;
+}
+/** Go os.PathError text for lstat: "lstat <path>: no such file or directory". */
+const goLstatError = (path: string, error: any) => new Error(`lstat ${path}: ${error?.code === "ENOENT" ? "no such file or directory" : error?.code === "EACCES" ? "permission denied" : error?.code === "ENOTDIR" ? "not a directory" : String(error?.message ?? error)}`);
 const safeName = (n: unknown) => typeof n === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64 && n !== "archive";
 const now = () => new Date().toISOString();
 const AUTOGEN_GUIDANCE_MARKER = "<!-- pi-swarm:autogenskills-guidance:v1 -->";
@@ -259,6 +274,27 @@ export class AutoSkillManager {
     if (JSON.stringify(rev.files) !== JSON.stringify(this.packageFiles(name))) throw new Error("disk package does not match history HEAD");
     return id;
   }
+  /** skillmanage.go resolveSupportPath (preceded by the isSafeSkillDirName check in history.go). */
+  private resolveSupportPath(name: string, relativePath: string): string {
+    if (!safeName(name)) throw new Error(`autogenskills: invalid skill name ${JSON.stringify(name)}`);
+    const clean = goCleanPath(relativePath);
+    if (clean.startsWith("/") || clean === "." || clean === ".." || clean.startsWith("../")) throw new Error("path must stay inside the skill package");
+    const first = clean.split("/")[0];
+    if (!SUPPORT_ROOTS.has(first)) throw new Error("path must begin with references/, templates/, scripts/, or assets/");
+    const root = join(this.config.dir, name);
+    let rootInfo; try { rootInfo = lstatSync(root); } catch (error) { throw goLstatError(root, error); }
+    if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new Error("skill package must be a real directory");
+    let current = root;
+    const parts = clean.split("/");
+    for (let index = 0; index < parts.length; index++) {
+      current = join(current, parts[index]);
+      let info; try { info = lstatSync(current); } catch (error: any) { if (error?.code === "ENOENT") break; throw goLstatError(current, error); }
+      if (info.isSymbolicLink()) throw new Error(`symlink rejected in skill package: ${parts.slice(0, index + 1).join("/")}`);
+      if (index < parts.length - 1 && !info.isDirectory()) throw new Error(`support path component is not a directory: ${parts[index]}`);
+      if (index === parts.length - 1 && !info.isFile()) throw new Error(`unsupported filesystem entry: ${parts[index]}`);
+    }
+    return join(root, clean);
+  }
   private safePath(root: string, value: string) {
     const p = resolve(root, value), r = relative(root, p);
     if (r === ".." || r.startsWith("../") || r.startsWith("..\\")) throw new Error("path escapes skill package");
@@ -430,7 +466,8 @@ export class AutoSkillManager {
   execute(input: any): any {
     this.assertEnabled(); const action = input?.action;
     if (action === "list") return { skills: this.list() };
-    if (!safeName(input?.name) && !["review", "metrics"].includes(action)) throw new Error("name must match lowercase skill identifier syntax");
+    // read_file validates the name itself with Go's wording (history.go isSafeSkillDirName).
+    if (!safeName(input?.name) && !["review", "metrics", "read_file"].includes(action)) throw new Error("name must match lowercase skill identifier syntax");
     const lockActions = new Set(["create", "patch", "view", "read_file", "write_file", "absorb_files", "history", "undo", "archive", "pin", "unpin"]);
     if (lockActions.has(action)) {
       const names = [String(input.name)];
@@ -615,13 +652,25 @@ export class AutoSkillManager {
       this.config.reviewHook?.({ action, name, revision: next.id });
       this.commit(); return { restored: id, revision: next.id };
     }
-    if (action === "read_file" || action === "write_file") {
-      if (action === "write_file") this.assertMutationAllowed(action);
+    if (action === "read_file") {
+      // history.go readSupportFileRevisionSnapshot + skillmanage.go
+      // resolveSupportPath, in Go's error order and wording.
+      const target = this.resolveSupportPath(name, String(input.file_path ?? ""));
+      const root = this.packageRoot(name);
+      if (root !== this.dir(name)) throw new Error(`autogenskills: skill ${JSON.stringify(name)} not found in active packages`);
+      const cleanPath = goCleanPath(String(input.file_path ?? ""));
+      if (!(cleanPath in this.packageFiles(name))) throw new Error(`autogenskills: support file ${JSON.stringify(cleanPath)} not found in captured package`);
+      const info = lstatSync(target);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error(`autogenskills: support file ${JSON.stringify(cleanPath)} is not a regular file`);
+      if (info.size > 1 << 20) throw new Error("autogenskills: support file exceeds 1 MiB");
+      return { path: target, content: readFileSync(target, "utf8"), revision: this.diskHead(name) };
+    }
+    if (action === "write_file") {
+      this.assertMutationAllowed(action);
       const raw = String(input.file_path ?? ""), first = raw.replaceAll("\\", "/").split("/")[0];
       if (raw.includes("\\")) throw new Error("support paths must use forward slashes");
       const p = this.safePath(this.dir(name), raw);
       if (!SUPPORT_ROOTS.has(first)) throw new Error("support path must stay under references/, templates/, scripts/, or assets/");
-      if (action === "read_file") return { path: p, content: readFileSync(p, "utf8"), revision: this.diskHead(name) };
       const current = this.diskHead(name);
       if (!input.expected_revision || input.expected_revision !== current) throw new Error(`expected_revision is required and must match current revision ${current}`);
       const rev = this.mutateActivePackage(name, "write_file", current, false, stage => {

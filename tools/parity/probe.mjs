@@ -116,6 +116,27 @@ export const TOOL_SCRIPTS = {
     { id: "call_t27", tool: "bash", args: {} },
     { id: "call_t28", tool: "Read", args: {} },
   ],
+  // On-disk (non-builtin) skill invocation, only meaningful in a workspace
+  // that ships project skills (tests/parity-probe.test.mjs makeStressWorkspace):
+  // "Base directory for this skill:" prefix, named {{argName}} (frontmatter
+  // `arguments`) and positional {{N}} substitution over strings.Fields(args),
+  // ${SWARM_SKILL_DIR}/${SWARM_SESSION_ID}, disable-model-invocation refusal,
+  // empty instructions, SkillManage view/history of a non-autogen skill, and
+  // a list that overflows the catalogue.
+  skills: [
+    { id: "call_k1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "skills probe", status: "in_progress", active: true }] } },
+    { id: "call_k2", tool: "Skill", args: { skill: "args-skill" } },
+    { id: "call_k3", tool: "Skill", args: { skill: "args-skill", args: "alpha  beta\tgamma" } },
+    { id: "call_k4", tool: "Skill", args: { skill: "args-skill", args: "only" } },
+    { id: "call_k5", tool: "Skill", args: { skill: "hidden-skill" } },
+    { id: "call_k6", tool: "Skill", args: { skill: "empty-skill" } },
+    { id: "call_k7", tool: "Skill", args: { skill: "claude-side" } },
+    { id: "call_k8", tool: "Skill", args: { skill: "" } },
+    { id: "call_k9", tool: "SkillManage", args: { action: "view", name: "args-skill" } },
+    { id: "call_k10", tool: "SkillManage", args: { action: "history", name: "args-skill" } },
+    { id: "call_k11", tool: "SkillManage", args: { action: "list" } },
+    { id: "call_k12", tool: "SkillManage", args: { action: "read_file", name: "args-skill", file_path: "references/notes.md" } },
+  ],
   // Message shapes the base scripts never exercise: assistant text next to a
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
@@ -183,7 +204,10 @@ export function canonicalizeRequest(request) {
           .replace(/"fire_time": ?"[^"]+"/g, '"fire_time":"<ts>"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
           .replace(/conversation: \d{8}-\d{6}-[a-z0-9]{6}/g, "conversation: <id>")
           .replace(/ \| at: \d{4}-\d\d-\d\dT[^ ]+Z/g, " | at: <ts>")
-          .replace(/annoyed: GitHub API POST [^\n]*/g, "annoyed: GitHub API POST <gh>");
+          .replace(/annoyed: GitHub API POST [^\n]*/g, "annoyed: GitHub API POST <gh>")
+          // Each side runs under its own scratch HOME; paths under it that
+          // leak into tool output (e.g. autogen dir errors) are per-side.
+          .replace(/\/tmp\/pi-swarm-parity-[A-Za-z0-9]+\/(?:pi|swarm)-home/g, "<home>");
       }
       return value;
     }
@@ -225,6 +249,7 @@ export function wireFingerprint(rawText) {
     .replace(/ duration_ms=\\"\d+\\"/g, ' duration_ms=\\"<ms>\\"')
     .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
     .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2")
+    .replace(/\/tmp\/pi-swarm-parity-[A-Za-z0-9]+\/(?:pi|swarm)-home/g, "<home>")
     .replace(/\\"(created_at|updated_at|completed_at)\\":\\"\d{4}-\d\d-\d\dT[^\\"]+\\"/g, '\\"$1\\":\\"<ts>\\"')
     .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
     .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")

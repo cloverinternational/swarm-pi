@@ -127,6 +127,18 @@ describe("Skill tool rendering (skilltools/skill_tool.go) and FSRead approval", 
     expect(registry.invoke("demo", "world", "sess-1").text).toBe(`Base directory for this skill: ${dir}\n\nHello world in ${dir} session sess-1`);
     expect(() => registry.invoke("nope")).toThrow('skill "nope" not found in registry');
     expect(() => registry.invoke("hidden")).toThrow('skill "hidden" cannot be used with the Skill tool due to disable-model-invocation');
+    // arguments.go: named {{argName}} from frontmatter `arguments` by position over
+    // strings.Fields(args), then positional {{N}}; {{arg}} is not special.
+    const named = join(home, ".swarm", "skills", "named"); mkdirSync(named);
+    writeFileSync(join(named, "SKILL.md"), "---\nname: named\ndescription: d\narguments:\n  - repo\n  - branch\n---\nClone {{repo}}@{{branch}} {{1}}/{{2}}/{{3}} {{arg}} ${SWARM_SESSION_ID}|");
+    registry.refresh();
+    expect(registry.invoke("named", "a  b\tc").text).toBe(`Base directory for this skill: ${named}\n\nClone a@b a/b/c {{arg}} |`);
+    expect(registry.invoke("named", "only").text).toBe(`Base directory for this skill: ${named}\n\nClone only@{{branch}} only/{{2}}/{{3}} {{arg}} |`);
+    // Builtins: Path is "builtin:<name>", no base-directory prefix, and the
+    // catalogue still lists disable-model-invocation skills (only Skill refuses).
+    const withBuiltins = new SwarmSkillRegistry({ cwd: home, home });
+    expect(withBuiltins.invoke("loop").text.startsWith("Base directory")).toBe(false);
+    expect(withBuiltins.catalog("")).toContain("<name>hidden</name>");
   });
   it("skips the workspace boundary only for approved (headless auto) paths", () => {
     expect(() => readImage("/nonexistent/parity.txt", "/w")).toThrow("path must be within workspace or ~/.swarm/");

@@ -11,7 +11,9 @@ export interface AutoSkillsExtensionOptions extends Config {}
 
 const settingsFile = (cwd: string) => join(resolve(cwd), ".pi", "swarm-settings.json");
 /** ${SWARM_SESSION_ID} substitution source for Skill invocations (skill_tool.go sessionIDGetter). */
-let sessionId = "";
+// swarm-tui sdk_integration.go SessionIDGetter returns "" ("safe default"),
+// so ${SWARM_SESSION_ID} always expands to the empty string in `swarm -p`.
+const SWARM_TUI_SESSION_ID = "";
 function autogenMode(cwd: string): Config["mode"] {
   const env = process.env.SWARM_AUTOGEN_MODE as Config["mode"] | undefined;
   if (env && ["never", "manual", "auto"].includes(env)) return env;
@@ -79,14 +81,13 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
     accountingExempt: options.accountingExempt ?? process.env.SWARM_AUTOGEN_ACCOUNTING_EXEMPT === "1",
     curatorRunner,
     skillInvoker: (name, args) => {
-      const skill = getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).invoke(name, args, sessionId);
+      const skill = getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).invoke(name, args, SWARM_TUI_SESSION_ID);
       return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions, text: skill.text };
     },
   });
 }
 
 export default function autogenskillsExtension(pi: any) {
-  pi.on?.("session_start", (_event: unknown, ctx: any) => { sessionId = ctx?.sessionManager?.getSessionId?.() ?? ""; });
   // Swarm autogen is enabled by default, but remains isolated from Pi's
   // native skill ecosystem. Persisted project settings or the environment can
   // disable it without exposing generated skills to Pi discovery.

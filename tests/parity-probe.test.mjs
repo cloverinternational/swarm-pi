@@ -159,7 +159,7 @@ test("unknown capture profiles are rejected before launching either runtime", as
 // sleep/stdin blockers, annoyance nudge) and every non-bash tool's result
 // envelope + error path must also be byte-identical, not only the 3-request
 // base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
-for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default")) {
+for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default" && name !== "skills")) {
   test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
     const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
     try {
@@ -196,6 +196,20 @@ async function makeStressWorkspace(root) {
   const skill = (name, description, extra = "") => `---\nname: ${name}\ndescription: "${description}"\n${extra}---\nbody of ${name}\n`;
   await write(".claude/skills/claude-side/SKILL.md", skill("claude-side", "A skill from .claude/skills — it's \\\"quoted\\\" & <tagged>"));
   await write(".pi/skills/pi-side/SKILL.md", skill("pi-side", "A skill from .pi/skills"));
+  // Exercised by the `skills` scenario (TOOL_SCRIPTS.skills).
+  await write(".swarm/skills/args-skill/SKILL.md", `---
+name: args-skill
+description: "Substitution probe"
+arguments:
+  - repo
+  - branch
+---
+Clone {{repo}} on {{branch}}; first={{1}} second={{2}} third={{3}} fourth={{4}} zero={{0}}
+dir=\${SWARM_SKILL_DIR} session=[\${SWARM_SESSION_ID}] arg={{arg}} repo again {{repo}}
+`);
+  await write(".swarm/skills/args-skill/references/notes.md", "notes body\n");
+  await write(".swarm/skills/hidden-skill/SKILL.md", skill("hidden-skill", "Not model-invocable", "disable-model-invocation: true\n"));
+  await write(".swarm/skills/empty-skill/SKILL.md", "---\nname: empty-skill\ndescription: \"No body at all\"\n---\n");
   for (let i = 1; i <= 70; i++) {
     const n = String(i).padStart(2, "0");
     // Apostrophes/quotes (html.EscapeString → &#39;/&#34;) and multibyte runes
@@ -220,6 +234,22 @@ test("project profile is wire-identical for a foreign workspace with nested cont
     assert.match(result.swarm.prompt.text, /<location>[^<]*\/\.claude\/skills\/claude-side\/SKILL\.md<\/location>/);
     assert.doesNotMatch(result.swarm.prompt.text, /pi-side/);
     assert.match(result.swarm.prompt.text, /additional skill\(s\) omitted/);
+    assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+    assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, { timeout: 180_000 });
+
+test("project profile is wire-identical for on-disk skill invocation in a foreign workspace (skills scenario)", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));
+  const workspace = join(scratch, "ws");
+  const output = join(scratch, "out");
+  try {
+    await makeStressWorkspace(workspace);
+    const result = await captureParity({ profile: "project", scenario: "skills", workspace, output });
+    assert.equal(result.pi.requests.length, expectedPrimaryRequests("skills"));
+    assert.equal(result.swarm.requests.length, expectedPrimaryRequests("skills"));
     assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
     assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
   } finally {

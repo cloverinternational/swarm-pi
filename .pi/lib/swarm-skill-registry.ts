@@ -22,25 +22,30 @@ export class SwarmSkillRegistry {
   refresh() { this.result = this.loader.load(); return this.result; }
   list() { return this.result.skills; }
   find(name: string) { return this.result.skills.find(s => s.name === name); }
-  catalog(query = "") { return generateRankedAvailableSkillsXML(rankSkillsForContext(this.result.skills.filter(s => !s.disableModelInvocation), query)); }
+  /** skills_manager.go GetPromptContextForQuery ranks loader.List() unfiltered: disable-model-invocation skills still appear in <available_skills> (only the Skill tool refuses them). */
+  catalog(query = "") { return generateRankedAvailableSkillsXML(rankSkillsForContext(this.result.skills, query)); }
   /**
-   * skilltools/skill_tool.go Invoke: resolve, refuse disable-model-invocation,
-   * prefix "Base directory for this skill: <dir>" for on-disk skills, then
-   * SubstituteArguments ({{N}} positional; named {{arg}} kept for Pi callers)
-   * and SubstituteVariables (${SWARM_SKILL_DIR}, ${SWARM_SESSION_ID}).
+   * tools/skilltools/skill_tool.go Invoke: resolve, refuse
+   * disable-model-invocation, prefix "Base directory for this skill: <Path>"
+   * for on-disk skills (builtins have Path "builtin:<name>"), then
+   * SubstituteArguments (named {{argName}} from frontmatter `arguments`
+   * by position, then positional {{N}}; both over strings.Fields(args)) and
+   * SubstituteVariables (${SWARM_SKILL_DIR} = Path, ${SWARM_SESSION_ID}).
+   * The TUI's SessionIDGetter returns "" (sdk_integration.go), so callers
+   * should pass "" unless they mirror a different host.
    */
   invoke(name: string, args = "", sessionId = "") {
     const skill = this.find(name);
     if (!skill) throw new Error(`skill ${JSON.stringify(name)} not found in registry`);
     if (skill.disableModelInvocation) throw new Error(`skill ${JSON.stringify(name)} cannot be used with the Skill tool due to disable-model-invocation`);
     const builtin = skill.source === "builtin";
-    const path = builtin ? skill.location : skill.dir;
+    const path = builtin ? `builtin:${skill.name}` : skill.dir;
     let content = skill.instructions;
     if (content === "") return { ...skill, instructions: content, text: `Skill ${JSON.stringify(name)} has no instructions content.` };
     if (!builtin) content = `Base directory for this skill: ${path}\n\n${content}`;
-    if (args) {
+    if (args !== "") {
       const values = args.split(/\s+/).filter(Boolean);
-      content = content.replaceAll("{{arg}}", args);
+      (skill.arguments ?? []).forEach((argName, i) => { if (i < values.length) content = content.replaceAll(`{{${argName}}}`, values[i]); });
       content = content.replace(/\{\{(\d+)\}\}/g, (match, n) => { const i = Number(n); return i >= 1 && i <= values.length ? values[i - 1] : match; });
     }
     content = content.replaceAll("${SWARM_SKILL_DIR}", path).replaceAll("${SWARM_SESSION_ID}", sessionId);
