@@ -294,6 +294,14 @@ the package/extension boundary.
   layers; do not make ambient discovery silently widen a closed profile.
 - `packages/runtime/contract` and `packages/runtime/runtime-contracts` define interfaces consumed by
   multiple packages; change them deliberately and update all consumers/tests.
+- Import direction is fixed by who runs the code. `.pi/` imports package
+  sources by relative path (`../../../packages/<layer>/<name>/src/index.ts`):
+  Pi loads extensions through jiti with plain Node resolution and no build
+  step, so a bare `@pi-swarm/<name>` import there would silently depend on a
+  stale or missing `dist/`. Package-to-package imports use the bare workspace
+  name (`@pi-swarm/core`, `@pi-swarm/runtime-contracts`) against that
+  package's `dist` exports so `tsc` `rootDir` boundaries hold. Do not mix the
+  two; `tools/repo/rewrite-imports.mjs --check` verifies the relative side.
 
 ## Change contract
 

@@ -16,6 +16,23 @@ against the commit-0 baseline. Deviations from the plan as written:
   (`resolve(__dirname, "../..")` and friends) were fixed by hand because the
   check gate cannot see them.
 
+Follow-ups executed after the series, each gated the same way:
+
+- b6a772c: the default tool renderer moved into `@pi-swarm/core` (dist
+  exports map); `schedule` and `mcp` import the bare workspace name and
+  compile again (12/12 packages build);
+- c793cfb: the `swarm-transport-parity.test.ts` hang was a test fake that
+  never returned `Done` from the configure sub-menu, spinning the loop in
+  microtasks so no timeout could fire; `npm test` now completes;
+- 36b6c20: `codemode` became `packages/tools/codemode` (`@pi-swarm/codemode`,
+  `noEmit` typecheck build) so its dependencies install from the root
+  workspace instead of an untracked nested `node_modules`; the dead
+  `annoyed/package.json` was removed;
+- bare `@pi-swarm/*` imports from `.pi/` were rejected: Pi's jiti loader uses
+  plain Node resolution, so they would resolve through `dist/` and make a Pi
+  boot depend on a prior build. The rule is recorded in `AGENTS.md`
+  ("Package boundaries").
+
 ## Findings that shape the design (verified in-repo)
 
 - Pi discovers project extensions **non-recursively**: `extensions/*.ts`,
