@@ -14,7 +14,7 @@ import {
   promptSliceEvidence,
   sharedPromptPrefix,
   summarizeMismatches,
-} from "../tools/parity/probe.mjs";
+} from "../../tools/parity/probe.mjs";
 
 test("canonicalizer replaces generated tool call IDs consistently", () => {
   const request = canonicalizeRequest({

@@ -117,7 +117,7 @@ export const TOOL_SCRIPTS = {
     { id: "call_t28", tool: "Read", args: {} },
   ],
   // On-disk (non-builtin) skill invocation, only meaningful in a workspace
-  // that ships project skills (tests/parity-probe.test.mjs makeStressWorkspace):
+  // that ships project skills (tests/parity/parity-probe.test.mjs makeStressWorkspace):
   // "Base directory for this skill:" prefix, named {{argName}} (frontmatter
   // `arguments`) and positional {{N}} substitution over strings.Fields(args),
   // ${SWARM_SKILL_DIR}/${SWARM_SESSION_ID}, disable-model-invocation refusal,
