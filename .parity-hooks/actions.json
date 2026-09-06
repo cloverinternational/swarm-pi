@@ -1,0 +1,4566 @@
+{
+  "pi": [
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf fourteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-14>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[fourteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-14>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf fourteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-14>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[fourteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-14>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"list\"}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-15>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"list\",\"status\":\"succeeded\",\"data\":{\"tasks\":[{\"active\":true,\"category\":\"acting\",\"id\":\"1\",\"parent_id\":\"\",\"priority\":\"medium\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}],\"pagination\":{\"total\":1,\"offset\":0,\"limit\":50,\"more\":false}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-15>"
+    }
+  ],
+  "swarm": [
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf fourteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-14>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[fourteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-14>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf one\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[one]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf two\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[two]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-3>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-3>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-4>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-4>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf x > .parity-probe-write && cat .parity-probe-write && rm .parity-probe-write\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-5>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-5>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"sleep 0.2; printf six\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-6>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Tool 'bash' blocked by hook: Blocked: a bare sleep can't wait for a condition. To wait until something is ready, poll with an until-loop instead. Replace this command with:\n\n  until <check>; do sleep 5; done && printf six\n\n(Adjust the marker/condition and the trailing command for your case. To wait for a command you started, use run_in_background: true. Do not chain shorter sleeps to work around this block — set timeout_seconds on the Bash call if you only need a hard cap.)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-6>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf seven\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-7>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[seven]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-7>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf eight\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-8>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[eight]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-8>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git status --short | head -1\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-9>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[ M .pi/extensions/autogenskills.ts\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-9>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"git diff --stat | head -1 > .parity-git-probe; rm -f .parity-git-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-10>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-10>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf hi | cat <<'EOF'\\nx\\nEOF\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-11>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<system-reminder source=\"stdin-conflict-advisory\" kind=\"block\" seq=\"1\">[stdin conflict] This command gives the same command two stdin sources: a pipe on the left and a heredoc on the right. Bash applies the last redirection and silently discards the other input, which usually fails in a confusing way.\n\nIf you meant to send the piped data, drop the heredoc. If you meant to send the heredoc, drop the pipe (e.g. inline the data, or use `ssh host 'cmd' < file`). Running as-is — this is advice, not a block.</system-reminder>\n\n---\n\n<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[x\n]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-11>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"create\",\"subject\":\"parity probe task\",\"status\":\"in_progress\",\"active\":true}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-12>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"create\",\"status\":\"succeeded\",\"data\":{\"task\":{\"active\":true,\"id\":\"1\",\"parent_id\":\"\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-12>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf thirteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-13>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[thirteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-13>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf fourteen\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-14>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[fourteen]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-14>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"operations\":[{\"key\":\"t\",\"op\":\"list\"}]}",
+            "name": "TaskManage"
+          },
+          "id": "<tool-call-15>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "{\"status\":\"succeeded\",\"results\":[{\"key\":\"t\",\"op\":\"list\",\"status\":\"succeeded\",\"data\":{\"tasks\":[{\"active\":true,\"category\":\"acting\",\"id\":\"1\",\"parent_id\":\"\",\"priority\":\"medium\",\"status\":\"in_progress\",\"subject\":\"parity probe task\"}],\"pagination\":{\"total\":1,\"offset\":0,\"limit\":50,\"more\":false}}}]}",
+      "role": "tool",
+      "tool_call_id": "<tool-call-15>"
+    }
+  ]
+}

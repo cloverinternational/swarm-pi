@@ -1,0 +1,9 @@
+{
+ "model": "luna",
+ "max_tokens": 31999,
+ "stream": true,
+ "stream_options": {
+  "include_usage": true
+ },
+ "reasoning_effort": "medium"
+}

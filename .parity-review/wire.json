@@ -1,0 +1,72 @@
+{
+  "auxiliary": [
+    {
+      "bytes": 7727,
+      "identical": true,
+      "index": 0
+    }
+  ],
+  "identical": true,
+  "requests": [
+    {
+      "bytes": 57179,
+      "identical": true,
+      "index": 0
+    },
+    {
+      "bytes": 57728,
+      "identical": true,
+      "index": 1
+    },
+    {
+      "bytes": 58322,
+      "identical": true,
+      "index": 2
+    },
+    {
+      "bytes": 58712,
+      "identical": true,
+      "index": 3
+    },
+    {
+      "bytes": 59831,
+      "identical": true,
+      "index": 4
+    },
+    {
+      "bytes": 60221,
+      "identical": true,
+      "index": 5
+    },
+    {
+      "bytes": 60611,
+      "identical": true,
+      "index": 6
+    },
+    {
+      "bytes": 61563,
+      "identical": true,
+      "index": 7
+    },
+    {
+      "bytes": 63268,
+      "identical": true,
+      "index": 8
+    },
+    {
+      "bytes": 64973,
+      "identical": true,
+      "index": 9
+    },
+    {
+      "bytes": 65270,
+      "identical": true,
+      "index": 10
+    },
+    {
+      "bytes": 65662,
+      "identical": true,
+      "index": 11
+    }
+  ]
+}

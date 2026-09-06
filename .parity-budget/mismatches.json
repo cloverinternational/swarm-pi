@@ -1,0 +1,40 @@
+{
+  "categories": {},
+  "count": 0,
+  "mismatches": [],
+  "pi": {
+    "auxiliaryRequestCount": 1,
+    "prompt": {
+      "bytes": 11307,
+      "sha256": "02c4f5bebb3a66e2bac1421eaf1c7db5fc4f7f0fbfd67ca4ed5ea3fdb32c7bf4"
+    },
+    "requestCount": 14,
+    "skills": 1,
+    "tools": 28
+  },
+  "profile": "project",
+  "sharedPrompt": {
+    "bytes": 2854,
+    "pi": {
+      "exact": true,
+      "offset": 1516,
+      "present": true
+    },
+    "sha256": "d76ef6956cb0d7377a0743774d4b9240da23476dac089567ba9c0cd87bf6ffdb",
+    "swarm": {
+      "exact": true,
+      "offset": 1516,
+      "present": true
+    }
+  },
+  "swarm": {
+    "auxiliaryRequestCount": 1,
+    "prompt": {
+      "bytes": 11307,
+      "sha256": "02c4f5bebb3a66e2bac1421eaf1c7db5fc4f7f0fbfd67ca4ed5ea3fdb32c7bf4"
+    },
+    "requestCount": 14,
+    "skills": 1,
+    "tools": 28
+  }
+}

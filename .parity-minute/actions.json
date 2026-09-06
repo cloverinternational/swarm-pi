@@ -1,0 +1,120 @@
+{
+  "pi": [
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf parity-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[parity-probe]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf parity-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[parity-probe]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    }
+  ],
+  "swarm": [
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf parity-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[parity-probe]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf parity-probe\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-1>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "<result exit_code=\"0\" duration_ms=\"<ms>\" timed_out=\"false\">\n  <stdout><![CDATA[parity-probe]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>",
+      "role": "tool",
+      "tool_call_id": "<tool-call-1>"
+    },
+    {
+      "content": null,
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"printf out; printf err >&2; exit 3\"}",
+            "name": "bash"
+          },
+          "id": "<tool-call-2>",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nerr\n\nstdout:\nout (error_id=<id>)",
+      "role": "tool",
+      "tool_call_id": "<tool-call-2>"
+    }
+  ]
+}
