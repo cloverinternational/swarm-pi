@@ -46,7 +46,8 @@ export function renderSkillManageResult(action: string, params: any, result: any
     }
     case "read_file": {
       const rel = String(params?.file_path ?? "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "");
-      return `═══ SUPPORT FILE: ${params?.name}/${rel} ═══\nRevision: ${result?.revision}\n${result?.content ?? ""}`;
+      const note = result?.external ? "\nNOTE: This revision represents live external/untracked state. Use this newly viewed revision for the next mutation to reconcile it explicitly." : "";
+      return `═══ SUPPORT FILE: ${params?.name}/${rel} ═══\nRevision: ${result?.revision}${note}\n${result?.content ?? ""}`;
     }
     case "view": {
       const s = result?.skill ?? {};
@@ -63,6 +64,7 @@ export function renderSkillManageResult(action: string, params: any, result: any
       if (Array.isArray(s.tags) && s.tags.length > 0) b += `Tags: ${s.tags.join(", ")}\n`;
       b += `Source: ${result?.source ?? "autogen"}\nRevision: ${result?.revision}\n`;
       if (paged) b += `expected_revision: ${result?.revision}\nInstructions range: [${offset},${end}) of ${totalChars} Unicode characters\n`;
+      if (result?.external) b += "NOTE: This revision represents live external/untracked state. Use this newly viewed revision for the next mutation to reconcile it explicitly.\n";
       b += `\n${s.instructions ?? ""}`;
       const support: string[] = result?.support_files ?? [];
       if (support.length > 0) b += `\n\nSupport files (load only when needed with SkillManage action=read_file):\n${support.map(p => `- ${p}\n`).join("")}`;

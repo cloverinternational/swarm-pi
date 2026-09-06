@@ -311,6 +311,10 @@ async function makeHomeSeed(root) {
   await write(".swarmos/skills/stale.bak/SKILL.md", skill("stale", "Skipped by configmigrate"));
   await write(".swarm/skills/home-skill-dup/SKILL.md", skill("home-skill-dup", "DUP from ~/.swarm (should win)"));
   await write(".swarm/skills/home-swarm-skill/SKILL.md", skill("home-swarm-skill", "User skill from ~/.swarm/skills"));
+  // A pre-existing autogen package that opts out of model invocation: still
+  // catalogued and SkillManage-visible, refused by the Skill tool.
+  await write(".swarm/skills/autogen/home-autogen-dmi/SKILL.md", `---\nname: home-autogen-dmi\ndescription: Autogen package hidden from the model\ndisable-model-invocation: true\nversion: 1.0.0\n---\n\nBody of home-autogen-dmi.\n`);
+  await write(".swarm/skills/autogen/home-autogen-dmi/references/r.md", "ref\n");
 }
 
 test("project profile is wire-identical for user-scoped skills in a seeded HOME with a legacy ~/.swarmos tree (home scenario)", async () => {

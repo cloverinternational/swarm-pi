@@ -306,6 +306,28 @@ export const TOOL_SCRIPTS = {
     { id: "call_h6", tool: "Skill", args: { skill: "home-swarm-skill" } },
     { id: "call_h7", tool: "SkillManage", args: { action: "view", name: "home-swarm-skill" } },
     { id: "call_h8", tool: "SkillManage", args: { action: "list" } },
+    { id: "call_h9", tool: "Skill", args: { skill: "home-autogen-dmi" } },
+    { id: "call_h10", tool: "SkillManage", args: { action: "view", name: "home-autogen-dmi" } },
+    { id: "call_h11", tool: "SkillManage", args: { action: "read_file", name: "home-autogen-dmi", file_path: "references/r.md" } },
+    { id: "call_h12", tool: "SkillManage", args: { action: "history", name: "home-autogen-dmi" } },
+    // Untracked → tracked (patch with the synthetic baseline id publishes a
+    // HEAD), then out-of-band drift: view/read_file/history report a synthetic
+    // external revision, a stale patch conflicts against it, and presenting
+    // the synthetic id reconciles it as a persisted "external" revision.
+    // The synthetic "untracked" id history reports differs from the "baseline"
+    // id view reports (the action is hashed): a patch with the history id
+    // conflicts, then a fresh view supplies the accepted one.
+    { id: "call_h13", tool: "SkillManage", args: { action: "patch", name: "home-autogen-dmi", instructions: "Tracked body.", expected_revision: "$REVISION:home-autogen-dmi" } },
+    { id: "call_h13b", tool: "SkillManage", args: { action: "view", name: "home-autogen-dmi" } },
+    { id: "call_h13c", tool: "SkillManage", args: { action: "patch", name: "home-autogen-dmi", instructions: "Tracked body.", expected_revision: "$REVISION:home-autogen-dmi" } },
+    { id: "call_h14", command: "printf 'drifted\\n' >> \"$HOME/.swarm/skills/autogen/home-autogen-dmi/references/r.md\" && echo appended" },
+    { id: "call_h15", tool: "SkillManage", args: { action: "view", name: "home-autogen-dmi" } },
+    { id: "call_h16", tool: "SkillManage", args: { action: "read_file", name: "home-autogen-dmi", file_path: "references/r.md" } },
+    { id: "call_h17", tool: "SkillManage", args: { action: "history", name: "home-autogen-dmi" } },
+    { id: "call_h18", tool: "SkillManage", args: { action: "patch", name: "home-autogen-dmi", instructions: "Stale patch.", expected_revision: "$BASELINE:home-autogen-dmi" } },
+    { id: "call_h19", tool: "SkillManage", args: { action: "patch", name: "home-autogen-dmi", instructions: "Reconciled body.", expected_revision: "$REVISION:home-autogen-dmi" } },
+    { id: "call_h20", tool: "SkillManage", args: { action: "history", name: "home-autogen-dmi" } },
+    { id: "call_h21", tool: "SkillManage", args: { action: "view", name: "home-autogen-dmi" } },
   ],
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),

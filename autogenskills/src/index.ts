@@ -285,17 +285,54 @@ export class AutoSkillManager {
     renameSync(temporary, head);
     return rev;
   }
-  private diskHead(name: string) {
+  private readHead(name: string): string {
     const hp = join(this.config.dir, ".history", "heads", name);
     this.safePath(this.config.dir, `.history/heads/${name}`);
-    // history.go prepareMutationBase: with no head, an absent package yields
-    // a synthetic baseline id that is never persisted; an existing one is
-    // reconciled as an "external" revision.
-    if (!pathExists(hp)) return this.packageRoot(name) ? this.saveRevision(name, "external").id : this.snapshotRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z" }).id;
+    if (!pathExists(hp)) return "";
     if (lstatSync(hp).isSymbolicLink()) throw new Error("untrusted history HEAD");
-    const id = readFileSync(hp, "utf8").trim();
-    const rev = this.loadRevision(name, id);
-    if (JSON.stringify(rev.files) !== JSON.stringify(this.packageFiles(name))) throw new Error("disk package does not match history HEAD");
+    return readFileSync(hp, "utf8").trim();
+  }
+  private livePlacement(name: string): RevisionPlacement {
+    const root = this.packageRoot(name);
+    return !root ? "absent" : root === this.dir(name) ? "active" : "archived";
+  }
+  /**
+   * history.go currentRevisionSnapshot / viewSkillRevisionSnapshot: reads
+   * never write history. With no HEAD the live state is a synthetic
+   * "baseline" revision; when the live package drifted from HEAD it is a
+   * synthetic "external" child of HEAD. Both are reported as `external`.
+   */
+  private currentRevision(name: string): { id: string; head: string; external: boolean } {
+    const head = this.readHead(name);
+    if (!head) return { id: this.snapshotRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z" }).id, head, external: true };
+    const recorded = this.loadRevision(name, head);
+    const same = (recorded.placement ?? "active") === this.livePlacement(name) && JSON.stringify(recorded.files) === JSON.stringify(this.packageFiles(name));
+    if (same) return { id: head, head, external: false };
+    return { id: this.snapshotRevision(name, "external", head, { absent: true, createdAt: "0001-01-01T00:00:00Z" }).id, head, external: true };
+  }
+  /**
+   * history.go prepareMutationBase: validate `expected` against the live
+   * state and adopt out-of-band state only when the caller presents the
+   * synthetic id a view returned. Untracked packages get a persisted
+   * (zero-time) baseline revision — published only for requireExpected
+   * callers, so create's baseline stays unpublished and becomes its parent.
+   */
+  private prepareMutationBase(name: string, expected: string, requireExpected: boolean): string {
+    const { id, head, external } = this.currentRevision(name);
+    if (!head) {
+      if (requireExpected && expected !== id) throw revisionConflict(name, expected, id);
+      if (!requireExpected && this.livePlacement(name) !== "absent") throw revisionConflict(name, expected, id);
+      const persisted = this.saveRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z", publish: requireExpected });
+      if (persisted.id !== id) throw new Error(`autogenskills: live package changed while initializing history for ${JSON.stringify(name)}`);
+      return id;
+    }
+    if (!external) {
+      if (requireExpected && expected !== head) throw revisionConflict(name, expected, head);
+      return head;
+    }
+    if (!requireExpected || expected !== id) throw revisionConflict(name, expected, id);
+    const reconciled = this.saveRevision(name, "external", head, { absent: true, createdAt: "0001-01-01T00:00:00Z" });
+    if (reconciled.id !== id) throw new Error(`autogenskills: live package changed while reconciling ${JSON.stringify(name)}`);
     return id;
   }
   /** skillmanage.go resolveSupportPath (preceded by the isSafeSkillDirName check in history.go). */
@@ -546,6 +583,7 @@ export class AutoSkillManager {
     if (action === "pin" || action === "unpin") { const skill = this.parse(name); const old = this.state.skills[name] ?? { version: skill.version, uses: 0 }; old.pinned = action === "pin"; old.curatorState = old.pinned ? "pinned" : "active"; this.state.skills[name] = old; this.config.reviewHook?.({ action, name, revision: old.hash }); this.commit(); return { name, pinned: old.pinned, state: old.curatorState }; }
     if (action === "create") {
       this.assertMutationAllowed(action); this.safePath(this.config.dir, name);
+      const parent = this.prepareMutationBase(name, "", false);
       // factory.go Create runs inside runRevisionMutation's mutate(): its
       // errors come back errors.Join-ed with the (always failing) baseline
       // restore, in CreateOptions.Validate → MinInstructionsLength → exists order.
@@ -554,9 +592,6 @@ export class AutoSkillManager {
       if (this.config.minInstructionsLength > 0 && [...String(input.instructions)].length < this.config.minInstructionsLength) throw mutationFailure(`autogenskills: instructions must contain at least ${this.config.minInstructionsLength} characters under the configured policy`);
       if (pathExists(this.file(name))) throw mutationFailure(`autogenskills: skill ${JSON.stringify(name)} already exists; view and patch the existing skill instead`);
       const s: Skill = { name, description: input.description, instructions: input.instructions, tags: String(input.tags ?? "").split(",").map((x:string)=>x.trim()).filter(Boolean), category: input.category, version: "1.0.0", path: this.dir(name), updatedAt: now() };
-      const headPath = join(this.config.dir, ".history", "heads", name); this.safePath(this.config.dir, `.history/heads/${name}`);
-      const parent = pathExists(headPath) ? readFileSync(headPath, "utf8").trim()
-        : this.saveRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z", publish: false }).id;
       this.write(s, "create", parent); this.commit();
       return { skill: s, revision: this.state.skills[name].hash, expected_revision: this.state.skills[name].hash };
     }
@@ -564,15 +599,15 @@ export class AutoSkillManager {
       const s = this.parse(name, true), offset = input.offset ?? 0, limit = input.limit ?? 80000;
       if (input.offset !== undefined && offset < 0) throw new Error("view 'offset' must be non-negative");
       if (input.limit !== undefined && limit <= 0) throw new Error("view 'limit' must be positive");
-      const hash = this.diskHead(name);
+      const { id: hash, external } = this.currentRevision(name);
       this.viewed.add(name);
       if (!this.config.previewOnly) {
         this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: s.version, hash, lastUsed: now() };
         this.commit();
       }
-      return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit).join("") }, instructions_total: s.instructions, support_files: this.supportFiles(name), source: "autogen", revision: hash, expected_revision: hash, version: s.version };
+      return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit).join("") }, instructions_total: s.instructions, support_files: this.supportFiles(name), source: "autogen", revision: hash, expected_revision: hash, external, version: s.version };
     }
-    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const currentRevision = this.diskHead(name); if ((input.expected_revision ?? "") !== currentRevision) throw revisionConflict(name, String(input.expected_revision ?? ""), currentRevision); if (!pathExists(this.file(name))) throw mutationFailure(`autogenskills: read ${this.file(name)}: open ${this.file(name)}: no such file or directory`); const s = this.parse(name); if (input.instructions) s.instructions = input.append ? `${s.instructions}\n\n${input.instructions}` : input.instructions; if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
+    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const currentRevision = this.prepareMutationBase(name, String(input.expected_revision ?? ""), true); if (!pathExists(this.file(name))) throw mutationFailure(`autogenskills: read ${this.file(name)}: open ${this.file(name)}: no such file or directory`); const s = this.parse(name); if (input.instructions) s.instructions = input.append ? `${s.instructions}\n\n${input.instructions}` : input.instructions; if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
     if (action === "absorb_files") {
       // skillmanage.go executeAbsorbFiles + absorb.go absorbSupportFiles: the
       // source/destination must both load, every carried file is one chained
@@ -629,8 +664,7 @@ export class AutoSkillManager {
         if (remaining.length) throw new Error(`Archive refused: ${JSON.stringify(name)} still has ${remaining.length} support file(s) that ${JSON.stringify(absorbedInto)} does not hold byte-for-byte:\n  ${remaining.join("\n  ")}\n\nCarry them across first, without retyping them:\n  SkillManage(action="absorb_files", from_skill=${JSON.stringify(name)}, name=${JSON.stringify(absorbedInto)})\nthen rewrite the umbrella's instructions to the new paths and archive again.\nIf a file is genuinely obsolete, name it in 'dropped_files' and justify the loss in 'pruning_reason'.`);
         if (dropped.length && reason.trim() === "") throw new Error("archive with 'dropped_files' requires 'pruning_reason' explaining why losing those files is safe");
       }
-      const expected = String(input.expected_revision ?? ""); const current = this.diskHead(name);
-      if (expected !== current) throw revisionConflict(name, expected, current);
+      const current = this.prepareMutationBase(name, String(input.expected_revision ?? ""), true);
       if (meta?.pinned || meta?.curatorState === "pinned") throw mutationFailure(`curator: skill ${JSON.stringify(name)} is pinned and cannot be archived`);
       if (!pathExists(this.dir(name))) throw mutationFailure(`curator: inspect ${name}: lstat ${this.dir(name)}: no such file or directory`);
       const s = this.parse(name), target = join(this.config.dir, "archive", name);
@@ -647,26 +681,22 @@ export class AutoSkillManager {
       this.commit(); return { archived: name, path: target, absorbed_into: absorbedInto, pruning_reason: input.pruning_reason, revision: provenance.id };
     }
     if (action === "history") {
-      const headPath = join(this.config.dir, ".history", "heads", name);
+      // history.go historySnapshot: never writes. With no HEAD the live state
+      // is one synthetic "untracked" entry; when the live package drifted
+      // from HEAD a synthetic "external" child of HEAD precedes the chain.
       const limit = input.limit;
-      this.safePath(this.config.dir, `.history/heads/${name}`);
-      if (!existsSync(headPath)) {
-        // history.go historySnapshot: with no recorded head, the live state
-        // is reported as a single synthetic "untracked" revision whose id is
-        // the sha256 of the canonical manifest (format 1, zero created_at,
-        // zero curator_meta). A package that does not exist is "absent".
-        if (!this.packageRoot(name)) {
-          const manifest = `{"format":${HISTORY_FORMAT},"skill":${JSON.stringify(name)},"action":"untracked","created_at":"0001-01-01T00:00:00Z","placement":"absent","curator_meta":{"state":"","last_used_at":"0001-01-01T00:00:00Z","created_at":"0001-01-01T00:00:00Z","pinned":false,"version":""}}`;
-          return { revisions: [{ id: this.hashBytes(manifest), action: "untracked", createdAt: "0001-01-01T00:00:00Z", placement: "absent", files: {}, blobs: {} }] };
-        }
-        // An existing package with no head is "untracked" live state whose
-        // synthetic id is per-package (hashes are per-run on the wire anyway).
-        const placement = this.packageRoot(name) === this.dir(name) ? "active" : "archived";
-        const files = this.packageFiles(name);
-        return { revisions: [{ id: this.hashBytes(JSON.stringify({ format: HISTORY_FORMAT, skill: name, action: "untracked", placement, files })), action: "untracked", createdAt: "0001-01-01T00:00:00Z", placement, files, blobs: {} }] };
+      if (typeof limit === "number" && limit < 1) throw new Error(`limit must be >= 1, got ${limit}`);
+      const head = this.readHead(name);
+      const placement = this.livePlacement(name);
+      const revisions: Revision[] = [];
+      if (!head) {
+        const live = this.snapshotRevision(name, "untracked", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z" });
+        return { revisions: [{ id: live.id, action: "untracked", createdAt: live.createdAt, placement, files: live.files }] };
       }
-      const revisions: Revision[] = [], seen = new Set<string>();
-      let cursor = readFileSync(headPath, "utf8").trim();
+      const current = this.currentRevision(name);
+      if (current.external) revisions.push({ id: current.id, parent: head, action: "external", createdAt: "0001-01-01T00:00:00Z", placement, files: this.packageFiles(name) });
+      const seen = new Set<string>();
+      let cursor = head;
       while (cursor) {
         if (seen.has(cursor)) throw new Error("untrusted revision history cycle");
         seen.add(cursor);
@@ -674,7 +704,6 @@ export class AutoSkillManager {
         revisions.push(revision);
         cursor = revision.parent ?? "";
       }
-      if (typeof limit === "number" && limit < 1) throw new Error(`limit must be >= 1, got ${limit}`);
       return { revisions: revisions.map(r => ({ id: r.id, parent: r.parent, action: r.action, revert_of: r.revertOf, createdAt: r.createdAt, placement: r.placement ?? "active", files: r.files })) };
     }
     if (action === "undo") {
@@ -685,8 +714,7 @@ export class AutoSkillManager {
       const expected = String(input.expected_revision ?? "");
       const currentRoot = this.packageRoot(name);
       if (!currentRoot) throw new Error(`autogenskills: skill ${JSON.stringify(name)} not found in active or archived packages`);
-      const current = this.diskHead(name);
-      if (expected !== current) throw revisionConflict(name, expected, current);
+      const current = this.prepareMutationBase(name, expected, true);
       const currentManifest = this.loadRevision(name, current);
       let id = String(input.revision ?? "");
       if (!id) id = currentManifest.parent ?? "";
@@ -736,7 +764,8 @@ export class AutoSkillManager {
       const info = lstatSync(target);
       if (!info.isFile() || info.isSymbolicLink()) throw new Error(`autogenskills: support file ${JSON.stringify(cleanPath)} is not a regular file`);
       if (info.size > 1 << 20) throw new Error("autogenskills: support file exceeds 1 MiB");
-      return { path: target, content: readFileSync(target, "utf8"), revision: this.diskHead(name) };
+      const { id: revision, external } = this.currentRevision(name);
+      return { path: target, content: readFileSync(target, "utf8"), revision, external };
     }
     if (action === "write_file") {
       this.assertMutationAllowed(action);
@@ -745,9 +774,7 @@ export class AutoSkillManager {
       // history.go WriteSupportFileRevisioned: resolveSupportPath runs before
       // the revision transaction, so its errors carry no errors.Join suffix.
       const p = this.resolveSupportPath(name, raw, "unsafe skill name");
-      const current = this.diskHead(name);
-      const expected = String(input.expected_revision ?? "");
-      if (expected !== current) throw revisionConflict(name, expected, current);
+      const current = this.prepareMutationBase(name, String(input.expected_revision ?? ""), true);
       const content: string | Buffer = input.file_content ?? "";
       if (Buffer.byteLength(content) > 1 << 20) throw mutationFailure(`autogenskills: support file size ${Buffer.byteLength(content)} exceeds ${1 << 20}-byte history limit`);
       const rev = this.mutateActivePackage(name, "write_file", current, false, stage => {
@@ -854,7 +881,7 @@ export class AutoSkillManager {
             this.executeLocked({
               action: "archive",
               name,
-              expected_revision: this.diskHead(name),
+              expected_revision: this.currentRevision(name).id,
               pruning_reason: "stale automatic archive",
               curator_internal: true,
             });
