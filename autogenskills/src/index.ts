@@ -62,7 +62,7 @@ const pathExists = (path: string) => { try { lstatSync(path); return true; } cat
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 const sleepSync = (milliseconds: number) => Atomics.wait(sleepBuffer, 0, 0, milliseconds);
 type LockOwner = { pid: number; token: string; createdAt: string; processStart?: string };
-type HeldLock = { token: string; depth: number };
+type HeldLock = { token: string; depth: number; owner: object };
 const LOCKS = Symbol.for("pi-swarm-autogen-held-locks");
 const lockRoot = globalThis as typeof globalThis & { [LOCKS]?: Map<string, HeldLock> };
 const heldLocks = lockRoot[LOCKS] ?? (lockRoot[LOCKS] = new Map<string, HeldLock>());
@@ -90,6 +90,10 @@ export class AutoSkillManager {
   private readonly viewed = new Set<string>();
   private curatorRunning?: Promise<any>;
   private chargedCalls = new Set<string>();
+  // Armed only after the enforcement hook actually stops work. This keeps
+  // direct mutations subject to the normal budget while making the advertised
+  // recovery path (blocked tool -> SkillManage(create)) usable.
+  private onboardingRecoveryArmed = false;
   readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"] };
   constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
     const home = process.env.HOME ?? process.cwd();
@@ -256,19 +260,49 @@ export class AutoSkillManager {
     return p;
   }
   private lockOwner(path: string): LockOwner | undefined {
-    try { return JSON.parse(readFileSync(join(path, "owner.json"), "utf8")) as LockOwner; }
-    catch { return; }
+    try {
+      const ownerPath = join(path, "owner.json");
+      // Never follow lock metadata symlinks.
+      if (lstatSync(ownerPath).isSymbolicLink()) return;
+      const parsed = JSON.parse(readFileSync(ownerPath, "utf8")) as Partial<LockOwner>;
+      if (!Number.isInteger(parsed.pid) || (parsed.pid ?? 0) <= 0 ||
+          typeof parsed.token !== "string" || parsed.token.length === 0 ||
+          typeof parsed.createdAt !== "string" || parsed.createdAt.length === 0) return;
+      return parsed as LockOwner;
+    } catch { return; }
+  }
+  private ownerMetadataExists(path: string) {
+    try { return lstatSync(join(path, "owner.json")).isSymbolicLink() || true; }
+    catch (error: any) { if (error?.code === "ENOENT") return false; return true; }
   }
   private reapStaleLock(path: string) {
     let age = 0;
     try { age = Date.now() - lstatSync(path).mtimeMs; } catch { return true; }
+    // Older versions could leave a plain file at the lock path. Inspect the
+    // type before age checks so a fresh legacy file cannot cause a timeout.
+    let stat;
+    try { stat = lstatSync(path); } catch { return true; }
+    if (stat.isSymbolicLink()) throw new Error("symlinks are not permitted in skill locks");
+    if (!stat.isDirectory()) {
+      try { rmSync(path, { force: true }); } catch { return false; }
+      return true;
+    }
     const owner = this.lockOwner(path);
     if (owner && ownerAlive(owner)) return false;
+    // If metadata exists but is malformed, it may be mid-write or corrupted
+    // by the current owner. Never infer that the owner is dead: doing so can
+    // let a second client steal an active lock. Locks without metadata are
+    // legacy artifacts and may still be reaped after the grace period.
+    if (!owner && this.ownerMetadataExists(path)) return false;
     if (!owner && age < 1000) return false;
     const reaper = join(path, "reap");
     try { writeFileSync(reaper, `${process.pid}\n`, { flag: "wx", mode: 0o600 }); }
     catch (error: any) { return error?.code === "ENOENT"; }
     const confirmed = this.lockOwner(path);
+    if (!confirmed && this.ownerMetadataExists(path)) {
+      try { rmSync(reaper, { force: true }); } catch { /* best effort */ }
+      return false;
+    }
     if (confirmed && ownerAlive(confirmed)) {
       try { rmSync(reaper, { force: true }); } catch { /* another owner is authoritative */ }
       return false;
@@ -282,16 +316,18 @@ export class AutoSkillManager {
     this.safePath(this.config.dir, ".history/locks");
     mkdirSync(root, { recursive: true, mode: 0o755 });
     const path = join(root, `${name}.lock`);
-    const held = heldLocks.get(path);
-    if (held) { held.depth++; return { path, token: held.token }; }
     const deadline = Date.now() + this.config.lockTimeoutMs;
+    const held = heldLocks.get(path);
+    // Module-level reentrancy is only valid for the same manager. A second
+    // manager in this process must still contend on the filesystem lock.
+    if (held && held.owner === this) { held.depth++; return { path, token: held.token }; }
     for (;;) {
       const token = randomUUID();
       try {
         mkdirSync(path, { mode: 0o700 });
         const owner: LockOwner = { pid: process.pid, token, createdAt: now(), processStart: processStart(process.pid) };
         writeFileSync(join(path, "owner.json"), `${JSON.stringify(owner)}\n`, { flag: "wx", mode: 0o600 });
-        heldLocks.set(path, { token, depth: 1 });
+        heldLocks.set(path, { token, depth: 1, owner: this });
         return { path, token };
       } catch (error: any) {
         if (error?.code !== "EEXIST") {
@@ -306,13 +342,18 @@ export class AutoSkillManager {
   }
   private releaseSkillLock(lock: { path: string; token: string }) {
     const held = heldLocks.get(lock.path);
-    if (!held || held.token !== lock.token) throw new Error("skill mutation lock ownership changed");
+    if (!held || held.token !== lock.token || held.owner !== this) throw new Error("skill mutation lock ownership changed");
     held.depth--;
     if (held.depth > 0) return;
     const owner = this.lockOwner(lock.path);
     if (!owner || owner.token !== lock.token) throw new Error("skill mutation lock ownership changed");
+    // Re-check immediately before removal. This does not replace the atomic
+    // mkdir acquisition, but prevents a stale release from deleting a lock
+    // that has already been replaced by another owner.
+    const current = this.lockOwner(lock.path);
+    if (!current || current.token !== lock.token) throw new Error("skill mutation lock ownership changed");
     heldLocks.delete(lock.path);
-    rmSync(lock.path, { recursive: true });
+    rmSync(lock.path, { recursive: true, force: true });
   }
   private withSkillLocks<T>(names: string[], operation: () => T): T {
     const locks: Array<{ path: string; token: string }> = [];
@@ -360,7 +401,24 @@ export class AutoSkillManager {
     this.state.mutations++; this.config.reviewHook?.({ action, name: skill.name, revision: rev.id });
   }
   private assertEnabled() { if (this.config.mode === "never") throw new Error("autogenerated skills are disabled (mode=never)"); }
-  private assertMutationAllowed(action: string) { if (this.config.mode !== "auto") return; if (action === "review") return; const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget; if (this.state.reviewRequired) throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")"); if (this.state.budgetCalls >= budget) { if (!this.state.skilled) throw new Error(`autogen onboarding budget exceeded (${budget}); create or use a skill`); if (this.state.nudgeIgnores >= this.config.maxNudgeIgnores) { this.state.reviewRequired = true; throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")"); } } }
+  private assertMutationAllowed(action: string) {
+    if (this.config.mode !== "auto" || action === "review") return;
+    const budget = this.state.skilled ? this.config.workingBudget : this.config.toolCallBudget;
+    // Creating the missing onboarding skill is the escape hatch advertised by
+    // the budget gate.  Blocking it makes the gate impossible to recover from.
+    if (!this.state.skilled && action === "create" && this.onboardingRecoveryArmed) {
+      this.onboardingRecoveryArmed = false;
+      return;
+    }
+    if (this.state.reviewRequired) throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")");
+    if (this.state.budgetCalls >= budget) {
+      if (!this.state.skilled) throw new Error(`autogen onboarding budget exceeded (${budget}); create or use a skill`);
+      if (this.state.nudgeIgnores >= this.config.maxNudgeIgnores) {
+        this.state.reviewRequired = true;
+        throw new Error("autogen review required before mutation; call SkillManage(action=\"review\")");
+      }
+    }
+  }
   execute(input: any): any {
     this.assertEnabled(); const action = input?.action;
     if (action === "list") return { skills: this.list() };
@@ -830,13 +888,14 @@ export class AutoSkillManager {
     if (!this.state.focusedTask) return;
     if (this.state.reviewRequired) { autogenDebug("gate-block", { tool: toolName, reason: "review-required", budgetCalls: this.state.budgetCalls }); return { block: true, reason: "Autogen review required before mutation; call SkillManage(action=\"review\") or invoke a reusable skill." }; }
     // Swarm's onboarding tier is a hard gate as soon as the budget is spent.
-    if (!this.state.skilled && this.state.budgetCalls >= budget) { autogenDebug("gate-block", { tool: toolName, reason: "onboarding-budget", budgetCalls: this.state.budgetCalls, budget }); return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` }; }
+    if (!this.state.skilled && this.state.budgetCalls >= budget) { this.onboardingRecoveryArmed = true; autogenDebug("gate-block", { tool: toolName, reason: "onboarding-budget", budgetCalls: this.state.budgetCalls, budget }); return { block: true, reason: `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` }; }
     // Enforce both tiers at the tool_call boundary. Once the current budget is
     // exhausted, the next non-exempt focused tool call must not execute. The
     // old working-tier behavior returned undefined here, which allowed the
     // counter to run from 90/90 to 98/90 while only displaying a warning.
     if (this.state.budgetCalls >= budget) {
       autogenDebug("gate-block", { tool: toolName, reason: this.state.skilled ? "working-budget" : "onboarding-budget", budgetCalls: this.state.budgetCalls, budget, skilled: this.state.skilled });
+      if (!this.state.skilled) this.onboardingRecoveryArmed = true;
       return { block: true, reason: this.state.skilled
         ? `Autogen working budget of ${budget} non-exempt tool calls is exhausted; review or invoke a reusable skill before continuing.`
         : `Skill required before continuing: onboarding budget of ${budget} non-exempt tool calls was exceeded.` };

@@ -85,7 +85,13 @@ export default function codemodeExtension(pi: any) {
   const loadSelection = (ctx: any) => { const entries = ctx?.sessionManager?.getBranch?.() ?? ctx?.sessionManager?.getEntries?.() ?? []; const data = [...entries].reverse().find((entry: any) => entry?.type === "pi-swarm-codemode-tools" || (entry?.type === "custom" && entry?.customType === "pi-swarm-codemode-tools"))?.data; if (data?.mode === "all" || data?.mode === "allowlist") selection = { mode: data.mode, tools: normalizeNames(Array.isArray(data.tools) ? data.tools : []) }; };
   const selectionText = () => selection.mode === "all" ? "all tools" : selection.tools.length + " selected tools";
   const setSelection = (mode: "all" | "allowlist", names: string[]) => { selection = { mode, tools: normalizeNames(names) }; saveSelection(); };
-  pi.on?.("session_start", (_event: any, ctx: any) => { loadSelection(ctx); runtimeReady = true; activate(); });
+  // Registration is safe during extension loading, but changing the host's active
+  // tool set is not. CodeMode must be opt-in: automatically hiding Pi's native
+  // tools at session_start leaves a fresh conversation with only `codemode`, and
+  // makes the first turn depend on the confined interpreter being perfectly
+  // instructed. Rehydrate configuration here; `/codemode on` performs the
+  // explicit activation after startup.
+  pi.on?.("session_start", (_event: any, ctx: any) => { loadSelection(ctx); runtimeReady = true; updateCodeStatus(ctx); });
   const refreshRuntime = () => { const selectedTools = selection.mode === "all" ? tools : Object.fromEntries(Object.entries(tools).filter(([namespace]) => selection.tools.some(name => name === namespace || name.startsWith(namespace + ".")))); return CodeMode.make({ tools: { ...selectedTools, ...(runtimeReady ? buildPiTools(pi, selection) : {}) } as any, limits: { timeoutMs: 30_000, maxToolCalls: 50, maxOutputBytes: 128 * 1024 } }); };
   const originalTools = () => runtimeReady ? (pi.getActiveTools?.() ?? []) : [];
   let savedTools: string[] | undefined;
