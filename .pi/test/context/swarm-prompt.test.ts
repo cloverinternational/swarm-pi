@@ -97,9 +97,9 @@ describe("Forge prompt assembly", () => {
 
   it("uses persisted context selection for conversation metadata", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-prompt-metadata-"));
-    mkdirSync(join(cwd, ".pi"));
+    mkdirSync(join(cwd, ".pi", "config"), { recursive: true });
     writeFileSync(join(cwd, "selected.md"), "persisted selection");
-    writeFileSync(join(cwd, ".pi", "prompt-context.json"), JSON.stringify({ version: 1, prompts: [], context: { files: ["selected.md"], enabledSources: { project_name: false } } }));
+    writeFileSync(join(cwd, ".pi", "config", "prompt-context.json"), JSON.stringify({ version: 1, prompts: [], context: { files: ["selected.md"], enabledSources: { project_name: false } } }));
     const blocks = currentContextBlocks(cwd, false);
     expect(blocks.cached).toContain('<context name="file:selected.md">');
     expect(blocks.cached).toContain("persisted selection");

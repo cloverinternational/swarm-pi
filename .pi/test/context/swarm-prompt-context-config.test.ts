@@ -23,7 +23,34 @@ describe("workspace prompt/context configuration", () => {
     expect(config.activePrompt).toBe("reviewer");
     expect(config.prompts).toEqual(value.prompts);
     expect(JSON.parse(readFileSync(legacy, "utf8"))).toEqual(value);
-    expect(existsSync(join(cwd, ".pi", "prompt-context.json"))).toBe(true);
+    expect(existsSync(join(cwd, ".pi", "config", "prompt-context.json"))).toBe(true);
+  });
+
+  it("migrates a previous-location .pi/prompt-context.json into .pi/config/ without touching the original", () => {
+    const cwd = workspace();
+    const previous = join(cwd, ".pi", "prompt-context.json");
+    const value = { version: 1, prompts: [{ name: "reviewer", content: "Review safely" }], activePrompt: "reviewer", tools: { mode: "allowlist", names: ["bash"] } };
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    writeFileSync(previous, JSON.stringify(value));
+    const messages: string[] = [];
+    const config = loadPromptContextConfig(cwd, messages.push.bind(messages));
+    expect(config).toEqual(value);
+    expect(messages).toEqual(["Migrated .pi/prompt-context.json to .pi/config/prompt-context.json."]);
+    expect(JSON.parse(readFileSync(previous, "utf8"))).toEqual(value);
+    const current = join(cwd, ".pi", "config", "prompt-context.json");
+    expect(JSON.parse(readFileSync(current, "utf8"))).toEqual(value);
+    // A second load reads the current location and reports nothing.
+    const again: string[] = [];
+    expect(loadPromptContextConfig(cwd, again.push.bind(again))).toEqual(value);
+    expect(again).toEqual([]);
+  });
+
+  it("prefers the current location when both exist", () => {
+    const cwd = workspace();
+    mkdirSync(join(cwd, ".pi", "config"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "prompt-context.json"), JSON.stringify({ version: 1, prompts: [{ name: "old", content: "old" }] }));
+    writeFileSync(join(cwd, ".pi", "config", "prompt-context.json"), JSON.stringify({ version: 1, prompts: [{ name: "new", content: "new" }] }));
+    expect(loadPromptContextConfig(cwd).prompts).toEqual([{ name: "new", content: "new" }]);
   });
 
   it("uses the new store on profile conflicts and imports missing profiles", () => {
@@ -37,8 +64,8 @@ describe("workspace prompt/context configuration", () => {
 
   it("normalizes empty selections and repairs malformed versioned state", () => {
     const cwd = workspace();
-    const path = join(cwd, ".pi", "prompt-context.json");
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    const path = join(cwd, ".pi", "config", "prompt-context.json");
+    mkdirSync(join(cwd, ".pi", "config"), { recursive: true });
     writeFileSync(path, JSON.stringify({ version: 99, prompts: [{ name: " ok ", content: " body " }], skills: { mode: "allowlist", names: [] }, tools: { mode: "allowlist", names: [] } }));
     const messages: string[] = [];
     const config = loadPromptContextConfig(cwd, messages.push.bind(messages));

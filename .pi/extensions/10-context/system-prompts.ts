@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { swarmForgeSystemPrompt } from "../../../packages/context/prompt/src/index.ts";
-import { loadPromptContextConfig, savePromptContextConfig } from "../../lib/context/swarm-prompt-context-config.ts";
+import { loadPromptContextConfig, promptContextConfigPath, savePromptContextConfig } from "../../lib/context/swarm-prompt-context-config.ts";
 
 /**
  * The canonical prompt now comes from the vendored @pi-swarm/swarm-prompt
@@ -50,7 +50,7 @@ export interface SystemPromptAPI {
 const normalize = (value: string) => value.replace(/\r\n/g, "\n").trim();
 
 export function promptStorePath(cwd: string): string {
-  return join(cwd, ".pi", "prompt-context.json");
+  return promptContextConfigPath(cwd);
 }
 
 export function loadPromptStore(cwd: string): PromptStore {

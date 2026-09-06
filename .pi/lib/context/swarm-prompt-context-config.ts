@@ -16,7 +16,11 @@ export interface PromptContextConfig {
 
 export type SelectionConfig = { mode: "default" | "allowlist"; names: string[] };
 
-export const CONFIG_FILE = ".pi/prompt-context.json";
+/** Project configuration lives under .pi/config/. */
+export const CONFIG_FILE = ".pi/config/prompt-context.json";
+/** Location used before the .pi/config/ layout; migrated forward on first load. */
+export const PREVIOUS_CONFIG_FILE = ".pi/prompt-context.json";
+/** Original prompt-only store; still imported for prompts that the new store lacks. */
 export const LEGACY_PROMPT_FILE = ".pi/system-prompts.json";
 
 const clean = (value: string) => value.replace(/\r\n/g, "\n").trim();
@@ -32,6 +36,7 @@ export function selectionAllows(name: string, selection?: SelectionConfig): bool
 }
 
 export function promptContextConfigPath(cwd: string): string { return join(resolve(cwd), CONFIG_FILE); }
+export function previousPromptContextConfigPath(cwd: string): string { return join(resolve(cwd), PREVIOUS_CONFIG_FILE); }
 export function legacyPromptPath(cwd: string): string { return join(resolve(cwd), LEGACY_PROMPT_FILE); }
 
 export function defaultPromptContextConfig(): PromptContextConfig {
@@ -80,21 +85,35 @@ function legacyConfig(cwd: string): PromptContextConfig | undefined {
 /** Load, migrate, and normalize the workspace configuration without deleting legacy state. */
 export function loadPromptContextConfig(cwd: string, onRepair?: (message: string) => void, options: { persistMigration?: boolean } = {}): PromptContextConfig {
   const path = promptContextConfigPath(cwd);
-  const hadConfig = existsSync(path);
-  const parsed = hadConfig ? readJSON(path) : undefined;
+  // Migration chain: .pi/system-prompts.json -> .pi/prompt-context.json -> .pi/config/prompt-context.json.
+  // A valid file at the previous location is read as if it were the current
+  // one and copied forward once; like the legacy store it is never modified
+  // or deleted here.
+  let hadConfig = existsSync(path);
+  let parsed = hadConfig ? readJSON(path) : undefined;
+  if (!hadConfig) {
+    const previous = previousPromptContextConfigPath(cwd);
+    const parsedPrevious = existsSync(previous) ? readJSON(previous) : undefined;
+    if ((parsedPrevious as any)?.version === 1) {
+      hadConfig = true;
+      parsed = parsedPrevious;
+      if (options.persistMigration !== false) atomicWrite(path, normalize(parsedPrevious));
+      onRepair?.(`Migrated ${PREVIOUS_CONFIG_FILE} to ${CONFIG_FILE}.`);
+    }
+  }
   let config = hadConfig ? normalize(parsed) : defaultPromptContextConfig();
   if (!hadConfig) {
     const legacy = legacyConfig(cwd);
     if (legacy) {
       config = legacy;
       if (options.persistMigration !== false) atomicWrite(path, config);
-      onRepair?.("Migrated .pi/system-prompts.json to .pi/prompt-context.json.");
+      onRepair?.(`Migrated ${LEGACY_PROMPT_FILE} to ${CONFIG_FILE}.`);
     }
   } else if (parsed === undefined || (parsed as any)?.version !== 1) {
     const backup = `${path}.recovery-${new Date().toISOString().replace(/[:.]/g, "-")}`;
     try { copyFileSync(path, backup); } catch { /* preserve best effort */ }
     atomicWrite(path, config);
-    onRepair?.("Repaired invalid .pi/prompt-context.json; valid fields were preserved.");
+    onRepair?.(`Repaired invalid ${CONFIG_FILE}; valid fields were preserved.`);
   }
   // New configuration wins conflicts but imports missing legacy profiles.
   const legacy = legacyConfig(cwd);
