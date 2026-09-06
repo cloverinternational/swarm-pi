@@ -5,7 +5,7 @@
   "pi": {
     "extensions": [
       "annoyed/index.ts",
-      "codemode/index.ts",
+      "codemode.ts",
       "control-task-tools.ts",
       "exa-search.ts",
       "history-search.ts",

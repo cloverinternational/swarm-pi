@@ -1,12 +1,12 @@
-import { CodeMode, Tool } from "./src/index.ts";
+import { CodeMode, Tool } from "../../../packages/tools/codemode/src/index.ts";
 import { Effect, Schema } from "effect";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { JsonSchema } from "./src/tool.ts";
-import { wrapToolForHookRows } from "../../00-runtime/hooks.ts";
+import type { JsonSchema } from "../../../packages/tools/codemode/src/tool.ts";
+import { wrapToolForHookRows } from "../00-runtime/hooks.ts";
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
 // Deliberately mirrors the host-authority model requested here: CodeMode is not a

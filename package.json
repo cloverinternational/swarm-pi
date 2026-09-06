@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build -w @pi-swarm/contract && npm run build -w @pi-swarm/core && npm run build -w @pi-swarm/runtime-contracts && npm run build -w @pi-swarm/prompt && npm run build -w @pi-swarm/skills && npm run build -w @pi-swarm/autogenskills && npm run build -w @pi-swarm/policy && npm run build -w @pi-swarm/schedule && npm run build -w @pi-swarm/agents && npm run build -w @pi-swarm/mcp && npm run build -w @pi-swarm/taskmanage",
+    "build": "npm run build -w @pi-swarm/contract && npm run build -w @pi-swarm/core && npm run build -w @pi-swarm/runtime-contracts && npm run build -w @pi-swarm/prompt && npm run build -w @pi-swarm/skills && npm run build -w @pi-swarm/autogenskills && npm run build -w @pi-swarm/policy && npm run build -w @pi-swarm/schedule && npm run build -w @pi-swarm/agents && npm run build -w @pi-swarm/mcp && npm run build -w @pi-swarm/codemode && npm run build -w @pi-swarm/taskmanage",
     "test": "vitest run",
     "test:parity": "node --test tests/parity/parity-probe.test.mjs",
     "test:integration": "node ./tools/integration/run-postgres-integration.mjs",

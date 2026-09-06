@@ -1,0 +1,14 @@
+{
+  "name": "@pi-swarm/codemode",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode-inspired confined CodeMode runtime for Pi; consumed as TypeScript source by .pi/extensions/30-tools/codemode.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "acorn": "8.15.0",
+    "effect": "4.0.0-beta.83",
+    "typebox": "^1.3.26"
+  }
+}

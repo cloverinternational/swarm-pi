@@ -72,7 +72,7 @@ address in each tree.
 | `packages/runtime/` | `core` (session identity, event journal), `contract` (immutable profile/capability contracts), `runtime-contracts` (control-plane, daemon, goal-loop, task interfaces). |
 | `packages/context/` | `prompt` (canonical prompt assets and provenance), `skills` (loader, registry, builtins), `autogenskills` (generated-skill lifecycle). |
 | `packages/policy/` | `policy` (capability, workspace, mutation, network, approval). |
-| `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`. |
+| `packages/tools/` | `agents`, `taskmanage`, `mcp`, `schedule`, `codemode`. |
 | `tests/parity/` | Cross-runtime parity suite (`node --test`). |
 | `tools/parity/` | Pi ↔ Swarm probes, fixtures, generators; `plexus/` holds the A/B harness. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
@@ -178,7 +178,7 @@ When changing discovery, preserve these invariants:
 | `00-runtime` | `cache-telemetry`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks`, `upstream-readonly` |
-| `30-tools` | `annoyed/`, `codemode/`, `control-task-tools`, `exa-search`, `history-search`, `pi-ask-user`, `research-tools`, `schedule`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `pi-ask-user`, `research-tools`, `schedule`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status` |
 
@@ -210,7 +210,7 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `websearch` | `.pi/extensions/30-tools/exa-search.ts` | Exa HTTP adapter; credentials/config must remain outside tool arguments. |
 | `xai_web_search`, `x_search` | `.pi/extensions/30-tools/swarm-search.ts` | xAI HTTP adapter; credential lookup is environment/vault mediated. |
 | `web_fetch`, `deepwiki`, `browser_get_page` | `.pi/extensions/30-tools/research-tools.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
-| `codemode` | `.pi/extensions/30-tools/codemode/index.ts` | `.pi/extensions/30-tools/codemode/src/` interpreter, schema, OpenAPI, and runtime; it composes registered tools and must not bypass policy. |
+| `codemode` | `.pi/extensions/30-tools/codemode.ts` | `packages/tools/codemode/src/` interpreter, schema, OpenAPI, and runtime (`@pi-swarm/codemode`, consumed as TypeScript source); it composes registered tools and must not bypass policy. |
 | `enter_plan_mode`, `exit_plan_mode` | `.pi/extensions/10-context/swarm-plan-mode.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
 | `control_plane_status` | `.pi/extensions/50-ui/control-panel.ts` | `packages/runtime/runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
 | `daemon_status`, goal/task/run tools | `.pi/extensions/00-runtime/swarm-runtime.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/runtime/runtime-contracts/src/daemon-rpc.ts`, `goal-loop.ts`, `control-task.ts`; unavailable daemon must fail closed. |
@@ -268,6 +268,7 @@ are separate seams and should remain decoupled.
 | `packages/policy/policy` | `packages/policy/policy/src/policy.ts`, `packages/policy/policy/src/index.ts` | Authorization, workspace/mutation/network boundaries, or fail-closed rules change. |
 | `packages/runtime/runtime-contracts` | `packages/runtime/runtime-contracts/src/*.ts` | Control-plane, daemon, goal-loop, task, or stable runtime interfaces change. |
 | `packages/tools/schedule` | `packages/tools/schedule/src/{cron,scheduler,store,tools,types}.ts` | Scheduling semantics, persistence, or schedule tools change. |
+| `packages/tools/codemode` | `packages/tools/codemode/src/{codemode,tool,tool-runtime,tool-schema}.ts`, `interpreter/`, `openapi/`, `stdlib/` | The confined CodeMode interpreter, tool-schema bridge, or OpenAPI import changes. Its `build` is a `noEmit` typecheck; the extension imports its `src/` directly. |
 | `packages/context/skills` | `packages/context/skills/src/index.ts`, `packages/context/skills/builtins/**` | Skill loading, precedence, builtins, metadata, or disclosure changes. |
 | `packages/runtime/contract` | `packages/runtime/contract/src/index.ts` | Immutable profile, capability IDs, digest, or provenance contracts change. |
 | `packages/runtime/core` | `packages/runtime/core/src/index.ts` | Session identity, event journal, or runtime replacement semantics change. |
