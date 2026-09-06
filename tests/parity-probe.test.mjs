@@ -194,11 +194,13 @@ async function makeStressWorkspace(root) {
   execFileSync("git", ["-c", "user.email=p@p", "-c", "user.name=p", "commit", "-qm", "init"], { cwd: root });
   await write("dirty.txt", "dirty\n");
   const skill = (name, description, extra = "") => `---\nname: ${name}\ndescription: "${description}"\n${extra}---\nbody of ${name}\n`;
-  await write(".claude/skills/claude-side/SKILL.md", skill("claude-side", "A skill from .claude/skills"));
+  await write(".claude/skills/claude-side/SKILL.md", skill("claude-side", "A skill from .claude/skills — it's \\\"quoted\\\" & <tagged>"));
   await write(".pi/skills/pi-side/SKILL.md", skill("pi-side", "A skill from .pi/skills"));
   for (let i = 1; i <= 70; i++) {
     const n = String(i).padStart(2, "0");
-    const sentence = `Description ${n} with a fairly long sentence that repeats itself to inflate the catalogue size; `;
+    // Apostrophes/quotes (html.EscapeString → &#39;/&#34;) and multibyte runes
+    // (byte budget vs UTF-16 length) must render and truncate identically.
+    const sentence = `Description ${n} — it's a "fairly" long sentence (café №${n}) that repeats itself to inflate the catalogue size; `;
     await write(`.swarm/skills/stress-skill-${n}/SKILL.md`, skill(`stress-skill-${n}`, sentence.repeat(5), `when_to_use: Use when the user mentions stress case ${n} or <angle> & ampersand\ntags:\n  - stress\n  - case-${n}\n`));
   }
 }

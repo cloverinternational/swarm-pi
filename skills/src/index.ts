@@ -24,25 +24,39 @@ export interface SkillLoadResult { skills: LoadedSkill[]; diagnostics: SkillDiag
 export const DEFAULT_BUILTIN_SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "builtins");
 export const builtinLocation = (name: string) => `builtin:${name}/SKILL.md`;
 
-/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+/** prompt_xml.go escapeXML = html.EscapeString (note &#39; and &#34;, not &quot;). */
+const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;");
+/** Go bytewise string ordering (sort.Strings / `<` on strings). */
+const goLess = (a: string, b: string) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+/** registry.go classifySource names, as they appear in Skill.Source/LoadedFrom. */
+const goSourceName = (source: SkillSource) => source === "managed" ? "policy" : source === "install" || source === "cli" ? "local" : source;
+const skillEntryXML = (skill: LoadedSkill, description: string) => {
+  const when = skill.whenToUse ? `    <when_to_use>${esc(skill.whenToUse)}</when_to_use>\n` : "";
+  return `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(description)}</description>\n${when}    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>\n`;
+};
+
+/** prompt_xml.go GenerateAvailableSkillsXML (uncapped, full descriptions). */
 export function generateAvailableSkillsXML(skills: LoadedSkill[]): string {
   if (!skills.length) return "";
-  const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
-  return `<available_skills>\n${skills.map(skill => `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(skill.description)}</description>\n    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>`).join("\n")}\n</available_skills>`;
+  return `<available_skills>\n${skills.map(skill => skillEntryXML(skill, skill.description)).join("")}</available_skills>`;
 }
 
 export const MAX_AVAILABLE_SKILLS = 60;
 export const MAX_AVAILABLE_SKILLS_CHARS = 12_000;
 export const MAX_PROMPT_DESCRIPTION_RUNES = 240;
+export const OMISSION_MARKER_RESERVE = 180;
+/** prompt_xml.go truncatePromptDescription (rune-based). */
 const promptDescription = (value: string) => {
   const runes = [...value.trim()];
   return runes.length <= MAX_PROMPT_DESCRIPTION_RUNES
     ? runes.join("")
     : `${runes.slice(0, MAX_PROMPT_DESCRIPTION_RUNES - 1).join("")}…`;
 };
+/** relevance.go relevanceTerms: FieldsFunc(!IsLetter && !IsDigit), >=3 runes, first-seen order. */
 const relevanceTerms = (value: string) => [...new Set(
-  value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(term => [...term].length >= 3),
+  value.split(/[^\p{L}\p{N}]+/u).filter(term => [...term].length >= 3),
 )];
+/** relevance.go RankForContext with no active skills (headless has none). */
 export function rankSkillsForContext(skills: LoadedSkill[], query: string): LoadedSkill[] {
   const normalized = query.trim().toLowerCase();
   const terms = relevanceTerms(normalized);
@@ -50,7 +64,8 @@ export function rankSkillsForContext(skills: LoadedSkill[], query: string): Load
     const name = skill.name.toLowerCase();
     const description = promptDescription(skill.description).toLowerCase();
     const whenToUse = (skill.whenToUse ?? "").toLowerCase();
-    const metadata = [skill.category ?? "", ...(skill.tags ?? []), skill.location ?? skill.filePath, skill.source].join(" ").toLowerCase();
+    const source = goSourceName(skill.source);
+    const metadata = [skill.category ?? "", ...(skill.tags ?? []), source, source].join(" ").toLowerCase();
     let value = 0;
     if (normalized && name.includes(normalized)) value += 1000;
     if (normalized && `${description} ${whenToUse}`.includes(normalized)) value += 600;
@@ -62,28 +77,33 @@ export function rankSkillsForContext(skills: LoadedSkill[], query: string): Load
     }
     return value;
   };
-  return [...skills].sort((left, right) =>
+  // Registry.List() pre-sorts by priority desc, name asc; the ranking sort is stable.
+  const listed = [...skills].sort((a, b) => ((b.priority ?? 0) - (a.priority ?? 0)) || goLess(a.name, b.name));
+  return listed.sort((left, right) =>
     score(right) - score(left) ||
     (right.priority ?? 0) - (left.priority ?? 0) ||
-    left.name.toLowerCase().localeCompare(right.name.toLowerCase()),
+    goLess(left.name.toLowerCase(), right.name.toLowerCase()),
   );
 }
+/** prompt_xml.go GenerateRankedAvailableSkillsXML — the budget is in BYTES. */
 export function generateRankedAvailableSkillsXML(
   skills: LoadedSkill[],
   maxSkills = MAX_AVAILABLE_SKILLS,
   maxChars = MAX_AVAILABLE_SKILLS_CHARS,
 ): string {
   if (!skills.length) return "";
-  const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+  if (maxSkills <= 0) maxSkills = skills.length;
+  if (maxChars <= 0) maxChars = MAX_AVAILABLE_SKILLS_CHARS;
   const closing = "</available_skills>";
   let xml = "<available_skills>\n";
+  let bytes = Buffer.byteLength(xml);
   let rendered = 0;
   for (const skill of skills) {
-    if (rendered >= maxSkills) break;
-    const when = skill.whenToUse ? `\n    <when_to_use>${esc(skill.whenToUse)}</when_to_use>` : "";
-    const entry = `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(promptDescription(skill.description))}</description>${when}\n    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>\n`;
-    if (rendered > 0 && xml.length + entry.length + closing.length + 160 > maxChars) break;
-    xml += entry;
+    if (rendered >= maxSkills) continue;
+    const entry = skillEntryXML(skill, promptDescription(skill.description));
+    const entryBytes = Buffer.byteLength(entry);
+    if (rendered > 0 && bytes + entryBytes + closing.length + OMISSION_MARKER_RESERVE > maxChars) break;
+    xml += entry; bytes += entryBytes;
     rendered++;
   }
   const omitted = skills.length - rendered;
