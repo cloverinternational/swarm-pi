@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fatalValidationError, parseSkillMDContent } from "./skillmd.js";
 
 export type SkillSource = "managed" | "install" | "project" | "user" | "autogen" | "cli" | "builtin";
 /**
@@ -90,40 +91,6 @@ export function generateRankedAvailableSkillsXML(
   return `${xml}${closing}`;
 }
 
-const MAX_NAME = 64, MAX_DESC = 1024;
-/**
- * Discovery order mirrors Swarm exactly (later roots overwrite earlier ones,
- * because Registry.DiscoverAll does `r.skills[name] = skill` unconditionally):
- *   builtins (RegisterDefaultSkills, overwrite=false)
- *   $SWARM_MANAGED_SKILLS_DIR            loader.go — prepended, so in practice LOWEST
- *   ~/.swarmos/skills, ~/.swarmos/skills/skills   loader.go installDir (TUI DefaultSkillsDir)
- *   ~/.claude/skills, ~/.claude/commands loader.go
- *   $SWARM_HOME|~/.swarm/skills           paths.SkillsDir() (autogen/ is a subtree)
- *   <cwd>/.claude/skills, <cwd>/.claude/commands, <cwd>/.swarm/skills
- *                                        skills_manager.go AddProjectSearchPaths (only if they exist)
- * Precedence is therefore the ordinal position of the root, not a per-source
- * rank. `source` is only a classification (registry.go classifySource).
- */
-const sourceFor = (path: string, roots: Array<{ root: string; source: SkillSource }>): SkillSource => roots.find(r => { const p=resolve(path), root=resolve(r.root); return p===root || p.startsWith(root+"/"); })?.source ?? "user";
-const parseFrontmatter = (raw: string): { fields: Record<string,string>; body: string } => {
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!m) return { fields: {}, body: raw };
-  const fields: Record<string,string> = {};
-  // Swarm builtin SKILL.md files use YAML block lists (`tags:\n  - a`). Fold
-  // list items into the comma-separated form the rest of the loader expects so
-  // the same file parses identically on both runtimes.
-  let listKey: string | undefined;
-  for (const line of m[1].split(/\r?\n/)) {
-    const item = line.match(/^\s+-\s*(.*)$/);
-    if (item && listKey) { const value = item[1].trim().replace(/^['"]|['"]$/g,""); fields[listKey] = fields[listKey] ? `${fields[listKey]},${value}` : value; continue; }
-    if (/^\s/.test(line)) continue; // nested mapping we do not model
-    const i=line.indexOf(":"); if (i<=0) { listKey = undefined; continue; }
-    const key=line.slice(0,i).trim(), value=line.slice(i+1).trim().replace(/^['"]|['"]$/g,"");
-    fields[key]=value; listKey = value === "" ? key : undefined;
-  }
-  return { fields, body: m[2] };
-};
-const validName = (name: string) => name.length>0 && name.length<=MAX_NAME && /^[a-z0-9-]+$/.test(name) && !name.startsWith("-") && !name.endsWith("-") && !name.includes("--");
 /** parser.go skipDirs — "archive" holds skills the autogen curator retired. */
 const SKIP_DIRS = new Set(["node_modules", ".git", ".svn", ".hg", "venv", ".venv", "__pycache__", ".mypy_cache", ".ruff_cache", "dist", "build", ".next", ".nuxt", ".output", "vendor", ".cache", ".tmp", "tmp", "archive"]);
 /**
@@ -208,11 +175,21 @@ export class SkillLoader {
   load(): SkillLoadResult {
     const paths=this.paths(), diagnostics:SkillDiagnostic[]=[]; const selected=new Map<string,LoadedSkill>(); const cwd=resolve(this.options.cwd ?? process.cwd());
     // Swarm ParseSkillMDContent: instructions = strings.TrimSpace(body).
-    for(const spec of paths){ for(const file of walk(spec.path)){ const dir=resolve(file,".."); let raw; try{raw=readFileSync(file,"utf8");}catch(e){diagnostics.push({path:file,message:String(e)});continue;} const {fields,body}=parseFrontmatter(raw); const name=fields.name || (dir.split("/").pop() ?? ""); const description=fields.description ?? ""; if(!validName(name)){diagnostics.push({path:file,message:`invalid skill name ${name}`});continue;} if(description.length>MAX_DESC){diagnostics.push({path:file,message:"description exceeds 1024 characters"});continue;} const autogenRoot=resolve(process.env.SWARM_HOME || join(this.options.home ?? process.env.HOME ?? cwd,".swarm"),"skills","autogen"); const source:SkillSource=spec.source!=="managed"&&spec.source!=="builtin"&&spec.source!=="cli"&&(dir===autogenRoot||dir.startsWith(autogenRoot+"/"))?"autogen":spec.source; const skill:LoadedSkill={name,description,instructions:body.trim(),dir,filePath:file,location:spec.source==="builtin"?builtinLocation(name):file,source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:fields["disable-model-invocation"] === "true",whenToUse:fields.when_to_use || fields["when-to-use"],category:fields.category,tags:fields.tags?.split(",").map(tag=>tag.trim()).filter(Boolean),priority:Number.isFinite(Number(fields.priority))?Number(fields.priority):undefined}; const prior=selected.get(name); if(!prior || skill.precedence>=prior.precedence) selected.set(name,skill); } }
+    for(const spec of paths){ for(const file of walk(spec.path)){
+      const dir=resolve(file,"..");
+      let raw; try{raw=readFileSync(file,"utf8");}catch(e){diagnostics.push({path:file,message:String(e)});continue;}
+      // LoadSkillWithValidation: parse like yaml.v3, then the fatal gate.
+      let parsed; try{parsed=parseSkillMDContent(raw);}catch(e){diagnostics.push({path:file,message:(e as Error).message});continue;}
+      const m=parsed.metadata; const fatal=fatalValidationError(m); if(fatal){diagnostics.push({path:file,message:fatal});continue;}
+      const autogenRoot=resolve(process.env.SWARM_HOME || join(this.options.home ?? process.env.HOME ?? cwd,".swarm"),"skills","autogen");
+      const source:SkillSource=spec.source!=="managed"&&spec.source!=="builtin"&&spec.source!=="cli"&&(dir===autogenRoot||dir.startsWith(autogenRoot+"/"))?"autogen":spec.source;
+      const skill:LoadedSkill={name:m.name,description:m.description,instructions:parsed.instructions,dir,filePath:file,location:spec.source==="builtin"?builtinLocation(m.name):file,source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:m.disableModelInvocation,whenToUse:m.whenToUse||undefined,category:m.category||undefined,tags:m.tags.length?m.tags:undefined,priority:m.priority||undefined};
+      const prior=selected.get(m.name); if(!prior || skill.precedence>=prior.precedence) selected.set(m.name,skill);
+    } }
     let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); const allowed = this.options.allowedNames ?? this.options.allowedSkills; if (allowed) skills=skills.filter(s=>allowed.includes(s.name)); return {skills,diagnostics,searchPaths:paths};
   }
   find(name:string):LoadedSkill|undefined{return this.load().skills.find(s=>s.name===name)}
   watch(onChange:(result:SkillLoadResult)=>void):()=>void { this.closeWatchers(); for(const p of this.paths()){ if(!existsSync(p.path)) continue; try{this.watchers.push(watch(p.path,{recursive:true},()=>onChange(this.load())))}catch{} } return ()=>this.closeWatchers(); }
   closeWatchers(){for(const w of this.watchers)w.close();this.watchers=[];}
 }
-export { parseFrontmatter, validName };
+export { parseSkillMDContent, fatalValidationError, validateName, validateDescription, extractDescriptionFromMarkdown, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH } from "./skillmd.js";
