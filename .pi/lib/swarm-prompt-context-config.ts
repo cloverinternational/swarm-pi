@@ -61,7 +61,9 @@ function legacyConfig(cwd: string): PromptContextConfig | undefined {
   const raw = readJSON(legacyPromptPath(cwd));
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as any;
-  return normalize({ prompts: value.prompts, activePrompt: value.active });
+  // Legacy stores with an omitted `active` field represented an explicit Pi
+  // selection; preserve that historical migration behavior.
+  return normalize({ prompts: value.prompts, activePrompt: typeof value.active === "string" ? value.active : "Pi default / current base" });
 }
 
 /** Load, migrate, and normalize the workspace configuration without deleting legacy state. */

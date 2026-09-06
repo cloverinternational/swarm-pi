@@ -49,7 +49,8 @@ export class Scheduler {
         this.clock = options.clock ?? DEFAULT_CLOCK;
         this.sink = options.sink;
         this.onError = options.onError ?? ((error) => console.error("[schedule]", error));
-        this.idFactory = options.idFactory ?? ((kind) => `${kind}-${crypto.randomUUID()}`);
+        // cron_create.go generateTaskID / schedule_wakeup.go: "<kind>-<time.Now().UnixNano()>".
+        this.idFactory = options.idFactory ?? ((kind) => `${kind}-${BigInt(Date.now()) * 1000000n + process.hrtime.bigint() % 1000000n}`);
     }
     async start() {
         await this.exclusive(async () => {
@@ -125,7 +126,7 @@ export class Scheduler {
                 throw new Error("id parameter is required");
             const task = this.tasks.get(id);
             if (!task)
-                throw new Error(`scheduled task '${id}' not found`);
+                throw new Error(`task '${id}' not found`);
             this.tasks.delete(id);
             try {
                 await this.persist();

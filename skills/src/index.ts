@@ -9,7 +9,7 @@ export type SkillSource = "managed" | "install" | "project" | "user" | "autogen"
  * `<location>`: Swarm renders embedded builtins as `builtin:<name>/SKILL.md`
  * and everything else as the absolute path.
  */
-export interface LoadedSkill { name: string; description: string; instructions: string; dir: string; filePath: string; location: string; source: SkillSource; precedence: number; supportFiles: string[]; disableModelInvocation?: boolean; whenToUse?: string; category?: string; tags?: string[]; priority?: number; /** frontmatter `arguments` — names for {{name}} substitution (arguments.go). */ arguments?: string[]; }
+export interface LoadedSkill { name: string; description: string; instructions: string; dir: string; filePath: string; location: string; source: SkillSource; precedence: number; supportFiles: string[]; disableModelInvocation?: boolean; whenToUse?: string; category?: string; tags?: string[]; priority?: number; /** frontmatter `arguments` — names for {{name}} substitution (arguments.go). */ arguments?: string[]; /** frontmatter `version` (Metadata.Version; autogen index renders "?.?.?" when empty). */ version?: string; }
 export interface SkillDiagnostic { path: string; message: string; }
 export interface SkillLoaderOptions { cwd?: string; home?: string; installDir?: string; managedDir?: string; autogenDir?: string; builtinDir?: string | null; cliPaths?: string[]; closed?: boolean; allowedNames?: string[]; allowedSkills?: string[]; }
 export interface SkillLoadResult { skills: LoadedSkill[]; diagnostics: SkillDiagnostic[]; searchPaths: Array<{ path: string; source: SkillSource; precedence: number }>; }
@@ -168,7 +168,7 @@ export function loadSkillFromDir(dir: string, source: SkillSource, precedence = 
   const raw = readFileSync(file, "utf8");
   const parsed = parseSkillMDContent(raw);
   const m = parsed.metadata; const fatal = fatalValidationError(m); if (fatal) throw new Error(fatal);
-  return { name: m.name, description: m.description, instructions: parsed.instructions, dir: resolve(dir), filePath: file, location: source === "builtin" ? builtinLocation(m.name) : file, source, precedence, supportFiles: packageFiles(resolve(dir)), disableModelInvocation: m.disableModelInvocation, whenToUse: m.whenToUse || undefined, category: m.category || undefined, tags: m.tags.length ? m.tags : undefined, priority: m.priority || undefined, arguments: m.arguments.length ? m.arguments : undefined };
+  return { name: m.name, description: m.description, instructions: parsed.instructions, dir: resolve(dir), filePath: file, location: source === "builtin" ? builtinLocation(m.name) : file, source, precedence, supportFiles: packageFiles(resolve(dir)), disableModelInvocation: m.disableModelInvocation, whenToUse: m.whenToUse || undefined, category: m.category || undefined, tags: m.tags.length ? m.tags : undefined, priority: m.priority || undefined, arguments: m.arguments.length ? m.arguments : undefined, version: m.version || undefined };
 }
 
 export class SkillLoader {
@@ -216,7 +216,7 @@ export class SkillLoader {
       const m=parsed.metadata; const fatal=fatalValidationError(m); if(fatal){diagnostics.push({path:file,message:fatal});continue;}
       const autogenRoot=resolve(process.env.SWARM_HOME || join(this.options.home ?? process.env.HOME ?? cwd,".swarm"),"skills","autogen");
       const source:SkillSource=spec.source!=="managed"&&spec.source!=="builtin"&&spec.source!=="cli"&&(dir===autogenRoot||dir.startsWith(autogenRoot+"/"))?"autogen":spec.source;
-      const skill:LoadedSkill={name:m.name,description:m.description,instructions:parsed.instructions,dir,filePath:file,location:spec.source==="builtin"?builtinLocation(m.name):file,source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:m.disableModelInvocation,whenToUse:m.whenToUse||undefined,category:m.category||undefined,tags:m.tags.length?m.tags:undefined,priority:m.priority||undefined,arguments:m.arguments.length?m.arguments:undefined};
+      const skill:LoadedSkill={name:m.name,description:m.description,instructions:parsed.instructions,dir,filePath:file,location:spec.source==="builtin"?builtinLocation(m.name):file,source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:m.disableModelInvocation,whenToUse:m.whenToUse||undefined,category:m.category||undefined,tags:m.tags.length?m.tags:undefined,priority:m.priority||undefined,arguments:m.arguments.length?m.arguments:undefined,version:m.version||undefined};
       const prior=selected.get(m.name); if(!prior || skill.precedence>=prior.precedence) selected.set(m.name,skill);
     } }
     let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); const allowed = this.options.allowedNames ?? this.options.allowedSkills; if (allowed) skills=skills.filter(s=>allowed.includes(s.name)); return {skills,diagnostics,searchPaths:paths};

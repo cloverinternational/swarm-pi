@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync, watch } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fatalValidationError, parseSkillMDContent } from "./skillmd.js";
 /**
  * Byte-identical mirrors of the skills Swarm embeds in its binary
  * (`swarm-sdk/internal/skills/builtins` plus the programmatic `loop` skill).
@@ -10,23 +11,36 @@ import { fileURLToPath } from "node:url";
  */
 export const DEFAULT_BUILTIN_SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "builtins");
 export const builtinLocation = (name) => `builtin:${name}/SKILL.md`;
-/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+/** prompt_xml.go escapeXML = html.EscapeString (note &#39; and &#34;, not &quot;). */
+const esc = (value) => value.replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;");
+/** Go bytewise string ordering (sort.Strings / `<` on strings). */
+const goLess = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+/** registry.go classifySource names, as they appear in Skill.Source/LoadedFrom. */
+const goSourceName = (source) => source === "managed" ? "policy" : source === "install" || source === "cli" ? "local" : source;
+const skillEntryXML = (skill, description) => {
+    const when = skill.whenToUse ? `    <when_to_use>${esc(skill.whenToUse)}</when_to_use>\n` : "";
+    return `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(description)}</description>\n${when}    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>\n`;
+};
+/** prompt_xml.go GenerateAvailableSkillsXML (uncapped, full descriptions). */
 export function generateAvailableSkillsXML(skills) {
     if (!skills.length)
         return "";
-    const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
-    return `<available_skills>\n${skills.map(skill => `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(skill.description)}</description>\n    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>`).join("\n")}\n</available_skills>`;
+    return `<available_skills>\n${skills.map(skill => skillEntryXML(skill, skill.description)).join("")}</available_skills>`;
 }
 export const MAX_AVAILABLE_SKILLS = 60;
 export const MAX_AVAILABLE_SKILLS_CHARS = 12_000;
 export const MAX_PROMPT_DESCRIPTION_RUNES = 240;
+export const OMISSION_MARKER_RESERVE = 180;
+/** prompt_xml.go truncatePromptDescription (rune-based). */
 const promptDescription = (value) => {
     const runes = [...value.trim()];
     return runes.length <= MAX_PROMPT_DESCRIPTION_RUNES
         ? runes.join("")
         : `${runes.slice(0, MAX_PROMPT_DESCRIPTION_RUNES - 1).join("")}…`;
 };
-const relevanceTerms = (value) => [...new Set(value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(term => [...term].length >= 3))];
+/** relevance.go relevanceTerms: FieldsFunc(!IsLetter && !IsDigit), >=3 runes, first-seen order. */
+const relevanceTerms = (value) => [...new Set(value.split(/[^\p{L}\p{N}]+/u).filter(term => [...term].length >= 3))];
+/** relevance.go RankForContext with no active skills (headless has none). */
 export function rankSkillsForContext(skills, query) {
     const normalized = query.trim().toLowerCase();
     const terms = relevanceTerms(normalized);
@@ -34,7 +48,8 @@ export function rankSkillsForContext(skills, query) {
         const name = skill.name.toLowerCase();
         const description = promptDescription(skill.description).toLowerCase();
         const whenToUse = (skill.whenToUse ?? "").toLowerCase();
-        const metadata = [skill.category ?? "", ...(skill.tags ?? []), skill.location ?? skill.filePath, skill.source].join(" ").toLowerCase();
+        const source = goSourceName(skill.source);
+        const metadata = [skill.category ?? "", ...(skill.tags ?? []), source, source].join(" ").toLowerCase();
         let value = 0;
         if (normalized && name.includes(normalized))
             value += 1000;
@@ -52,25 +67,33 @@ export function rankSkillsForContext(skills, query) {
         }
         return value;
     };
-    return [...skills].sort((left, right) => score(right) - score(left) ||
+    // Registry.List() pre-sorts by priority desc, name asc; the ranking sort is stable.
+    const listed = [...skills].sort((a, b) => ((b.priority ?? 0) - (a.priority ?? 0)) || goLess(a.name, b.name));
+    return listed.sort((left, right) => score(right) - score(left) ||
         (right.priority ?? 0) - (left.priority ?? 0) ||
-        left.name.toLowerCase().localeCompare(right.name.toLowerCase()));
+        goLess(left.name.toLowerCase(), right.name.toLowerCase()));
 }
+/** prompt_xml.go GenerateRankedAvailableSkillsXML — the budget is in BYTES. */
 export function generateRankedAvailableSkillsXML(skills, maxSkills = MAX_AVAILABLE_SKILLS, maxChars = MAX_AVAILABLE_SKILLS_CHARS) {
     if (!skills.length)
         return "";
-    const esc = (value) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
+    if (maxSkills <= 0)
+        maxSkills = skills.length;
+    if (maxChars <= 0)
+        maxChars = MAX_AVAILABLE_SKILLS_CHARS;
     const closing = "</available_skills>";
     let xml = "<available_skills>\n";
+    let bytes = Buffer.byteLength(xml);
     let rendered = 0;
     for (const skill of skills) {
         if (rendered >= maxSkills)
-            break;
-        const when = skill.whenToUse ? `\n    <when_to_use>${esc(skill.whenToUse)}</when_to_use>` : "";
-        const entry = `  <skill>\n    <name>${esc(skill.name)}</name>\n    <description>${esc(promptDescription(skill.description))}</description>${when}\n    <location>${esc(skill.location ?? skill.filePath)}</location>\n  </skill>\n`;
-        if (rendered > 0 && xml.length + entry.length + closing.length + 160 > maxChars)
+            continue;
+        const entry = skillEntryXML(skill, promptDescription(skill.description));
+        const entryBytes = Buffer.byteLength(entry);
+        if (rendered > 0 && bytes + entryBytes + closing.length + OMISSION_MARKER_RESERVE > maxChars)
             break;
         xml += entry;
+        bytes += entryBytes;
         rendered++;
     }
     const omitted = skills.length - rendered;
@@ -78,63 +101,73 @@ export function generateRankedAvailableSkillsXML(skills, maxSkills = MAX_AVAILAB
         xml += `  <!-- ${omitted} additional skill(s) omitted to bound prompt size; use SkillManage(action="list") for on-demand discovery -->\n`;
     return `${xml}${closing}`;
 }
-const MAX_NAME = 64, MAX_DESC = 1024;
-const precedence = { managed: 600, cli: 500, install: 400, project: 300, user: 200, autogen: 100, builtin: 0 };
-const sourceFor = (path, roots) => roots.find(r => { const p = resolve(path), root = resolve(r.root); return p === root || p.startsWith(root + "/"); })?.source ?? "user";
-const parseFrontmatter = (raw) => {
-    const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-    if (!m)
-        return { fields: {}, body: raw };
-    const fields = {};
-    // Swarm builtin SKILL.md files use YAML block lists (`tags:\n  - a`). Fold
-    // list items into the comma-separated form the rest of the loader expects so
-    // the same file parses identically on both runtimes.
-    let listKey;
-    for (const line of m[1].split(/\r?\n/)) {
-        const item = line.match(/^\s+-\s*(.*)$/);
-        if (item && listKey) {
-            const value = item[1].trim().replace(/^['"]|['"]$/g, "");
-            fields[listKey] = fields[listKey] ? `${fields[listKey]},${value}` : value;
-            continue;
-        }
-        if (/^\s/.test(line))
-            continue; // nested mapping we do not model
-        const i = line.indexOf(":");
-        if (i <= 0) {
-            listKey = undefined;
-            continue;
-        }
-        const key = line.slice(0, i).trim(), value = line.slice(i + 1).trim().replace(/^['"]|['"]$/g, "");
-        fields[key] = value;
-        listKey = value === "" ? key : undefined;
-    }
-    return { fields, body: m[2] };
-};
-const validName = (name) => name.length > 0 && name.length <= MAX_NAME && /^[a-z0-9-]+$/.test(name) && !name.startsWith("-") && !name.endsWith("-") && !name.includes("--");
-const walk = (root, out = []) => {
-    if (!existsSync(root))
-        return out;
-    let entries;
-    try {
-        entries = readdirSync(root, { withFileTypes: true });
-    }
-    catch {
-        return out;
-    }
-    if (entries.some(e => e.name === "SKILL.md" && (e.isFile() || e.isSymbolicLink()))) {
-        out.push(join(root, "SKILL.md"));
-        return out;
-    }
-    for (const e of entries) {
-        if (e.name.startsWith(".") || e.name === "node_modules")
-            continue;
-        const p = join(root, e.name);
+/** parser.go skipDirs — "archive" holds skills the autogen curator retired. */
+const SKIP_DIRS = new Set(["node_modules", ".git", ".svn", ".hg", "venv", ".venv", "__pycache__", ".mypy_cache", ".ruff_cache", "dist", "build", ".next", ".nuxt", ".output", "vendor", ".cache", ".tmp", "tmp", "archive"]);
+/**
+ * parser.go DiscoverSkills: recursive walk that follows directory symlinks,
+ * skips tooling/hidden directories (except the root itself), keeps descending
+ * below a directory that already holds a SKILL.md, and dedupes SKILL.md files
+ * by canonical path. Unresolvable/unreadable directories are skipped silently.
+ */
+const walk = (rootDir, out = []) => {
+    const seenDirs = new Set(), seenPaths = new Set();
+    const visit = (dir) => {
+        let realDir;
         try {
-            if (e.isDirectory() || (e.isSymbolicLink() && statSync(p).isDirectory()))
-                walk(p, out);
+            realDir = realpathSync(dir);
+        }
+        catch {
+            return;
+        }
+        if (seenDirs.has(realDir))
+            return;
+        seenDirs.add(realDir);
+        // os.ReadDir returns entries sorted by filename; Node does not.
+        let entries;
+        try {
+            entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        }
+        catch {
+            return;
+        }
+        for (const e of entries) {
+            const name = e.name, fullPath = join(dir, name);
+            if (e.isDirectory() || e.isSymbolicLink()) {
+                let isDir = false;
+                try {
+                    isDir = statSync(fullPath).isDirectory();
+                }
+                catch {
+                    continue;
+                }
+                if (!isDir) {
+                    if (name === "SKILL.md")
+                        addFile(fullPath);
+                    continue;
+                }
+                if (SKIP_DIRS.has(name))
+                    continue;
+                if (dir !== rootDir && name.startsWith("."))
+                    continue;
+                visit(fullPath);
+                continue;
+            }
+            if (name === "SKILL.md")
+                addFile(fullPath);
+        }
+    };
+    const addFile = (fullPath) => {
+        let canonical = fullPath;
+        try {
+            canonical = realpathSync(fullPath);
         }
         catch { }
-    }
+        if (seenPaths.has(canonical))
+            return;
+        seenPaths.add(canonical);
+        out.push(fullPath);
+    };
+    visit(rootDir);
     return out;
 };
 const packageFiles = (dir) => { const out = []; const roots = ["references", "templates", "scripts", "assets"]; for (const root of roots) {
@@ -170,6 +203,21 @@ catch {
     }
     catch { }
 } };
+/**
+ * skills.LoadSkill(dir) for one package: parse + fatal validation. Throws with
+ * the loader's diagnostic message. Used by autogen refreshSkill, which
+ * re-registers a single package without re-discovering every root.
+ */
+export function loadSkillFromDir(dir, source, precedence = Number.MAX_SAFE_INTEGER) {
+    const file = join(resolve(dir), "SKILL.md");
+    const raw = readFileSync(file, "utf8");
+    const parsed = parseSkillMDContent(raw);
+    const m = parsed.metadata;
+    const fatal = fatalValidationError(m);
+    if (fatal)
+        throw new Error(fatal);
+    return { name: m.name, description: m.description, instructions: parsed.instructions, dir: resolve(dir), filePath: file, location: source === "builtin" ? builtinLocation(m.name) : file, source, precedence, supportFiles: packageFiles(resolve(dir)), disableModelInvocation: m.disableModelInvocation, whenToUse: m.whenToUse || undefined, category: m.category || undefined, tags: m.tags.length ? m.tags : undefined, priority: m.priority || undefined, arguments: m.arguments.length ? m.arguments : undefined, version: m.version || undefined };
+}
 export class SkillLoader {
     options;
     watchers = [];
@@ -183,33 +231,52 @@ export class SkillLoader {
     }
     paths() {
         const cwd = resolve(this.options.cwd ?? process.cwd()), home = this.options.home ?? process.env.HOME ?? cwd;
+        const swarmRoot = process.env.SWARM_HOME || join(home, ".swarm");
         const rows = [];
+        // Ordinal precedence: the LAST root to define a name wins (DiscoverAll).
         const add = (path, source) => { if (path)
-            rows.push({ path: resolve(path), source, precedence: precedence[source] }); };
+            rows.push({ path: resolve(path), source, precedence: rows.length }); };
         if (!this.options.closed) {
-            add(this.options.managedDir ?? process.env.SWARM_MANAGED_SKILLS_DIR ?? "", "managed");
-            for (const p of this.options.cliPaths ?? [])
-                add(p, "cli");
-            add(this.options.installDir ?? join(home, ".swarm", "skills"), "install");
-            add(join(cwd, ".swarm", "skills"), "project");
-            add(join(cwd, ".pi", "skills"), "project");
-            add(join(cwd, ".agents", "skills"), "project");
-            add(join(home, ".claude", "skills"), "user");
-            add(join(home, ".claude", "commands"), "user");
-            add(join(home, ".swarm", "skills"), "user");
-            add(join(home, ".agents", "skills"), "user");
-            add(this.options.autogenDir ?? join(home, ".swarm", "skills", "autogen"), "autogen");
             if (this.options.builtinDir !== null)
                 add(this.options.builtinDir ?? DEFAULT_BUILTIN_SKILLS_DIR, "builtin");
+            // loader.go NewLoader: managed dir only when set, existing, a directory,
+            // and SWARM_DISABLE_POLICY_SKILLS != "1". It is *prepended* to the search
+            // paths, which under last-wins discovery makes it the lowest priority.
+            const managed = this.options.managedDir ?? (process.env.SWARM_DISABLE_POLICY_SKILLS === "1" ? "" : process.env.SWARM_MANAGED_SKILLS_DIR ?? "");
+            if (managed) {
+                let ok = false;
+                try {
+                    ok = statSync(managed).isDirectory();
+                }
+                catch { }
+                if (ok)
+                    add(managed, "managed");
+            }
+            const installDir = this.options.installDir ?? join(home, ".swarmos", "skills");
+            add(installDir, "install");
+            add(join(installDir, "skills"), "install");
+            add(join(home, ".claude", "skills"), "user");
+            add(join(home, ".claude", "commands"), "user");
+            add(join(swarmRoot, "skills"), "user");
+            // A non-default autogen dir has no Swarm equivalent; the default one is
+            // already covered by the ~/.swarm/skills subtree walk.
+            if (this.options.autogenDir && resolve(this.options.autogenDir) !== resolve(swarmRoot, "skills", "autogen"))
+                add(this.options.autogenDir, "autogen");
+            // skills_manager.go AddProjectSearchPaths: only roots that exist.
+            for (const p of [join(cwd, ".claude", "skills"), join(cwd, ".claude", "commands"), join(cwd, ".swarm", "skills")])
+                if (existsSync(p))
+                    add(p, "project");
         }
-        else
-            for (const p of this.options.cliPaths ?? [])
-                add(p, "cli");
+        // Pi-only explicit roots (closed/allowlisted policy); no Swarm counterpart.
+        for (const p of this.options.cliPaths ?? [])
+            add(p, "cli");
         return rows.filter((r, i, a) => a.findIndex(x => x.path === r.path) === i);
     }
     load() {
         const paths = this.paths(), diagnostics = [];
         const selected = new Map();
+        const cwd = resolve(this.options.cwd ?? process.cwd());
+        // Swarm ParseSkillMDContent: instructions = strings.TrimSpace(body).
         for (const spec of paths) {
             for (const file of walk(spec.path)) {
                 const dir = resolve(file, "..");
@@ -221,21 +288,27 @@ export class SkillLoader {
                     diagnostics.push({ path: file, message: String(e) });
                     continue;
                 }
-                const { fields, body } = parseFrontmatter(raw);
-                const name = fields.name || (dir.split("/").pop() ?? "");
-                const description = fields.description ?? "";
-                if (!validName(name)) {
-                    diagnostics.push({ path: file, message: `invalid skill name ${name}` });
+                // LoadSkillWithValidation: parse like yaml.v3, then the fatal gate.
+                let parsed;
+                try {
+                    parsed = parseSkillMDContent(raw);
+                }
+                catch (e) {
+                    diagnostics.push({ path: file, message: e.message });
                     continue;
                 }
-                if (description.length > MAX_DESC) {
-                    diagnostics.push({ path: file, message: "description exceeds 1024 characters" });
+                const m = parsed.metadata;
+                const fatal = fatalValidationError(m);
+                if (fatal) {
+                    diagnostics.push({ path: file, message: fatal });
                     continue;
                 }
-                const skill = { name, description, instructions: body.trimEnd(), dir, filePath: file, location: spec.source === "builtin" ? builtinLocation(name) : file, source: spec.source, precedence: spec.precedence, supportFiles: packageFiles(dir), disableModelInvocation: fields["disable-model-invocation"] === "true", whenToUse: fields.when_to_use || fields["when-to-use"], category: fields.category, tags: fields.tags?.split(",").map(tag => tag.trim()).filter(Boolean), priority: Number.isFinite(Number(fields.priority)) ? Number(fields.priority) : undefined };
-                const prior = selected.get(name);
+                const autogenRoot = resolve(process.env.SWARM_HOME || join(this.options.home ?? process.env.HOME ?? cwd, ".swarm"), "skills", "autogen");
+                const source = spec.source !== "managed" && spec.source !== "builtin" && spec.source !== "cli" && (dir === autogenRoot || dir.startsWith(autogenRoot + "/")) ? "autogen" : spec.source;
+                const skill = { name: m.name, description: m.description, instructions: parsed.instructions, dir, filePath: file, location: spec.source === "builtin" ? builtinLocation(m.name) : file, source, precedence: spec.precedence, supportFiles: packageFiles(dir), disableModelInvocation: m.disableModelInvocation, whenToUse: m.whenToUse || undefined, category: m.category || undefined, tags: m.tags.length ? m.tags : undefined, priority: m.priority || undefined, arguments: m.arguments.length ? m.arguments : undefined, version: m.version || undefined };
+                const prior = selected.get(m.name);
                 if (!prior || skill.precedence >= prior.precedence)
-                    selected.set(name, skill);
+                    selected.set(m.name, skill);
             }
         }
         let skills = [...selected.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -256,4 +329,4 @@ export class SkillLoader {
     closeWatchers() { for (const w of this.watchers)
         w.close(); this.watchers = []; }
 }
-export { parseFrontmatter, validName };
+export { parseSkillMDContent, fatalValidationError, validateName, validateDescription, extractDescriptionFromMarkdown, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH } from "./skillmd.js";

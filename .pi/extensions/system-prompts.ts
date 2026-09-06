@@ -1,7 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { swarmForgeSystemPrompt } from "../../swarm-prompt/src/index.ts";
+import { loadPromptContextConfig, savePromptContextConfig } from "../lib/swarm-prompt-context-config.ts";
 
 /**
  * The canonical prompt now comes from the vendored @pi-swarm/swarm-prompt
@@ -48,33 +47,15 @@ export interface SystemPromptAPI {
   }): void;
 }
 
-const fileName = ".pi/system-prompts.json";
 const normalize = (value: string) => value.replace(/\r\n/g, "\n").trim();
 
 export function promptStorePath(cwd: string): string {
-  return join(cwd, fileName);
+  return join(cwd, ".pi", "prompt-context.json");
 }
 
 export function loadPromptStore(cwd: string): PromptStore {
-  const path = promptStorePath(cwd);
-  // Preserve the original Pi-Swarm default: Forge owns the prompt until the
-  // user explicitly selects Pi's base prompt.
-  if (!existsSync(path)) return { prompts: [], active: FORGE_PROMPT };
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<PromptStore>;
-    const prompts = Array.isArray(parsed.prompts)
-      ? parsed.prompts.filter((p): p is SystemPromptPreset =>
-        typeof p?.name === "string" && typeof p?.content === "string" && p.name.trim().length > 0)
-      : [];
-    const requested = typeof parsed.active === "string" ? parsed.active : undefined;
-    // Migration: older versions represented an explicit "use Pi" choice by
-    // writing a valid store with no active value.
-    if (requested === undefined) return { prompts, active: PI_DEFAULT_PROMPT };
-    const knownBuiltin = requested === FORGE_PROMPT || requested === PI_DEFAULT_PROMPT;
-    return { prompts, active: knownBuiltin || prompts.some(p => p.name === requested) ? requested : undefined };
-  } catch {
-    return { prompts: [], active: FORGE_PROMPT };
-  }
+  const config = loadPromptContextConfig(cwd);
+  return { prompts: config.prompts, active: config.activePrompt ?? FORGE_PROMPT };
 }
 
 export type ActiveSystemPrompt =
@@ -96,9 +77,8 @@ export function resolveActiveSystemPrompt(cwd: string): ActiveSystemPrompt {
 }
 
 export function savePromptStore(cwd: string, store: PromptStore): void {
-  const path = promptStorePath(cwd);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  const config = loadPromptContextConfig(cwd);
+  savePromptContextConfig(cwd, { ...config, prompts: store.prompts, ...(store.active ? { activePrompt: store.active } : {}) });
 }
 
 function describe(prompt: SystemPromptPreset, active?: string): string {

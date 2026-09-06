@@ -1,0 +1,260 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "Bash",
+      "description": "Execute shell commands and return the output. Supports pipes, redirections, and shell features.\nBoth stdout and stderr are captured.\n\nIMPORTANT: You MUST specify timeout_seconds for every command to prevent hanging.\n\nCommand runs and blocks until completion or timeout.\n- If completes within timeout: Returns output immediately\n- If exceeds timeout: Auto-backgrounds and returns task_id for later retrieval\n\nParameters:\n- command (required): Shell command to execute\n- cwd: Working directory (default: current directory)\n- env: Environment variables as key-value pairs\n- timeout_seconds (REQUIRED): Maximum seconds to wait before auto-backgrounding\n\nExample:\n{\n  \"command\": \"npm test\",\n  \"timeout_seconds\": 30\n}\nReturns: Output if completes in 30s, or {\"backgrounded\": true, \"task_id\": \"...\"} if exceeds timeout",
+      "parameters": {
+        "properties": {
+          "command": {
+            "description": "Shell command to execute",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "Working directory (use this instead of 'cd')",
+            "type": "string"
+          },
+          "description": {
+            "description": "Brief label for this command shown in the status header and TUI (5-10 words)",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Extra environment variables to set",
+            "properties": {},
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "description": "REQUIRED: Maximum seconds to wait for command completion. If exceeded, command auto-backgrounds. Minimum: 1 second.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command",
+          "timeout_seconds"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ReadBackgroundCommand",
+      "description": "Reads output and status from a background bash command.\n\nUse this tool to:\n- Check the status of a background process (running, completed, failed, cancelled)\n- Read the stdout/stderr output from the process\n- Get the exit code when the process has completed\n- Query specific lines or search output with a pattern\n\nThe output is returned as structured JSON with metadata including timestamps,\nline numbers, and stream type (stdout/stderr) for each line.\n\nHeartbeat fields on metadata tell you whether a long-running process is still\nmaking progress without needing to diff polls yourself:\n- \"last_output_at\": RFC3339 timestamp of the most recent line written.\n- \"seconds_since_last_output\": how long ago that was (0 if never output).\n- \"bytes_written\": cumulative output size in bytes (strictly non-decreasing).\nA process that is \"running\" but has a high seconds_since_last_output may still\nbe healthy (network I/O, LLM calls) — prefer another poll over a cancel unless\nthe gap exceeds several minutes OR bytes_written has not changed between polls.\n\nIMPORTANT: By default only the last 100 lines (tail) are returned in the \"output\"\narray to keep responses concise. When the output is truncated, \"metadata.output_file\"\ncontains the path to a temp file with the complete output — read that file with the\nRead or Bash tool if you need earlier lines.\n\nParameters:\n- task_id (required): The ID of the background process to read from\n- action: \"output\" (default), \"status\", \"cancel\", or \"list\"\n- from_line: Start reading from this line number (1-indexed, default: 1)\n- max_lines: Maximum number of lines to return (default: 100, capped at 1000)\n- pattern: Regex pattern to filter output lines (optional)\n- stream: Filter by stream type - \"stdout\", \"stderr\", or empty for all (optional)",
+      "parameters": {
+        "properties": {
+          "action": {
+            "default": "output",
+            "description": "Action to perform: output (get output lines, default), status (get process state only), cancel (terminate process), list (list all background processes)",
+            "enum": [
+              "status",
+              "output",
+              "cancel",
+              "list"
+            ],
+            "type": "string"
+          },
+          "from_line": {
+            "default": 1,
+            "description": "Start reading from this line number (1-indexed)",
+            "type": "integer"
+          },
+          "max_lines": {
+            "default": 100,
+            "description": "Maximum number of lines to return (default: 100 tail lines; capped at 1000). When truncated, see metadata.output_file for the full output.",
+            "type": "integer"
+          },
+          "pattern": {
+            "description": "Regex pattern to filter output lines",
+            "type": "string"
+          },
+          "stream": {
+            "description": "Filter by stream type (stdout, stderr, or empty for all)",
+            "enum": [
+              "stdout",
+              "stderr",
+              ""
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "The ID of the background process (returned when command was backgrounded)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ask_user_question",
+      "description": "Ask the user a question and wait for their response. Use this when clarification\nwould materially change the outcome — don't use it for questions you can answer from context\nor for simple guesses you can verify with a quick test.\n\nFor several related decisions, send one questionnaire with 'questions' instead of\n'question'. Each item requires a unique id, a prompt, and structured options:\n\n  {\"questions\":[{\n    \"id\":\"database\",\n    \"prompt\":\"Which database should we use?\",\n    \"label\":\"Database\",\n    \"options\":[\n      {\"value\":\"postgres\",\"label\":\"PostgreSQL\",\"description\":\"Relational and full-featured\"},\n      {\"value\":\"sqlite\",\"label\":\"SQLite\",\"description\":\"Simple embedded storage\"}\n    ],\n    \"allow_other\":false\n  }]}\n\nOmitting allow_other permits a custom answer. Set it to false to require one of the\nlisted values. Do not combine 'question' and 'questions'.\n\n## When to prefer 'visual_choice' over 'choice'\n\nStrongly prefer 'visual_choice' any time the answer is easier to SEE than to read:\n\n- UI / layout / component design (\"which layout?\", \"which button style?\", \"which nav?\")\n- Architectural options that map to diagrams (\"which service topology?\", \"which state machine?\")\n- Side-by-side comparisons where prose would be dense (\"flat vs tree structure?\")\n- Any \"show me options\" where you would otherwise describe three designs in a paragraph\n\nIf the user says \"plan / design / layout / mock up / sketch / wireframe / compare\", treat\nthat as a strong signal to enter plan mode AND to offer 'visual_choice' for decisions that\nbenefit from visual comparison. Do NOT fall back to a bulleted list in chat when a\nvisual_choice picker would be a better fit.\n\n## visual_choice payload\n\nSupply a 'visual' object with a 'kind' discriminator and primitive-specific fields:\n\n  { \"kind\": \"options\",  \"items\": [{\"key\",\"label\",\"description?\"}, ...] }\n  { \"kind\": \"cards\",    \"items\": [{\"key\",\"title\",\"description?\",\"body?\"}, ...] }\n  { \"kind\": \"split\",    \"items\": [ {A}, {B} ] }   // exactly 2 items\n  { \"kind\": \"markdown\", \"content\": \"# prose + fenced mermaid blocks\" }\n  { \"kind\": \"mermaid\",  \"diagram\": \"flowchart TD\\n...\", \"caption?\": \"...\" }\n  { \"kind\": \"raw_html\", \"content\": \"<div>...</div>\" }\n\nInteractive kinds (options/cards/split) accept any presentation kind as a nested 'body':\n\n  {\"kind\":\"cards\",\"items\":[\n    {\"key\":\"flat\",\"title\":\"Flat\",\"body\":{\"kind\":\"mermaid\",\"diagram\":\"graph TD\\nA-->B\\nA-->C\"}},\n    {\"key\":\"tree\",\"title\":\"Tree\",\"body\":{\"kind\":\"mermaid\",\"diagram\":\"graph TD\\nR-->A-->C\"}}\n  ]}\n\nThe active client renders the picker inline; in the TUI the user reviews and selects it in the terminal.\n\n## Other types\n\n- 'text' — free-form input\n- 'choice' — single text option (only when visual treatment adds nothing)\n- 'multi_choice' — multiple text options\n- 'confirm' — yes/no (use for deletions, destructive actions)\n- 'number' — numeric input\n\n## Rules\n\n- Do NOT use for questions you can answer from context.\n- Do NOT use in the middle of an already-specified multi-step task.\n- Prefer visual_choice over text choice for anything design-adjacent.\n- Prefer attempting + showing results over asking upfront on non-design tasks.",
+      "parameters": {
+        "properties": {
+          "choices": {
+            "description": "Available choices (required for 'choice' and 'multi_choice' types)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {
+            "description": "Default value if user doesn't respond or for text input placeholder",
+            "type": "string"
+          },
+          "description": {
+            "description": "Optional detailed description providing context about why you're asking",
+            "type": "string"
+          },
+          "options": {
+            "description": "Structured options for a singleton choice question. Each option has a unique value, a non-empty label, and an optional description.",
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "priority": {
+            "default": "medium",
+            "description": "Priority level for the question",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "question": {
+            "description": "A single question to ask. Exactly one of question or questions must be supplied.",
+            "type": "string"
+          },
+          "questions": {
+            "description": "A questionnaire of related questions. Exactly one of question or questions must be supplied.",
+            "items": {
+              "properties": {
+                "allow_other": {
+                  "description": "Whether the user may provide a custom answer. Defaults to true when omitted.",
+                  "type": "boolean"
+                },
+                "id": {
+                  "description": "Unique, non-empty identifier for this question.",
+                  "type": "string"
+                },
+                "label": {
+                  "description": "Optional short, non-empty heading for the question.",
+                  "type": "string"
+                },
+                "options": {
+                  "description": "Available structured options, each with a unique value and non-empty label.",
+                  "items": {
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "prompt": {
+                  "description": "The question shown to the user.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "default": "300",
+            "description": "Timeout in seconds (default: 300, 0 for no timeout)",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Optional title for the question dialog",
+            "type": "string"
+          },
+          "type": {
+            "default": "text",
+            "description": "Type of question: 'text' for free-form input, 'choice' for single selection, 'multi_choice' for multiple selections, 'confirm' for yes/no, 'number' for numeric input, 'visual_choice' for a visual primitive picker",
+            "enum": [
+              "text",
+              "choice",
+              "multi_choice",
+              "confirm",
+              "number",
+              "visual_choice"
+            ],
+            "type": "string"
+          },
+          "visual": {
+            "additionalProperties": {},
+            "description": "Visual primitive payload (required when type == 'visual_choice'). Shape: {kind: 'options'|'cards'|'split'|'markdown'|'mermaid'|'raw_html', ...primitive fields}",
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "enter_plan_mode",
+      "description": "Switch to plan mode to design an approach before implementing.\n\nUse this tool when you receive a complex task that requires careful upfront design. In plan mode you should:\n1. Explore the codebase to understand the relevant context\n2. Resolve the decision tree with the user — ask one question at a time with your recommended answer\n3. Write your plan to a text or Markdown file inside the active workspace\n4. Call exit_plan_mode when ready for user approval\n\nIMPORTANT: In plan mode, you must resolve requirements with the user BEFORE writing the plan.\nWalk the decision tree branch-by-branch. For each unresolved decision:\n1. Ask one question at a time via ask_user_question\n2. Include your recommended answer (based on codebase exploration)\n3. Wait for user response before moving to the next decision\n4. If the answer can be found in the codebase, explore it yourself instead of asking\n\nPlan mode is an approval ceremony, not a permission boundary. Normal tool permissions,\nworkspace limits, and safety controls continue to apply.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "exit_plan_mode",
+      "description": "Present your plan for user approval and exit plan mode.\n\nRECOMMENDED: Write your plan to a text or Markdown file inside the active workspace,\nthen call exit_plan_mode with plan_file set to that file's path. The file contents\nare copied into conversation storage before approval.\n\nAlternatively, pass the full plan content directly in the plan parameter.\n\nThe user will review and can:\n- Approve (y): you begin implementing\n- Approve + compact context (c): context cleared, then implement\n- Reject with feedback (n): revise your plan and call exit_plan_mode again\n\nThis tool BLOCKS until the user responds - do not set a timeout.\nOnly call after enter_plan_mode.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "description": "The complete implementation plan in Markdown format. Use either plan or plan_file, not both.",
+            "type": "string"
+          },
+          "plan_file": {
+            "description": "Path to a UTF-8 text or Markdown plan inside the active workspace. Relative paths resolve from the workspace root. Use either plan_file or plan, not both.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    }
+  }
+]

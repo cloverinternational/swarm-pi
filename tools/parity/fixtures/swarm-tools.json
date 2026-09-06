@@ -1406,4 +1406,5 @@
     },
     "type": "function"
   }
+  ,{"function":{"description":"Store, list, or remove global credentials in the transparent local vault. Secrets are not encrypted; the user assumes all risk.","name":"vault","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["add","list","remove"]},"id":{"type":"string","description":"Credential identifier."},"kind":{"type":"string","description":"Credential kind, such as password, api_key, or ssh_key."},"secret":{"type":"string","description":"Credential value. Stored transparently in the global local vault."},"name":{"type":"string"},"target":{"type":"string","description":"Environment variable or file target used by vault_exec."}},"required":["action"]}},"type":"function"}
 ]

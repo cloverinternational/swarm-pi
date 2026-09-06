@@ -1,20 +1,28 @@
+import { randomBytes } from "node:crypto";
 const objectSchema = { type: "object" };
 const text = (details, message) => ({
     content: [{ type: "text", text: message ?? JSON.stringify(details, null, 2) }],
     details,
 });
-const failure = (error) => ({
-    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-    details: { error: error instanceof Error ? error.message : String(error) },
-    isError: true,
-});
-function executable(run) {
+// Go map[string]any → MarshalIndent with sorted keys.
+const sorted = (value) => Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+/** Go time.Format(layout) in the local zone: "2006-01-02T15:04:05Z07:00" (RFC3339) or "15:04:05". */
+const pad = (n) => String(n).padStart(2, "0");
+export function goLocalRFC3339(date) {
+    const offset = -date.getTimezoneOffset();
+    const zone = offset === 0 ? "Z" : `${offset > 0 ? "+" : "-"}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${zone}`;
+}
+const goClock = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+/** Swarm tools return sdkerr failures as tool errors: "Error executing <tool>: <msg> (error_id=…)". */
+function executable(name, run) {
     return async (_toolCallId, params) => {
         try {
             return await run(params);
         }
         catch (error) {
-            return failure(error);
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Error executing ${name}: ${message} (error_id=err_${randomBytes(10).toString("hex")})`);
         }
     };
 }
@@ -36,13 +44,16 @@ export function registerScheduleTools(pi, scheduler) {
                 agent_id: { type: "string", description: "Specific agent to use for execution" },
             },
         },
-        execute: executable(async (params) => {
+        execute: executable("CronCreate", async (params) => {
             const task = await scheduler.create({ ...params, agentId: params.agent_id });
             const details = scheduler.describe(task);
-            return text(details, JSON.stringify({
-                ...details,
-                message: `Scheduled ${details.type} task ${task.id} (${details.human_schedule}). ${task.durable ? "persisted" : "session-only"}.`,
-            }, null, 2));
+            // cron_create.go: persistence is reported as "session-only"/"persisted"
+            // here (CronList says "session"/"durable"); no next_fire_at on the wire.
+            const persistence = task.durable ? "persisted" : "session-only";
+            return text(details, JSON.stringify(sorted({
+                id: task.id, cron: task.cron, human_schedule: details.human_schedule, type: details.type, persistence,
+                message: `Scheduled ${details.type} task ${task.id} (${details.human_schedule}). ${persistence}.`,
+            }), null, 2));
         }),
     });
     pi.registerTool({
@@ -52,13 +63,25 @@ export function registerScheduleTools(pi, scheduler) {
         promptSnippet: "List active prompt schedules",
         executionMode: "parallel",
         parameters: { ...objectSchema, properties: {} },
-        execute: executable(async () => {
+        execute: executable("CronList", async () => {
+            // Swarm cron_list.go Run: text block + "\n" + MarshalIndent of a
+            // map[string]any (keys sorted at every level; no next_fire_at).
             const tasks = scheduler.list().map((task) => scheduler.describe(task));
-            const details = { total_tasks: tasks.length, tasks };
+            const taskInfos = tasks.map(({ next_fire_at: _next, ...info }) => sorted(info));
+            const details = sorted({ total_tasks: tasks.length, tasks: taskInfos });
+            let output = "";
             if (!tasks.length)
-                return text(details, `No scheduled tasks.\n\n${JSON.stringify(details, null, 2)}`);
-            const lines = tasks.map((task) => `  ${task.id}: ${task.human_schedule} (${task.type}, ${task.persistence})\n    Cron: ${task.cron}\n    Next: ${task.next_fire_at}`);
-            return text(details, `Scheduled Tasks (${tasks.length} total):\n\n${lines.join("\n\n")}\n\n${JSON.stringify(details, null, 2)}`);
+                output += "No scheduled tasks.\n";
+            else {
+                output += `Scheduled Tasks (${tasks.length} total):\n\n`;
+                for (const info of taskInfos) {
+                    output += `  ${info.id}: ${info.human_schedule} (${info.type}, ${info.persistence})\n    Cron: ${info.cron}\n`;
+                    if (info.agent_id !== undefined)
+                        output += `    Agent: ${info.agent_id}\n`;
+                    output += "\n";
+                }
+            }
+            return text({ total_tasks: tasks.length, tasks }, `${output}\n${JSON.stringify(details, null, 2)}`);
         }),
     });
     pi.registerTool({
@@ -72,9 +95,9 @@ export function registerScheduleTools(pi, scheduler) {
             required: ["id"],
             properties: { id: { type: "string", description: "Task ID to cancel" } },
         },
-        execute: executable(async (params) => {
+        execute: executable("CronDelete", async (params) => {
             await scheduler.remove(params.id);
-            return text({ id: params.id, message: `Cancelled scheduled task ${params.id}` });
+            return text(sorted({ id: params.id, message: `Cancelled scheduled task ${params.id}` }));
         }),
     });
     pi.registerTool({
@@ -91,14 +114,16 @@ export function registerScheduleTools(pi, scheduler) {
                 delay: { type: "string", description: "Delay before wakeup (e.g., '5m', '1h')." },
             },
         },
-        execute: executable(async (params) => {
+        execute: executable("ScheduleWakeup", async (params) => {
             const task = await scheduler.scheduleWakeup(params);
-            return text({
+            // schedule_wakeup.go: fire_time = time.Now().Add(delay).Format(RFC3339)
+            // in the local zone; the message uses the "15:04:05" clock layout.
+            return text(sorted({
                 id: task.id,
                 delay: task.delay,
-                fire_time: task.nextFireAt.toISOString(),
-                message: `Scheduled wakeup ${task.id} in ${task.delay} (at ${task.nextFireAt.toISOString()}).`,
-            });
+                fire_time: goLocalRFC3339(task.nextFireAt),
+                message: `Scheduled wakeup ${task.id} in ${task.delay} (at ${goClock(task.nextFireAt)}).`,
+            }));
         }),
     });
 }

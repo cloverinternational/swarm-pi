@@ -20,6 +20,21 @@ export interface RunnerContext { signal: AbortSignal; spec: Required<Pick<AgentS
 export interface RunnerOutcome { output: string; turns?: number }
 export type Runner = (ctx: RunnerContext) => Promise<string | RunnerOutcome>;
 
+/** Built-in Swarm TUI agent profiles shared by Subagent and Delegate. */
+export const BUILTIN_AGENT_PROFILES: Profile[] = [
+  {
+    name: "general-assistant",
+    systemPrompt: "You are a helpful AI assistant. You help users with a variety of tasks including answering questions, writing code, analyzing data, and solving problems.",
+    tools: ["*"],
+  },
+  {
+    name: "code-reviewer",
+    systemPrompt: "You are an expert code reviewer. Use repository inspection tools to list, search, and read only the repository text needed for the review. Analyze code for bugs, security issues, performance problems, and style violations. Provide constructive feedback with specific suggestions for improvement.",
+    capabilities: ["read-only", "repository inspection", "bug analysis", "security analysis", "performance analysis", "style analysis"],
+    tools: ["repository_inspect"],
+  },
+];
+
 /** Build a real Pi child-session runner. The child is deliberately prevented
  * from recursively spawning this control surface; the parent owns orchestration. */
 export function createPiRunner(pi: any): Runner {
@@ -32,7 +47,12 @@ export function createPiRunner(pi: any): Runner {
     // explicit option); `--session` would otherwise resume a stale file left
     // by an earlier child with the same deterministic id.
     await rm(sessionPath, { force: true });
-    const args = ["--mode", "text", "--print", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
+    // A Swarm sub-agent inherits its parent's tool registry and hooks. Pi's
+    // project extensions (this port) only load in a TRUSTED workspace, and a
+    // print-mode child without a remembered decision is untrusted by default
+    // (main.ts resolveProjectTrusted); the parent running this code is proof
+    // the workspace is trusted, so pass that decision down explicitly.
+    const args = ["--mode", "text", "--print", "--approve", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
     // Child Pi sessions need an unambiguous identity marker. The child loads
     // the same extensions as the parent, but its process-local tool contexts
     // do not inherit the parent's in-memory agent fields.
@@ -72,7 +92,7 @@ export class AgentManager {
   private readonly eventSinks = new Set<AgentEventSink>();
   constructor(private readonly options: { runner?: Runner; cwd?: string; concurrency?: number; profiles?: Profile[]; presets?: Record<string, Preset>; onComplete?: AgentCompletionSink; eventSink?: AgentEventSink } = {}) {
     if (options.eventSink) this.eventSinks.add(options.eventSink);
-    for (const p of options.profiles ?? []) this.profiles.set(p.name, clone(p));
+    for (const p of [...BUILTIN_AGENT_PROFILES, ...(options.profiles ?? [])]) this.profiles.set(p.name, clone(p));
     for (const [name, p] of Object.entries(options.presets ?? {})) this.presets.set(name, { ...clone(p), name: p.name || name });
   }
   addProfile(profile: Profile): void { this.profiles.set(profile.name, clone(profile)); }

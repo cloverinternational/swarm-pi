@@ -9,10 +9,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 /** Pi-Swarm's extension directory (the port itself), for probing foreign workspaces. */
-const PI_SWARM_EXTENSIONS = resolve(fileURLToPath(new URL("../../.pi/extensions", import.meta.url)));
+export const PI_SWARM_EXTENSIONS = resolve(fileURLToPath(new URL("../../.pi/extensions", import.meta.url)));
 
 const GENERATED_ID_KEYS = new Set(["tool_call_id"]);
-const PROBE_PROMPT = "PARITY_CAPTURE";
+export const PROBE_PROMPT = "PARITY_CAPTURE";
 /**
  * Tool calls the scripted model issues, indexed by how many tool results it
  * has seen. "default" covers the success + failure envelopes; "hooks" runs
@@ -386,7 +386,32 @@ function stableObject(value) {
   );
 }
 
+/**
+ * ReadBackgroundCommand JSON (swarm-tui/internal/bgprocess): timestamps,
+ * pids and durations are wall-clock, and `list` ranges a Go map, so its
+ * entry order is random by construction. `escaped` selects the JSON-escaped
+ * form used by the raw wire fingerprint (quotes as \" and newlines as \n).
+ */
+export function bgprocessMasks(escaped) {
+  // Literal (text) and regex-source forms of the quote and newline tokens.
+  const Q = escaped ? '\\"' : '"', NL = escaped ? "\\n" : "\n";
+  const q = escaped ? '\\\\"' : '"', nl = escaped ? "\\\\n" : "\\n";
+  const notQuote = escaped ? "\\\\" : '"';
+  const fields = new RegExp(`${q}(timestamp|started_at|ended_at|last_output_at)${q}: ?${q}\\d{4}-\\d\\d-\\d\\d[T ][^${notQuote}]*${q}|${q}(duration_seconds|seconds_since_last_output|pid)${q}: ?-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?`, "g");
+  const maskField = (_match, ts, num) => ts ? `${Q}${ts}${Q}: ${Q}<ts>${Q}` : `${Q}${num}${Q}: <n>`;
+  const list = new RegExp(`(\\{${nl}  ${q}count${q}: \\d+,${nl}  ${q}processes${q}: \\[${nl}    \\{)([\\s\\S]*?)(${nl}    \\}${nl}  \\]${nl}\\})`, "g");
+  const sortList = (_match, head, body, tail) => {
+    const separator = `${NL}    },${NL}    {`;
+    const entries = body.split(separator);
+    const key = entry => (entry.match(new RegExp(`${q}(command|started_at)${q}: ?${q}[^${notQuote}]*${q}`, "g")) ?? []).join("|");
+    entries.sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+    return head + entries.join(separator) + tail;
+  };
+  return { fields, maskField, list, sortList };
+}
+
 export function canonicalizeRequest(request) {
+  const bg = bgprocessMasks(false);
   const ids = new Map();
   let nextId = 1;
   const generatedId = value => {
@@ -423,6 +448,12 @@ export function canonicalizeRequest(request) {
           .replace(/"(created_at|updated_at|completed_at)": ?"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
           .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
           .replace(/\b([A-Za-z][A-Za-z0-9_-]*?)-\d{16,20}\b/g, "$1-<nanos>")
+          // bgprocess handles are bg-<UnixNano>-<pid>; the pid is per-side.
+          .replace(/\bbg-<nanos>-\d+\b/g, "bg-<nanos>-<pid>")
+          // bgprocess status/output/list JSON: wall-clock fields, pids, and
+          // Go map-ordered `list` entries (manager.go List ranges a map).
+          .replace(bg.list, bg.sortList)
+          .replace(bg.fields, bg.maskField)
           // Orchestration results carry wall-clock durations/start times.
           .replace(/"(duration|start_time)": ?"[^"]*"/g, '"$1":"<t>"')
           .replace(/^(duration:|elapsed:)\s+\S+$/gm, "$1 <t>")
@@ -482,6 +513,9 @@ export function wireFingerprint(rawText) {
     })
     .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
     .replace(/\b([A-Za-z][A-Za-z0-9_-]*?)-\d{16,20}\b/g, "$1-<nanos>")
+    .replace(/\bbg-<nanos>-\d+\b/g, "bg-<nanos>-<pid>")
+    .replace(bgprocessMasks(true).list, bgprocessMasks(true).sortList)
+    .replace(bgprocessMasks(true).fields, bgprocessMasks(true).maskField)
     .replace(/\\"(duration|start_time)\\": ?\\"[^\\"]*\\"/g, '\\"$1\\":\\"<t>\\"')
     .replace(/(\\n)(duration:|elapsed:)\s+[^\\]+?(?=\\n)/g, "$1$2 <t>")
     .replace(/\\"fire_time\\": ?\\"[^\\"]+\\"/g, '\\"fire_time\\":\\"<ts>\\"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
@@ -492,10 +526,7 @@ export function wireFingerprint(rawText) {
     .replace(/annoyed: GitHub API POST [^"]*?(?= \(error_id=)/g, "annoyed: GitHub API POST <gh>");
 }
 
-export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
-  const primary = raw => raw.filter(text => hasPrimaryPrompt(JSON.parse(text), probePrompt));
-  const left = primary(piRaw).map(wireFingerprint);
-  const right = primary(swarmRaw).map(wireFingerprint);
+function compareFingerprints(left, right) {
   const requests = [];
   for (let index = 0; index < Math.max(left.length, right.length); index++) {
     const a = left[index], b = right[index];
@@ -505,7 +536,21 @@ export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
     while (offset < a.length && a[offset] === b[offset]) offset++;
     requests.push({ index, identical: false, offset, pi: a.slice(Math.max(0, offset - 60), offset + 120), swarm: b.slice(Math.max(0, offset - 60), offset + 120) });
   }
-  return { identical: requests.every(entry => entry.identical), requests };
+  return requests;
+}
+
+/**
+ * Primary requests (the scripted conversation) are compared in order;
+ * auxiliary requests (conversation-metadata calls, sub-agent conversations)
+ * are compared in arrival order too — every byte that crosses the model
+ * boundary counts, not just the main loop.
+ */
+export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
+  const split = raw => { const primary = [], auxiliary = []; for (const text of raw) (hasPrimaryPrompt(JSON.parse(text), probePrompt) ? primary : auxiliary).push(wireFingerprint(text)); return { primary, auxiliary }; };
+  const left = split(piRaw), right = split(swarmRaw);
+  const requests = compareFingerprints(left.primary, right.primary);
+  const auxiliary = compareFingerprints(left.auxiliary, right.auxiliary);
+  return { identical: requests.every(entry => entry.identical) && auxiliary.every(entry => entry.identical), requests, auxiliary };
 }
 
 export function diffJson(left, right, path = "") {
@@ -552,11 +597,13 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function hasPrimaryPrompt(request, prompt) {
+export function hasPrimaryPrompt(request, prompt) {
   return (request.messages ?? []).some(message => {
     if (message?.role !== "user") return false;
-    if (typeof message.content === "string") return message.content === prompt || message.content.startsWith(`${prompt}\n`);
-    return Array.isArray(message.content) && message.content.some(block => block?.type === "text" && (block.text === prompt || block.text?.startsWith(`${prompt}\n`)));
+    // "PARITY_CAPTURE", "PARITY_CAPTURE\n<context>" (headless) or "PARITY_CAPTURE <step>" (tui-probe).
+    const primary = text => text === prompt || text.startsWith(`${prompt}\n`) || text.startsWith(`${prompt} `);
+    if (typeof message.content === "string") return primary(message.content);
+    return Array.isArray(message.content) && message.content.some(block => block?.type === "text" && typeof block.text === "string" && primary(block.text));
   });
 }
 
@@ -595,7 +642,7 @@ export function promptSliceEvidence(prompt, sharedPrompt) {
   };
 }
 
-function requestArtifacts(requests, probePrompt) {
+export function requestArtifacts(requests, probePrompt) {
   const all = requests.map(canonicalizeRequest);
   const canonical = all.filter(request => hasPrimaryPrompt(request, probePrompt));
   const auxiliaryRequests = all.filter(request => !hasPrimaryPrompt(request, probePrompt));
@@ -618,7 +665,19 @@ function requestArtifacts(requests, probePrompt) {
   };
 }
 
-function openAIChunk(model, delta, finishReason = null) {
+/**
+ * Swarm's conversation title/summary call (client/conversation_metadata.go)
+ * is a NON-streaming provider.Chat. Answer it with a chat.completion JSON
+ * body carrying valid metadata so the generation path is exercised once per
+ * turn (a non-JSON reply would make both runtimes retry once).
+ */
+export const METADATA_REPLY = JSON.stringify({ title: "Parity Capture Probe", summary: "The user sent a parity capture prompt. The agent ran the scripted tool calls and replied." });
+export function respondNonStreaming(res, body, content = METADATA_REPLY) {
+  res.writeHead(200, { "content-type": "application/json", connection: "close" });
+  res.end(JSON.stringify({ id: "chatcmpl-parity", object: "chat.completion", created: 1, model: body.model, choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
+}
+
+export function openAIChunk(model, delta, finishReason = null) {
   return {
     id: "chatcmpl-parity",
     object: "chat.completion.chunk",
@@ -628,7 +687,7 @@ function openAIChunk(model, delta, finishReason = null) {
   };
 }
 
-function substituteRevisions(args, messages) {
+export function substituteRevisions(args, messages) {
   let text = JSON.stringify(args);
   if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:") && !text.includes("$BASELINE:") && !text.includes("$LAST_AGENT")) return args;
   const byCall = new Map();
@@ -674,6 +733,7 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
     const body = JSON.parse(rawText);
     requests.push(body);
     rawRequests.push(rawText);
+    if (!body.stream) { respondNonStreaming(res, body); return; }
     const hasToolResult = Array.isArray(body.messages) && body.messages.some(message => message?.role === "tool");
     // Sub-agents spawned by the orchestration tools share this model: answer
     // them with a fixed sentence and no tool calls so the primary script's
@@ -738,7 +798,7 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
 
 
 /** Pi's discoverExtensionsInDir: top-level *.ts/*.js files plus subdirectories with an index.ts/js. */
-async function discoverExtensionEntries(dir) {
+export async function discoverExtensionEntries(dir) {
   const entries = [];
   for (const item of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
@@ -855,7 +915,7 @@ async function capturePi(workspace, scratch, profile, script, maxTurns = 0, seed
   }
 }
 
-async function captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns = 0, seed) {
+async function captureSwarm(workspace, scratch, profile, script, maxTurns = 0, seed) {
   const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "swarm-home");
@@ -882,11 +942,10 @@ async function captureSwarm(workspace, scratch, profile, projectSystemPrompt, sc
         "--system-prompt", CLEAN_SYSTEM_PROMPT,
         "--tools", "bash",
       );
-    } else if (projectSystemPrompt) {
-      const systemPromptFile = join(scratch, "project-system-prompt.txt");
-      await writeFile(systemPromptFile, projectSystemPrompt);
-      args.push("--system-prompt-file", systemPromptFile);
     }
+    // The project profile runs Swarm's NATIVE base prompt (settings/system_prompt.go
+    // SwarmForge + RenderWorkspaceContext): no --system-prompt-file, so the
+    // prompt bytes are compared, not copied from Pi.
     args.push("-p", PROBE_PROMPT);
     const processResult = await run(process.env.PARITY_SWARM_BIN || "swarm", args, {
       cwd: workspace,
@@ -920,18 +979,21 @@ export async function captureParity(options = {}) {
   try {
     const pi = await capturePi(workspace, scratch, profile, script, maxTurns, seed);
     const piArtifacts = requestArtifacts(pi.requests, PROBE_PROMPT);
-    const projectSystemPrompt = profile === "project"
-      ? sharedPromptPrefix(primarySystemPrompt(pi.requests))
-      : undefined;
-    const swarm = await captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns, seed);
+    const swarm = await captureSwarm(workspace, scratch, profile, script, maxTurns, seed);
     const swarmArtifacts = requestArtifacts(swarm.requests, PROBE_PROMPT);
+    // Evidence that the base prompt (skills catalogue and context blocks
+    // aside) is the same on both sides, independent of the request diff.
+    const projectSystemPrompt = profile === "project" ? sharedPromptPrefix(primarySystemPrompt(pi.requests)) : undefined;
     const sharedPrompt = projectSystemPrompt ? {
       bytes: Buffer.byteLength(projectSystemPrompt),
       sha256: sha256(projectSystemPrompt),
       pi: promptSliceEvidence(piArtifacts.prompt.text, projectSystemPrompt),
       swarm: promptSliceEvidence(swarmArtifacts.prompt.text, projectSystemPrompt),
     } : undefined;
-    const mismatches = diffJson(piArtifacts.requests, swarmArtifacts.requests);
+    const mismatches = [
+      ...diffJson(piArtifacts.requests, swarmArtifacts.requests),
+      ...diffJson(piArtifacts.auxiliaryRequests, swarmArtifacts.auxiliaryRequests).map(entry => ({ ...entry, path: `/auxiliary${entry.path}` })),
+    ];
     const mismatchCategories = summarizeMismatches(mismatches);
     const wire = wireComparison(pi.rawRequests ?? [], swarm.rawRequests ?? [], PROBE_PROMPT);
     await mkdir(output, { recursive: true });

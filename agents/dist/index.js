@@ -1,10 +1,24 @@
 import { createHash } from "node:crypto";
 export * from "./general-agent-adapter.js";
 export * from "./worker-daemon.js";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
+/** Built-in Swarm TUI agent profiles shared by Subagent and Delegate. */
+export const BUILTIN_AGENT_PROFILES = [
+    {
+        name: "general-assistant",
+        systemPrompt: "You are a helpful AI assistant. You help users with a variety of tasks including answering questions, writing code, analyzing data, and solving problems.",
+        tools: ["*"],
+    },
+    {
+        name: "code-reviewer",
+        systemPrompt: "You are an expert code reviewer. Use repository inspection tools to list, search, and read only the repository text needed for the review. Analyze code for bugs, security issues, performance problems, and style violations. Provide constructive feedback with specific suggestions for improvement.",
+        capabilities: ["read-only", "repository inspection", "bug analysis", "security analysis", "performance analysis", "style analysis"],
+        tools: ["repository_inspect"],
+    },
+];
 /** Build a real Pi child-session runner. The child is deliberately prevented
  * from recursively spawning this control surface; the parent owns orchestration. */
 export function createPiRunner(pi) {
@@ -14,7 +28,16 @@ export function createPiRunner(pi) {
         const sessionDir = `${ctx.cwd}/.pi/agent-sessions`;
         await mkdir(sessionDir, { recursive: true });
         const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}.jsonl`;
-        const args = ["--mode", "text", "--print", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
+        // Swarm children always start from an empty transcript (resume is an
+        // explicit option); `--session` would otherwise resume a stale file left
+        // by an earlier child with the same deterministic id.
+        await rm(sessionPath, { force: true });
+        // A Swarm sub-agent inherits its parent's tool registry and hooks. Pi's
+        // project extensions (this port) only load in a TRUSTED workspace, and a
+        // print-mode child without a remembered decision is untrusted by default
+        // (main.ts resolveProjectTrusted); the parent running this code is proof
+        // the workspace is trusted, so pass that decision down explicitly.
+        const args = ["--mode", "text", "--print", "--approve", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
         // Child Pi sessions need an unambiguous identity marker. The child loads
         // the same extensions as the parent, but its process-local tool contexts
         // do not inherit the parent's in-memory agent fields.
@@ -29,8 +52,30 @@ export function createPiRunner(pi) {
         const result = await pi.exec(command, commandArgs, { cwd: ctx.cwd, signal: ctx.signal });
         if (result?.killed || result?.code !== 0)
             throw new Error(`child pi failed (${result?.killed ? "killed" : `exit ${result?.code}`}): ${(result?.stderr ?? "").trim()}`);
-        return String(result?.stdout ?? "").trim();
+        return { output: String(result?.stdout ?? "").trim(), turns: await countSessionTurns(sessionPath) };
     };
+}
+/** Model turns = assistant messages recorded in the child's session JSONL (at least 1 when the child produced output). */
+async function countSessionTurns(sessionPath) {
+    try {
+        const { readFile } = await import("node:fs/promises");
+        const lines = (await readFile(sessionPath, "utf8")).split("\n");
+        let turns = 0;
+        for (const line of lines) {
+            if (!line)
+                continue;
+            try {
+                const entry = JSON.parse(line);
+                if (entry?.type === "message" && entry?.message?.role === "assistant")
+                    turns++;
+            }
+            catch { /* partial line */ }
+        }
+        return Math.max(1, turns);
+    }
+    catch {
+        return 1;
+    }
 }
 const clone = (v) => structuredClone(v);
 const unique = (xs) => [...new Set(xs.filter(Boolean))];
@@ -47,7 +92,7 @@ export class AgentManager {
         this.options = options;
         if (options.eventSink)
             this.eventSinks.add(options.eventSink);
-        for (const p of options.profiles ?? [])
+        for (const p of [...BUILTIN_AGENT_PROFILES, ...(options.profiles ?? [])])
             this.profiles.set(p.name, clone(p));
         for (const [name, p] of Object.entries(options.presets ?? {}))
             this.presets.set(name, { ...clone(p), name: p.name || name });
@@ -100,8 +145,9 @@ export class AgentManager {
             cwd = await this.createWorktree(cwd, spec.id);
         const instructions = [...(resolved.profile?.systemPrompt ? [resolved.profile.systemPrompt] : []), ...(resolved.capabilities ?? []).map(c => `Capability: ${c}`)];
         try {
-            const output = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering });
-            const result = { id: spec.id, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started };
+            const outcome = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering });
+            const { output, turns } = typeof outcome === "string" ? { output: outcome, turns: 1 } : { output: outcome.output, turns: outcome.turns ?? 1 };
+            const result = { id: spec.id, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started, turns };
             return result;
         }
         catch (e) {

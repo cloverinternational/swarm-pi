@@ -18,7 +18,9 @@ export interface LoadedSkill {
     whenToUse?: string;
     category?: string;
     tags?: string[];
-    priority?: number;
+    priority?: number; /** frontmatter `arguments` — names for {{name}} substitution (arguments.go). */
+    arguments?: string[]; /** frontmatter `version` (Metadata.Version; autogen index renders "?.?.?" when empty). */
+    version?: string;
 }
 export interface SkillDiagnostic {
     path: string;
@@ -54,19 +56,23 @@ export interface SkillLoadResult {
  */
 export declare const DEFAULT_BUILTIN_SKILLS_DIR: string;
 export declare const builtinLocation: (name: string) => string;
-/** Upstream-compatible progressive-disclosure index; bodies stay on disk. */
+/** prompt_xml.go GenerateAvailableSkillsXML (uncapped, full descriptions). */
 export declare function generateAvailableSkillsXML(skills: LoadedSkill[]): string;
 export declare const MAX_AVAILABLE_SKILLS = 60;
 export declare const MAX_AVAILABLE_SKILLS_CHARS = 12000;
 export declare const MAX_PROMPT_DESCRIPTION_RUNES = 240;
+export declare const OMISSION_MARKER_RESERVE = 180;
+/** relevance.go RankForContext with no active skills (headless has none). */
 export declare function rankSkillsForContext(skills: LoadedSkill[], query: string): LoadedSkill[];
+/** prompt_xml.go GenerateRankedAvailableSkillsXML — the budget is in BYTES. */
 export declare function generateRankedAvailableSkillsXML(skills: LoadedSkill[], maxSkills?: number, maxChars?: number): string;
-declare const parseFrontmatter: (raw: string) => {
-    fields: Record<string, string>;
-    body: string;
-};
-declare const validName: (name: string) => boolean;
 export declare function resolveSkillFile(skill: LoadedSkill, filePath: string): string;
+/**
+ * skills.LoadSkill(dir) for one package: parse + fatal validation. Throws with
+ * the loader's diagnostic message. Used by autogen refreshSkill, which
+ * re-registers a single package without re-discovering every root.
+ */
+export declare function loadSkillFromDir(dir: string, source: SkillSource, precedence?: number): LoadedSkill;
 export declare class SkillLoader {
     private readonly options;
     private watchers;
@@ -82,4 +88,4 @@ export declare class SkillLoader {
     watch(onChange: (result: SkillLoadResult) => void): () => void;
     closeWatchers(): void;
 }
-export { parseFrontmatter, validName };
+export { parseSkillMDContent, fatalValidationError, validateName, validateDescription, extractDescriptionFromMarkdown, MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH } from "./skillmd.js";

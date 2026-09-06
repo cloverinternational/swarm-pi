@@ -35,6 +35,7 @@ export interface AgentResult {
     startedAt?: string;
     completedAt: string;
     durationMs: number;
+    turns?: number;
 }
 export interface BackgroundHandle {
     readonly id: string;
@@ -66,7 +67,14 @@ export interface RunnerContext {
     instructions: readonly string[];
     steering: readonly string[];
 }
-export type Runner = (ctx: RunnerContext) => Promise<string>;
+/** A runner returns the child's final text, optionally with the number of model turns it took (Swarm reports `turns` per sub-agent). */
+export interface RunnerOutcome {
+    output: string;
+    turns?: number;
+}
+export type Runner = (ctx: RunnerContext) => Promise<string | RunnerOutcome>;
+/** Built-in Swarm TUI agent profiles shared by Subagent and Delegate. */
+export declare const BUILTIN_AGENT_PROFILES: Profile[];
 /** Build a real Pi child-session runner. The child is deliberately prevented
  * from recursively spawning this control surface; the parent owns orchestration. */
 export declare function createPiRunner(pi: any): Runner;
