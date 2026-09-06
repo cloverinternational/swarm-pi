@@ -103,9 +103,11 @@ Important UI locations:
 - **Inline hook rows:** `.pi/hook-render-bridge.ts` and `.pi/hook-presenter.ts`.
 - **Themes:** `.pi/themes/*.json`.
 
-The detailed design references are `PI_MODULAR_ARCHITECTURE.md`,
-`SWARM_TUI_TO_PI_MAP.md`, and `HOOKS_PROMPTS_TOOLS_PI_EQUIVALENCE.md`. Update
-those documents when a change alters a documented architectural boundary.
+The detailed design references are
+`docs/architecture/modular-pi-architecture.md`,
+`docs/architecture/swarm-tui-to-pi-map.md`, and
+`docs/architecture/hooks-prompts-tools-pi-equivalence.md`. Update those
+documents when a change alters a documented architectural boundary.
 
 ## AGENTS.md discovery
 

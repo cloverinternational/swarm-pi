@@ -1,5 +1,8 @@
 # Surgical Plan: Native Swarm-Style Hook Rows in Pi
 
+Status: archived — landed in `.pi/hook-render-bridge.ts` / `.pi/hook-presenter.ts`;
+superseded by `docs/plans/active/hook-ordering-first-principles.md`.
+
 ## 0. Objective
 
 Make hook execution render exactly like the Swarm TUI, around each individual tool call:

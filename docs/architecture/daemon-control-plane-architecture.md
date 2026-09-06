@@ -329,10 +329,11 @@ redaction.
 
 - `schedule/src/{cron,index,scheduler,store,tools,types}.ts`
 - `.pi/extensions/schedule.ts`
-- `taskmanage/REFERENCE_CONTRACT.md`, `taskmanage/WORKFLOWS.md`, and
-  `taskmanage/src/task-manage.ts`
+- `docs/reference/taskmanage-reference-contract.md`,
+  `docs/reference/taskmanage-workflows.md`, and `taskmanage/src/task-manage.ts`
 - `runtime-contracts/README.md`
-- `PI_MODULAR_ARCHITECTURE.md`, `PI_MISSING_TOOLS_AND_ECOSYSTEM.md`
+- `docs/architecture/modular-pi-architecture.md`,
+  `docs/reference/pi-missing-tools-and-ecosystem.md`
 - `upstream/swarm-sdk/internal/tools/builtin/{cron_scheduler,schedule_wakeup}.go`
 - `upstream/swarm-sdk/harness/schedules.go`
 - upstream Pi extension/session references under

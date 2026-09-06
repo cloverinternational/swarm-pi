@@ -37,7 +37,7 @@ not explicitly preserve the approved/edited plan for subsequent enforcement.
 - `tests/swarm-plan-mode.test.ts`
   - Extend the Pi adapter tests for real event wiring, exact prompt
     idempotence, approval/rejection retry, and session restart behavior.
-- `PLAN_improve_plan_mode_swarm.md`
+- `docs/plans/active/improve-plan-mode-swarm.md`
   - This implementation plan and acceptance record.
 
 Do not modify `upstream/`; it is reference material only.

@@ -1,5 +1,8 @@
 # Plan: map Swarm TUI/Forge to Pi plugins
 
+Status: archived — produced `docs/architecture/swarm-tui-to-pi-map.md`; the
+extension inventory in `AGENTS.md` is now authoritative.
+
 ## Goal
 
 Create an evidence-backed architecture map for a 1:1 replication of the Swarm
@@ -90,7 +93,7 @@ does not implement plugins.
 
 ## Deliverable
 
-Write `SWARM_TUI_TO_PI_MAP.md` with:
+Write `docs/architecture/swarm-tui-to-pi-map.md` with:
 
 1. scope and repository evidence;
 2. top-to-bottom execution flow;

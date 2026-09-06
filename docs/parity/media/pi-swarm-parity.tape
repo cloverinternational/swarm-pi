@@ -3,8 +3,8 @@
 
 Require pi
 
-Output .tape/pi-swarm-parity.gif
-Output .tape/pi-swarm-parity.mp4
+Output docs/parity/media/pi-swarm-parity.gif
+Output docs/parity/media/pi-swarm-parity.mp4
 
 Set Shell "bash"
 Set FontSize 14
@@ -33,5 +33,5 @@ Type "Use TaskManage in one atomic call with exactly these operations: create Wi
 Enter
 Sleep 30s
 
-Screenshot .tape/pi-swarm-parity.png
+Screenshot docs/parity/media/pi-swarm-parity.png
 Sleep 2s

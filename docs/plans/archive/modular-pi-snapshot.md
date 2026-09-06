@@ -1,5 +1,9 @@
 # Plan: source-focused Swarm snapshot and modular Pi architecture
 
+Status: archived — executed; superseded by
+`docs/architecture/modular-pi-architecture.md` and
+`docs/reference/upstream-snapshot.md`.
+
 ## Resolved scope
 
 Create a source-focused mirror of the canonical Swarm SDK/TUI inside
