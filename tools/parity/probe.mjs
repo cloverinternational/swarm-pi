@@ -329,6 +329,24 @@ export const TOOL_SCRIPTS = {
     { id: "call_h20", tool: "SkillManage", args: { action: "history", name: "home-autogen-dmi" } },
     { id: "call_h21", tool: "SkillManage", args: { action: "view", name: "home-autogen-dmi" } },
   ],
+  // xAI tools (advertised only with credentials, so run with --seed-home
+  // carrying a legacy ~/.swarmos/xai_oauth.json): every pre-network
+  // validation path of x_search / xai_web_search. Live calls are not probed
+  // (api.x.ai is hard-coded and would need a real token).
+  xai: [
+    { id: "call_x1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "xai probe", status: "in_progress", active: true }] } },
+    { id: "call_x2", tool: "x_search", args: { query: "   " } },
+    { id: "call_x3", tool: "x_search", args: { query: "q", allowed_x_handles: ["@a", " ", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] } },
+    { id: "call_x4", tool: "x_search", args: { query: "q", allowed_x_handles: ["@a"], excluded_x_handles: ["b"] } },
+    { id: "call_x5", tool: "x_search", args: { query: "q", allowed_x_handles: [" ", "@"], excluded_x_handles: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] } },
+    { id: "call_x6", tool: "xai_web_search", args: {} },
+    // Lift the 5-call onboarding budget so the web_search paths run too.
+    { id: "call_x6b", tool: "Skill", args: { skill: "swarm-skill" } },
+    { id: "call_x7", tool: "xai_web_search", args: { query: "q", allowed_domains: ["a.com"], excluded_domains: ["b.com"] } },
+    { id: "call_x8", tool: "xai_web_search", args: { query: "q", allowed_domains: ["1", "2", "3", "4", "5", "6"] } },
+    { id: "call_x9", tool: "xai_web_search", args: { query: "q", excluded_domains: [" ", "1", "2", "3", "4", "5", "6"] } },
+    { id: "call_x10", tool: "xai_web_search", args: { query: "q", allowed_domains: [" "], excluded_domains: ["1", "2", "3", "4", "5", "6"] } },
+  ],
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
   // and the remaining tools' happy/error paths.

@@ -1,0 +1,86 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "x_search",
+      "description": "Search X (Twitter) posts, threads, and profiles using xAI's native X Search.\n\nxAI has real-time, privileged access to all of X's data (Elon Musk owns both\ncompanies). This tool is fundamentally different from web scraping — Grok\nruns the search server-side with full fidelity to actual post content,\nengagement, and recency.\n\nUse this tool to:\n- Find recent tweets on any topic\n- Search specific users' posts (allowed_x_handles)\n- Research what's being said about a person, company, or event on X\n- Analyze media attached to posts (images, videos)\n- Filter by date range\n\nReturns the answer synthesized by Grok with direct citation links to posts.",
+      "parameters": {
+        "properties": {
+          "allowed_x_handles": {
+            "description": "Only include posts from these X handles (max 10, without @). Mutually exclusive with excluded_x_handles.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enable_image_understanding": {
+            "default": false,
+            "description": "Whether to analyze images attached to X posts. Default false.",
+            "type": "boolean"
+          },
+          "enable_video_understanding": {
+            "default": false,
+            "description": "Whether to analyze videos attached to X posts. Default false.",
+            "type": "boolean"
+          },
+          "excluded_x_handles": {
+            "description": "Exclude posts from these X handles (max 10, without @). Mutually exclusive with allowed_x_handles.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "from_date": {
+            "description": "Start date for results in YYYY-MM-DD format.",
+            "type": "string"
+          },
+          "query": {
+            "description": "What to search for on X. Can be a topic, hashtag, question, or statement.",
+            "type": "string"
+          },
+          "to_date": {
+            "description": "End date for results in YYYY-MM-DD format.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xai_web_search",
+      "description": "Search the web in real-time using xAI's (Grok's) built-in web search.\n\nGrok browses the live web server-side — fetching pages, reading content, and\nsynthesizing an answer with source citations. Unlike static search engines,\nGrok can follow links and read full page content.\n\nOptionally filter to or exclude specific domains (max 5 each).\n\nReturns Grok's synthesized answer plus citation URLs. Use for current events,\ndocumentation, research — anything that benefits from live web access.",
+      "parameters": {
+        "properties": {
+          "allowed_domains": {
+            "description": "Only include results from these domains (max 5, e.g. [\"github.com\"]). Mutually exclusive with excluded_domains.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "excluded_domains": {
+            "description": "Exclude results from these domains (max 5). Mutually exclusive with allowed_domains.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "query": {
+            "description": "What to search for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]

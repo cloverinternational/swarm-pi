@@ -15,14 +15,24 @@ import { fileURLToPath } from "node:url";
 export interface CanonicalTool { name: string; description: string; parameters: unknown }
 
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "parity", "fixtures", "swarm-tools.json");
+/** Tools Swarm registers only in some environments (x_search / xai_web_search behind xAI credentials); same wire capture, gated separately. */
+const CONDITIONAL_FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "tools", "parity", "fixtures", "swarm-conditional-tools.json");
 let cache: Map<string, CanonicalTool> | undefined;
+let conditionalCache: Map<string, CanonicalTool> | undefined;
 
+const readFixture = (path: string) => new Map((JSON.parse(readFileSync(path, "utf8")) as Array<{ function: CanonicalTool }>).map((entry) => [entry.function.name, entry.function]));
+
+/** The always-on Swarm tool surface (28 tools). */
 export function loadSwarmToolSurface(path = FIXTURE): Map<string, CanonicalTool> {
   if (cache && path === FIXTURE) return cache;
-  const raw = JSON.parse(readFileSync(path, "utf8")) as Array<{ function: CanonicalTool }>;
-  const map = new Map(raw.map((entry) => [entry.function.name, entry.function]));
+  const map = readFixture(path);
   if (path === FIXTURE) cache = map;
   return map;
+}
+/** Always-on plus environment-gated definitions, for description/schema overlay by name. */
+export function loadSwarmCanonicalTools(): Map<string, CanonicalTool> {
+  if (!conditionalCache) conditionalCache = new Map([...loadSwarmToolSurface(), ...readFixture(CONDITIONAL_FIXTURE)]);
+  return conditionalCache;
 }
 
 export function swarmToolNames(): string[] { return [...loadSwarmToolSurface().keys()]; }
@@ -42,7 +52,7 @@ export const PERMISSIVE_PARAMETERS = { type: "object" } as const;
 
 /** Overlay Swarm's canonical description onto a Pi tool definition by name and relax its validator. */
 export function applySwarmSurface<T extends { name: string; description?: string; parameters?: unknown }>(tool: T): T {
-  const canonical = loadSwarmToolSurface().get(tool.name);
+  const canonical = loadSwarmCanonicalTools().get(tool.name);
   if (!canonical) return tool;
   return { ...tool, description: canonical.description, parameters: { ...PERMISSIVE_PARAMETERS } };
 }
@@ -55,7 +65,7 @@ export function applySwarmSurface<T extends { name: string; description?: string
 export function overlaySwarmToolSchemas<T extends { tools?: unknown }>(payload: T): T | undefined {
   const tools = payload?.tools;
   if (!Array.isArray(tools) || tools.length === 0) return undefined;
-  const surface = loadSwarmToolSurface();
+  const surface = loadSwarmCanonicalTools();
   let changed = false;
   const next = tools.map((tool: any) => {
     const fn = tool?.function;

@@ -28,7 +28,8 @@ export interface GatingEnvironment {
 
 /** internal/tools/xai/responses.go HasCredentials + oauth_config.go IsExpired. */
 export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.env, now = () => Date.now()): boolean {
-  const file = join(home, ".swarm", "config", "oauth", "xai.json");
+  // paths.OAuthFile("xai") → <SWARM_HOME or ~/.swarm>/config/oauth/xai.json
+  const file = join(env.SWARM_HOME || join(home, ".swarm"), "config", "oauth", "xai.json");
   if (existsSync(file)) {
     try {
       const token = JSON.parse(readFileSync(file, "utf8"))?.token;
