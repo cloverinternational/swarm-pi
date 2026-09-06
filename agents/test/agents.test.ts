@@ -9,8 +9,13 @@ describe("AgentManager", () => {
     let seen: any;
     const cwd = mkdtempSync(join(tmpdir(), "pi-agent-runner-"));
     const runner = createPiRunner({ exec: async (...args: any[]) => { seen = args; return { code: 0, stdout: "child result", stderr: "", killed: false }; } });
-    expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toBe("child result");
+    // No child session file was written by the fake exec → turns floors at 1.
+    expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toEqual({ output: "child result", turns: 1 });
     expect(seen[0]).toBe(process.platform === "win32" ? "cmd.exe" : "env");
+    // A child that recorded three assistant messages reports three turns.
+    const sessionPath = join(cwd, ".pi", "agent-sessions", "s.jsonl");
+    const counting = createPiRunner({ exec: async () => { const { mkdirSync, writeFileSync } = await import("node:fs"); mkdirSync(join(cwd, ".pi", "agent-sessions"), { recursive: true }); writeFileSync(sessionPath, ["{\"type\":\"session\"}", "{\"type\":\"message\",\"message\":{\"role\":\"user\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"toolResult\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}"].join("\n") + "\n"); return { code: 0, stdout: "done", stderr: "", killed: false }; } });
+    expect(await counting({ signal: new AbortController().signal, spec: { id: "x", sessionId: "s", task: "t" }, task: "t", cwd, instructions: [], steering: [] })).toEqual({ output: "done", turns: 3 });
     if (process.platform === "win32") expect(seen[1][3]).toContain("PI_SWARM_SUBAGENT=1");
     else expect(seen[1]).toEqual(expect.arrayContaining(["PI_SWARM_SUBAGENT=1", "pi", "--mode", "text", "--session", `${cwd}/.pi/agent-sessions/x.jsonl`, "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
     expect(seen[2]).toMatchObject({ cwd });

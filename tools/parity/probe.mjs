@@ -389,7 +389,9 @@ export function canonicalizeRequest(request) {
     if (Array.isArray(value)) return value.map(item => visit(item, parentKey));
     if (!value || typeof value !== "object") {
       if (GENERATED_ID_KEYS.has(parentKey) && typeof value === "string") return generatedId(value);
-      if (typeof value === "string" && parentKey === "arguments") return revisionId(value);
+      // Echoed tool-call arguments carry revision ids and, for orchestration
+      // follow-ups ($LAST_AGENT), the per-run UnixNano-suffixed agent ids.
+      if (typeof value === "string" && parentKey === "arguments") return revisionId(value).replace(/\b([A-Za-z][A-Za-z0-9_-]*?)-\d{16,20}\b/g, "$1-<nanos>");
       // Swarm-format tool results carry wall-clock timing and random error
       // ids; both runtimes emit the same shape, so normalise the values.
       if (typeof value === "string" && parentKey === "content") {

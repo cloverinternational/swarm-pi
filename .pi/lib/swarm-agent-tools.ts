@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { AgentManager, AgentResult, BackgroundHandle } from "../../agents/src/index.ts";
 
 export type ToolResult = { text: string; isError?: boolean; details?: unknown };
@@ -11,7 +11,7 @@ type Status = "running" | "completed" | "failed" | "cancelled";
 type Question = { id: string; question: string; context: string; askedAt: number; answer?: string; resolve?: (answer: string) => void };
 type Entry = {
   id: string; task: string; startedAt: number; outputFile: string; handle: BackgroundHandle;
-  done: Promise<AgentResult>; result?: AgentResult; delegate?: boolean; question?: Question;
+  done: Promise<AgentResult>; result?: AgentResult; delegate?: boolean; question?: Question; consumedOffset?: number;
 };
 
 export const AGENT_MANAGER_SYMBOL = Symbol.for("pi-swarm.agent-manager");
@@ -19,10 +19,14 @@ export const AGENT_TOOLS_SYMBOL = Symbol.for("pi-swarm.agent-tools");
 const MAX_OUTPUT = 8 * 1024 * 1024;
 const divider = "───────────────────────────────────────────────────────────────\n";
 const goDuration = (ms: number) => ms < 1000 ? `${Math.max(0, Math.trunc(ms))}ms` : `${(ms / 1000).toFixed(ms % 1000 ? 3 : 0).replace(/0+$/, "").replace(/\.$/, "")}s`;
-const json = (v: unknown) => JSON.stringify(v, null, 2);
+const roundedSeconds = (ms: number) => `${Math.max(0, Math.round(ms / 1000))}s`;
+const stable = (v: any): any => Array.isArray(v) ? v.map(stable)
+  : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
+const json = (v: unknown) => JSON.stringify(stable(v), null, 2);
 const outputPath = (id: string) => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "swarm", "tasks", `${id}.output`);
 const terminal = (s: Status) => s !== "running";
 const id8 = () => randomUUID().slice(0, 8);
+const unixNano = () => BigInt(Date.now()) * 1_000_000n + (process.hrtime.bigint() % 1_000_000n);
 
 function parseChunk(data: Buffer): string {
   const parts: string[] = [];
@@ -31,13 +35,38 @@ function parseChunk(data: Buffer): string {
     try {
       const ev = JSON.parse(raw);
       if (ev.type === "final") {
-        if (ev.content) parts.push(String(ev.content));
+        if (ev.result) parts.push(String(ev.result));
         if (ev.error) parts.push(`[error] ${ev.error}`);
-      } else if (ev.type === "content" || ev.type === "chunk") parts.push(String(ev.content ?? ev.text ?? ""));
-      else if (ev.type === "tool_result") parts.push(String(ev.output ?? ""));
+      } else if (ev.type === "chunk" && ev.text) parts.push(String(ev.text));
     } catch { parts.push(raw); }
   }
   return parts.join("");
+}
+
+function formatTaskChunk(data: Buffer, fromStart: boolean): string {
+  const records: any[] = [];
+  for (const raw of data.toString("utf8").split("\n")) {
+    if (!raw.trim()) continue;
+    try { records.push(JSON.parse(raw.trim())); } catch {}
+  }
+  if (fromStart) {
+    for (let i = records.length - 1; i >= 0; i--) {
+      const record = records[i];
+      if (record.type === "final" && record.content) return String(record.content).replace(/\n+$/, "") + "\n";
+      if (record.type === "final" && record.error) return `[failed: ${record.error}]\n`;
+    }
+  }
+  let content = "";
+  let finalContent = "";
+  let finalError = "";
+  for (const record of records) {
+    if (record.type === "content") content += String(record.content ?? "");
+    else if (record.type === "final") { finalContent = String(record.content ?? ""); finalError = String(record.error ?? ""); }
+  }
+  let out = content ? content.replace(/\n+$/, "") + "\n" : "";
+  if (finalContent) out += `\n${finalContent.replace(/\n+$/, "")}\n`;
+  else if (finalError) out += `\n[failed: ${finalError}]\n`;
+  return out;
 }
 
 /** subagent.go getAllAvailableAgents builtin ids (custom definitions are merged in and sorted). */
@@ -49,7 +78,7 @@ export class SwarmAgentTools {
     return [...new Set([...custom, ...BUILTIN_AGENT_IDS])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
   private entries = new Map<string, Entry>();
-  constructor(readonly manager: AgentManager) {}
+  constructor(readonly manager: AgentManager, readonly cwd = process.cwd()) {}
 
   private fail(message: string): never { throw new Error(message); }
   /** Errors Swarm raises from the tool's Validate() (registry_impl.go wraps them as "validation failed for X: …"). */
@@ -57,7 +86,7 @@ export class SwarmAgentTools {
   private entry(id: string): Entry | undefined { return this.entries.get(id); }
   private status(e: Entry): Status { return (e.result?.status ?? "running") as Status; }
 
-  private spawn(task: string, opts: AgentToolParams, id: string, delegate = false): Entry {
+  private spawn(task: string, opts: AgentToolParams, id: string, delegate = false, register = true): Entry {
     const file = outputPath(id);
     mkdirSync(dirname(file), { recursive: true });
     closeSync(openSync(file, "a"));
@@ -68,20 +97,23 @@ export class SwarmAgentTools {
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
     entry.done = handle.wait().then(async result => {
       entry.result = result;
-      const record = result.status === "completed"
-        ? { type: "final", ts: Date.now(), content: result.output ?? "" }
-        : { type: "final", ts: Date.now(), error: result.error ?? (result.status === "cancelled" ? "cancelled" : "") };
       await mkdir(dirname(file), { recursive: true });
-      await appendFile(file, JSON.stringify(record) + "\n");
+      if (result.status === "completed") {
+        const content = result.output ?? "";
+        await appendFile(file, JSON.stringify({ type: "content", ts: Date.now(), content }) + "\n");
+        await appendFile(file, JSON.stringify({ type: "final", ts: Date.now(), content }) + "\n");
+      } else {
+        await appendFile(file, JSON.stringify({ type: "final", ts: Date.now(), error: result.error ?? (result.status === "cancelled" ? "cancelled" : "") }) + "\n");
+      }
       return result;
     });
-    this.entries.set(id, entry);
+    if (register) this.entries.set(id, entry);
     return entry;
   }
 
   async backgroundTask(p: AgentToolParams): Promise<ToolResult> {
     if (typeof p.task !== "string" || p.task === "") this.invalid("task parameter is required");
-    const id = p.agent_id || `bg-${process.hrtime.bigint()}`;
+    const id = p.agent_id || `bg-${unixNano()}`;
     const e = this.spawn(p.task, p, id);
     return { text: json({
       status: "async_launched", agent_id: id, description: p.task, output_file: e.outputFile,
@@ -90,7 +122,7 @@ export class SwarmAgentTools {
     }) };
   }
 
-  async subagent(p: AgentToolParams): Promise<ToolResult> {
+  async subagent(p: AgentToolParams, callId?: string): Promise<ToolResult> {
     // subagent.go Validate()
     if (typeof p.task !== "string" || p.task === "") this.invalid("task parameter is required");
     if (p.agent_id && p.preset) this.invalid("Cannot specify both 'agent_id' and 'preset'. The 'preset' parameter is deprecated - use 'agent_id' instead.");
@@ -103,8 +135,8 @@ export class SwarmAgentTools {
     if (typeof p.agent_id === "string" && p.agent_id !== "" && !this.availableAgents().includes(p.agent_id)) {
       this.fail(`Agent '${p.agent_id}' not found. Available agents: ${this.availableAgents().join(", ")}`);
     }
-    const prefix = p.agent_id || p.preset || "subagent";
-    const e = this.spawn(p.task, p, `${prefix}-${id8()}`);
+    const task = this.enrichedTask(p.task, p.agent_id || p.preset || "");
+    const e = this.spawn(task, p, `subagent-${callId || id8()}`, false, Boolean(p.run_in_background));
     if (p.run_in_background) return this.backgroundLaunch(e);
     if (Number(p.auto_background_seconds) > 0) {
       try {
@@ -112,7 +144,7 @@ export class SwarmAgentTools {
           e.done,
           new Promise<undefined>(resolve => setTimeout(resolve, Number(p.auto_background_seconds) * 1000)),
         ]);
-        if (!result) return this.backgroundLaunch(e);
+        if (!result) { this.entries.set(e.id, e); return this.backgroundLaunch(e); }
         return { text: result.status === "completed" ? (result.output ?? "") : `Sub-agent execution failed: ${result.error ?? "unknown error"}` };
       } catch (err) { return { text: `Sub-agent execution failed: ${String(err)}` }; }
     }
@@ -123,6 +155,24 @@ export class SwarmAgentTools {
       out = `[${Math.trunc((Buffer.byteLength(out) - Buffer.byteLength(head)) / 1024)}KB of output truncated — sub-agent produced more than the 8MB result limit]\n\n${head}`;
     }
     return { text: out };
+  }
+
+  private enrichedTask(task: string, agentType: string): string {
+    let projectType = "";
+    if (existsSync(join(this.cwd, "go.mod"))) projectType = "Go";
+    else if (existsSync(join(this.cwd, "package.json"))) projectType = "Node.js/JavaScript";
+    else if (existsSync(join(this.cwd, "Cargo.toml"))) projectType = "Rust";
+    else if (existsSync(join(this.cwd, "pyproject.toml")) || existsSync(join(this.cwd, "requirements.txt"))) projectType = "Python";
+    const roles: Record<string, string> = {
+      explore: "Explorer - focus on reading, searching, and understanding code",
+      code_formatter: "Code Formatter - focus on formatting and style fixes",
+      text_summarizer: "Summarizer - provide concise summaries",
+      error_analyzer: "Error Analyzer - diagnose and explain errors",
+      "research-agent": "Researcher - gather and synthesize information",
+      "git-commit-writer": "Git Commit Writer - analyze changes and write commit messages",
+      "code-reviewer": "Code Reviewer - review code for issues and improvements",
+    };
+    return `[CONTEXT]\nWorking Directory: ${this.cwd}\nProject: ${basename(this.cwd)}\n${projectType ? `Project Type: ${projectType}\n` : ""}${roles[agentType] ? `Agent Role: ${roles[agentType]}\n` : ""}[/CONTEXT]\n\n[TOOL CALL HYGIENE]\n- Batch at most 5 parallel tool calls per turn. If a batch returns errors, switch to sequential calls for the rest of this turn.\n- If you see the SAME error twice in a row, change your approach instead of retrying the same pattern.\n- Prefer one well-targeted call over many speculative ones; you are billed per tool result and the parent reads everything.\n[/TOOL CALL HYGIENE]\n\n[REPORTING DIRECTIVE]\nYou are a focused worker. Execute the task directly with your tools — do NOT converse, ask questions, or suggest next steps.\n- Do NOT emit text between tool calls. Use tools silently, then report ONCE at the end.\n- Your final message is your only deliverable — the parent sees it and nothing else (no intermediate output, no tool logs).\n- Stay strictly within the task's scope. If you notice related work outside scope, mention it in one sentence at most.\n- Be factual and concise. Keep the report under 500 words unless the task explicitly asks for more. No preamble, no meta-commentary.\n- Structure the report with plain-text labels: Result (the answer or key findings), Key files (relevant paths with line numbers for research), Files changed (only if you modified files), Issues (only if any).\n[/REPORTING DIRECTIVE]\n\n[TASK]\n${task}\n[/TASK]`;
   }
 
   private backgroundLaunch(e: Entry): ToolResult {
@@ -139,7 +189,10 @@ export class SwarmAgentTools {
     if (action === "status") {
       if (!p.agent_id) {
         if (!this.entries.size) return { text: "No background agents currently tracked." };
-        const agents = [...this.entries.values()].map(e => ({ agent_id: e.id, task: e.task, status: this.status(e), duration: goDuration(Date.now() - e.startedAt), output_file: e.outputFile }));
+        const agents = [...this.entries.values()].map(e => ({
+          agent_id: e.id, task: e.task, status: this.status(e), duration: goDuration(e.result?.durationMs ?? Date.now() - e.startedAt),
+          ...(e.result ? { output_file: e.outputFile, tokens_used: 0, cost_usd: 0 } : {}),
+        }));
         return { text: json({ total_agents: agents.length, agents }) };
       }
       const e = this.entry(p.agent_id);
@@ -152,6 +205,7 @@ export class SwarmAgentTools {
           : s === "completed" ? "Agent completed. Call action='result' to retrieve output."
           : s === "failed" ? "Agent failed. Call action='result' to retrieve partial output."
           : "Agent was cancelled. Call action='result' to retrieve partial output.",
+        ...(s === "completed" ? { tokens_used: 0, cost_usd: 0 } : {}),
         ...(e.result?.error ? { error: e.result.error } : {}),
       }) };
     }
@@ -159,14 +213,13 @@ export class SwarmAgentTools {
     const e = this.entry(p.agent_id);
     if (!e) return { text: `Agent not found: ${p.agent_id}` };
     if (action === "cancel") {
-      const ok = e.handle.cancel();
-      return ok ? { text: json({ agent_id: e.id, status: "cancelled", message: "Agent cancellation requested." }) }
-        : { text: `Failed to cancel agent '${e.id}': agent already finished` };
+      e.handle.cancel();
+      return { text: json({ agent_id: e.id, message: "Agent cancellation requested. Partial output remains readable via action='result'.", status: "cancelled" }) };
     }
     return this.readResult(e, Number.isInteger(p.offset) ? p.offset : 0);
   }
 
-  private async readResult(e: Entry, requestedOffset: number): Promise<ToolResult> {
+  private async readResult(e: Entry, requestedOffset: number, delegate = false): Promise<ToolResult> {
     let data = Buffer.alloc(0);
     try { data = await readFile(e.outputFile); } catch {}
     if (!data.length) {
@@ -177,7 +230,10 @@ export class SwarmAgentTools {
     const chunk = data.subarray(Math.min(offset, data.length), Math.min(data.length, offset + MAX_OUTPUT));
     const newOffset = Math.min(offset, data.length) + chunk.length;
     const s = this.status(e);
-    return { text: `agent_id:    ${e.id}\nstatus:      ${s}\noutput_file: ${e.outputFile}\noffset:      ${offset}\nnew_offset:  ${newOffset}\ntotal_bytes: ${data.length}\n${terminal(s) ? `duration:    ${goDuration(e.result?.durationMs ?? Date.now() - e.startedAt)}\n` : `elapsed:     ${goDuration(Date.now() - e.startedAt)}\n`}${divider}${chunk.length ? parseChunk(chunk) : (s === "running" ? "(agent is running — no output yet at this offset)\n" : "(no output at this offset)\n")}` };
+    let rendered = chunk.length
+      ? (delegate ? parseChunk(chunk) : formatTaskChunk(chunk, requestedOffset === 0))
+      : (s === "running" ? "(agent is running — no output yet at this offset)\n" : "(no output at this offset)\n");
+    return { text: `agent_id:    ${e.id}\nstatus:      ${s}\noutput_file: ${e.outputFile}\noffset:      ${offset}\nnew_offset:  ${newOffset}\ntotal_bytes: ${data.length}\n${!delegate && terminal(s) ? `duration:    ${goDuration(e.result?.durationMs ?? Date.now() - e.startedAt)}\n` : !terminal(s) ? `elapsed:     ${goDuration(Date.now() - e.startedAt)}\n` : ""}${divider}${rendered}` };
   }
 
   async waitForAgent(p: AgentToolParams): Promise<ToolResult> {
@@ -215,7 +271,7 @@ export class SwarmAgentTools {
   }
   private resultObject(r: AgentResult, file: string, includeResult = true): Record<string, unknown> {
     const o: Record<string, unknown> = { agent_id: r.id, status: r.status, duration: goDuration(r.durationMs) };
-    if (r.status === "completed") Object.assign(o, includeResult ? { result: r.output ?? "" } : {}, { tokens_used: 0, cost_usd: 0, turns: 0 });
+    if (r.status === "completed") Object.assign(o, includeResult ? { result: r.output ?? "" } : {}, { tokens_used: 0, cost_usd: 0, turns: r.turns ?? 1 });
     else if (r.status === "failed") Object.assign(o, { error: r.error ?? "unknown error" });
     else if (r.status === "cancelled") Object.assign(o, { message: "Agent was cancelled before completion." });
     if (file) o.output_file = file;
@@ -225,7 +281,7 @@ export class SwarmAgentTools {
   async delegate(p: AgentToolParams): Promise<ToolResult> {
     if (typeof p.task !== "string" || p.task === "") this.fail("task cannot be empty");
     const kind = p.agent_id || "general-assistant";
-    const id = `delegate-${kind}-${process.hrtime.bigint()}`;
+    const id = `delegate-${kind}-${unixNano()}`;
     const e = this.spawn(p.task, p, id, true);
     return { text: `Delegate launched: agent_id=${id}\nstatus=async_launched\noutput_file=${e.outputFile}\ntask=${p.task}\n\nUse DelegateOutput with this agent_id to poll, answer questions, check status, or retrieve the result.` };
   }
@@ -243,8 +299,13 @@ export class SwarmAgentTools {
     if (!e?.delegate) return { text: `Delegate not found: ${p.agent_id}\nIt may have expired or the agent_id is incorrect.`, isError: true };
     const action = String(p.action || "").trim().toLowerCase();
     if (!["status", "poll", "answer", "result", "cancel"].includes(action)) this.fail(`unknown action ${JSON.stringify(p.action)}: must be 'status', 'poll', 'answer', 'result', or 'cancel'`);
-    if (action === "result") return this.readResult(e, Number.isInteger(p.offset) ? p.offset : 0);
-    if (action === "cancel") { e.handle.cancel(); this.entries.delete(e.id); return { text: `Delegate ${e.id} cancelled.\nIf it had a pending question, it will time out.` }; }
+    if (action === "result") {
+      const requested = Number.isInteger(p.offset) ? p.offset : (e.consumedOffset ?? 0);
+      const result = await this.readResult(e, requested, true);
+      try { e.consumedOffset = (await readFile(e.outputFile)).length; } catch {}
+      return result;
+    }
+    if (action === "cancel") { e.handle.cancel(); return { text: `Delegate ${e.id} cancelled.\nIf it had a pending question, it will time out.` }; }
     if (action === "answer") {
       if (!p.answer) return { text: "Error: answer cannot be empty. Provide your answer in the 'answer' parameter.", isError: true };
       const q = e.question;
@@ -255,12 +316,12 @@ export class SwarmAgentTools {
     }
     if (action === "poll" && !e.question && !e.result) await Promise.race([e.done, new Promise(r => setTimeout(r, 10_000))]);
     if (e.question) return { text: this.formatQuestion(e) };
-    if (e.result && action === "poll") return { text: `agent_id: ${e.id}\nstatus:   ${e.result.status}\nelapsed:  ${goDuration(Date.now() - e.startedAt)}\n${e.result.status === "completed" && e.result.output ? `\n─── RESULT ───\n${e.result.output}\n` : ""}\nGet full output: DelegateOutput(agent_id="${e.id}", action="result")\n` };
-    return { text: `agent_id:  ${e.id}\nstatus:    ${this.status(e)}\nelapsed:   ${goDuration(Date.now() - e.startedAt)}\ntask:      ${e.task}\n\n(no pending questions)\n` };
+    if (e.result && action === "poll") return { text: `agent_id: ${e.id}\nstatus:   ${e.result.status}\nelapsed:  ${roundedSeconds(Date.now() - e.startedAt)}\n${e.result.status === "completed" && e.result.output ? `\n─── RESULT ───\n${e.result.output}\n` : ""}\nGet full output: DelegateOutput(agent_id="${e.id}", action="result")\n` };
+    return { text: `agent_id:  ${e.id}\nstatus:    ${this.status(e)}\nelapsed:   ${roundedSeconds(Date.now() - e.startedAt)}\ntask:      ${e.task}\n\n(no pending questions)\n` };
   }
 
   private formatQuestion(e: Entry): string {
     const q = e.question!;
-    return `─── DELEGATE QUESTION ───\nagent_id:    ${e.id}\nquestion_id: ${q.id}\nquestion:    ${q.question}\n${q.context ? `context:     ${q.context}\n` : ""}asked_at:    ${goDuration(Date.now() - q.askedAt)} ago\n\nThe delegate is BLOCKED waiting for your answer.\nAnswer: DelegateOutput(agent_id=${JSON.stringify(e.id)}, action="answer", answer="...", question_id=${JSON.stringify(q.id)})\n`;
+    return `─── DELEGATE QUESTION ───\nagent_id:    ${e.id}\nquestion_id: ${q.id}\nquestion:    ${q.question}\n${q.context ? `context:     ${q.context}\n` : ""}asked_at:    ${roundedSeconds(Date.now() - q.askedAt)} ago\n\nThe delegate is BLOCKED waiting for your answer.\nAnswer: DelegateOutput(agent_id=${JSON.stringify(e.id)}, action="answer", answer="...", question_id=${JSON.stringify(q.id)})\n`;
   }
 }

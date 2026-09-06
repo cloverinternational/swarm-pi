@@ -3,6 +3,7 @@
 .pi/config/*.local.json
 
 # Generated/runtime state
+.pi/agent-sessions/
 .swarm/
 autogenskills/dist/
 taskmanage/dist/

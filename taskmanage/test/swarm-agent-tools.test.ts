@@ -56,8 +56,9 @@ describe("Swarm agent orchestration tools", () => {
     const result = await logic.backgroundTask({ task: "slow" });
     const body = JSON.parse(result.text);
     expect(body.status).toBe("async_launched");
-    expect(body.agent_id).toMatch(/^bg-\d+$/);
+    expect(body.agent_id).toMatch(/^bg-\d{19}$/);
     expect(body.output_file).toMatch(/[/\\]\.cache[/\\]swarm[/\\]tasks[/\\]bg-\d+\.output$/);
+    expect(Object.keys(body)).toEqual(["agent_id", "can_read_output", "description", "message", "output_file", "status"]);
     d.resolve("done");
   });
 
@@ -68,6 +69,7 @@ describe("Swarm agent orchestration tools", () => {
     const first = await logic.taskOutput({ agent_id: launched.agent_id, action: "result", offset: 0 });
     const offset = Number(first.text.match(/new_offset:\s+(\d+)/)?.[1]);
     expect(first.text).toContain("alpha\nbeta");
+    expect(first.text).not.toContain("alpha\nbetaalpha\nbeta");
     const second = await logic.taskOutput({ agent_id: launched.agent_id, action: "result", offset });
     expect(second.text).toContain(`offset:      ${offset}`);
     expect(second.text).toContain("(no output at this offset)");
@@ -90,6 +92,21 @@ describe("Swarm agent orchestration tools", () => {
     const result = JSON.parse((await logic.multiWait({ agent_ids: [a, b], timeout_seconds: 1 })).text);
     expect(result).toMatchObject({ wait_status: "completed", agent_count: 2, completed_count: 2, agents_cancelled: false });
     expect(result.agents.map((x: any) => x.status)).toEqual(["completed", "completed"]);
+  });
+
+  it("uses the tool call id, enriched task, and excludes synchronous Subagent runs from tracking", async () => {
+    const seen: string[] = [];
+    const { tools, logic } = harness(async ctx => { seen.push(ctx.task); return "SUBAGENT_OK"; });
+    const subagent = tools.find(tool => tool.name === "Subagent");
+    expect((await subagent.execute("call_bg", { task: "say hi", run_in_background: true })).content[0].text)
+      .toContain('"agent_id": "subagent-call_bg"');
+    await logic.waitForAgent({ agent_id: "subagent-call_bg", timeout_seconds: 1 });
+    await subagent.execute("call_sync", { task: "say sync", agent_id: "general-assistant" });
+    const listed = JSON.parse((await logic.taskOutput({})).text);
+    expect(listed.total_agents).toBe(1);
+    expect(listed.agents[0].task).toContain("[REPORTING DIRECTIVE]");
+    expect(seen[0]).toContain(`[CONTEXT]\nWorking Directory: ${root}\nProject: Pi-Swarm\nProject Type: Node.js/JavaScript`);
+    expect(seen[0]).toContain("[TASK]\nsay hi\n[/TASK]");
   });
 
   it("supports Delegate question and answer round trip", async () => {

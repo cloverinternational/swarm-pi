@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 export * from "./general-agent-adapter.js";
 export * from "./worker-daemon.js";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -10,13 +10,15 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "cance
 export interface Profile { name: string; systemPrompt?: string; capabilities?: string[]; tools?: string[]; }
 export interface Preset extends Profile { provider?: string; model?: string; concurrency?: number; worktree?: boolean; }
 export interface AgentSpec { id?: string; parentId?: string; parentSessionId?: string; sessionId?: string; task: string; provider?: string; model?: string; profile?: string; preset?: string; capabilities?: string[]; worktree?: string | boolean; background?: boolean; }
-export interface AgentResult { id: string; status: AgentStatus; output?: string; error?: string; startedAt?: string; completedAt: string; durationMs: number; }
+export interface AgentResult { id: string; status: AgentStatus; output?: string; error?: string; startedAt?: string; completedAt: string; durationMs: number; turns?: number; }
 export interface BackgroundHandle { readonly id: string; readonly parentId?: string; readonly sessionId: string; wait(timeoutMs?: number): Promise<AgentResult>; cancel(): boolean; steer(instruction: string): boolean; }
 export type AgentCompletionSink = (result: AgentResult) => void | Promise<void>;
 export interface AgentCompletionEvent { readonly type: "agent.completed"; readonly agentId: string; readonly parentId?: string; readonly parentSessionId?: string; readonly sessionId: string; readonly background: boolean; readonly result: AgentResult; }
 export type AgentEventSink = (event: AgentCompletionEvent) => void | Promise<void>;
 export interface RunnerContext { signal: AbortSignal; spec: Required<Pick<AgentSpec, "id" | "task">> & AgentSpec; task: string; profile?: Profile; provider?: string; model?: string; cwd: string; instructions: readonly string[]; steering: readonly string[]; }
-export type Runner = (ctx: RunnerContext) => Promise<string>;
+/** A runner returns the child's final text, optionally with the number of model turns it took (Swarm reports `turns` per sub-agent). */
+export interface RunnerOutcome { output: string; turns?: number }
+export type Runner = (ctx: RunnerContext) => Promise<string | RunnerOutcome>;
 
 /** Build a real Pi child-session runner. The child is deliberately prevented
  * from recursively spawning this control surface; the parent owns orchestration. */
@@ -26,6 +28,10 @@ export function createPiRunner(pi: any): Runner {
     const sessionDir = `${ctx.cwd}/.pi/agent-sessions`;
     await mkdir(sessionDir, { recursive: true });
     const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}.jsonl`;
+    // Swarm children always start from an empty transcript (resume is an
+    // explicit option); `--session` would otherwise resume a stale file left
+    // by an earlier child with the same deterministic id.
+    await rm(sessionPath, { force: true });
     const args = ["--mode", "text", "--print", "--session", sessionPath, "--exclude-tools", "Agent,AgentControl", "-p", ctx.task];
     // Child Pi sessions need an unambiguous identity marker. The child loads
     // the same extensions as the parent, but its process-local tool contexts
@@ -38,8 +44,19 @@ export function createPiRunner(pi: any): Runner {
     if (ctx.model) args.unshift("--model", ctx.model);
     const result = await pi.exec(command, commandArgs, { cwd: ctx.cwd, signal: ctx.signal });
     if (result?.killed || result?.code !== 0) throw new Error(`child pi failed (${result?.killed ? "killed" : `exit ${result?.code}`}): ${(result?.stderr ?? "").trim()}`);
-    return String(result?.stdout ?? "").trim();
+    return { output: String(result?.stdout ?? "").trim(), turns: await countSessionTurns(sessionPath) };
   };
+}
+
+/** Model turns = assistant messages recorded in the child's session JSONL (at least 1 when the child produced output). */
+async function countSessionTurns(sessionPath: string): Promise<number> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const lines = (await readFile(sessionPath, "utf8")).split("\n");
+    let turns = 0;
+    for (const line of lines) { if (!line) continue; try { const entry = JSON.parse(line); if (entry?.type === "message" && entry?.message?.role === "assistant") turns++; } catch { /* partial line */ } }
+    return Math.max(1, turns);
+  } catch { return 1; }
 }
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -86,7 +103,7 @@ export class AgentManager {
     const started = Date.now(), startedAt = new Date(started).toISOString(), resolved = this.resolve(spec); let cwd = this.options.cwd ?? process.cwd();
     if (resolved.worktree) cwd = await this.createWorktree(cwd, spec.id!);
     const instructions = [...(resolved.profile?.systemPrompt ? [resolved.profile.systemPrompt] : []), ...(resolved.capabilities ?? []).map(c => `Capability: ${c}`)];
-    try { const output = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id!, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering }); const result: AgentResult = { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started }; return result; }
+    try { const outcome = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id!, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering }); const { output, turns } = typeof outcome === "string" ? { output: outcome, turns: 1 } : { output: outcome.output, turns: outcome.turns ?? 1 }; const result: AgentResult = { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started, turns }; return result; }
     catch (e) { return { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "failed", error: e instanceof Error ? e.message : String(e), startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started }; }
   }
   private async createWorktree(cwd: string, id: string) { const path = `${cwd}/.pi-worktrees/${id}`; await mkdir(`${cwd}/.pi-worktrees`, { recursive: true }); await execFileAsync("git", ["worktree", "add", "--detach", path, "HEAD"], { cwd, timeout: 15000 }); return path; }
