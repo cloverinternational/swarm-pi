@@ -9,7 +9,9 @@ const methods: Record<string, keyof SwarmAgentTools> = {
   BackgroundTask: "backgroundTask", Subagent: "subagent", SubagentOutput: "taskOutput", TaskOutput: "taskOutput",
   Delegate: "delegate", DelegateOutput: "delegateOutput", multi_agent_wait: "multiWait", wait_for_agent: "waitForAgent",
 };
-const text = (r: ToolResult) => ({ content: [{ type: "text", text: r.text }], details: r.details ?? {}, ...(r.isError ? { isError: true } : {}) });
+// Pi flags a tool result as failed only when execute() throws; the message
+// becomes the result content verbatim (docs/extensions.md "Signaling errors").
+const text = (r: ToolResult) => { if (r.isError) throw new Error(r.text); return { content: [{ type: "text", text: r.text }], details: r.details ?? {} }; };
 
 export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManager; cwd?: string } = {}): SwarmAgentTools {
   const host = pi as Record<PropertyKey, any>;
@@ -34,7 +36,8 @@ export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManage
         try { return text(await (logic[method] as any).call(logic, params)); }
         catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          return text({ text: `Error executing ${name}: ${message} (error_id=${newErrorID()})`, isError: true, details: { error: message } });
+          if (message.startsWith("Error executing ")) throw err;
+          throw new Error(`Error executing ${name}: ${message} (error_id=${newErrorID()})`);
         }
       },
     }));

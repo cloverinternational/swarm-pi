@@ -5,9 +5,10 @@ import { applySwarmSurface, loadSwarmToolSurface } from "../lib/swarm-tool-surfa
 
 type Pi = any;
 const registrations = new WeakSet<object>();
-const error = (name: string, message: string) => {
-  const text = `Error executing ${name}: ${message} (error_id=${newErrorID()})`;
-  return { content: [{ type: "text", text }], details: { error: text }, isError: true };
+// Pi flags a tool result as failed only when execute() throws; the message
+// becomes the result content verbatim (docs/extensions.md "Signaling errors").
+const error = (name: string, message: string): never => {
+  throw new Error(`Error executing ${name}: ${message} (error_id=${newErrorID()})`);
 };
 
 export function registerSwarmFSTools(pi: Pi): void {

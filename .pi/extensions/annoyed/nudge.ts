@@ -1,38 +1,35 @@
-import { createHash } from "node:crypto";
 import { isHookEnabled, persistHookState, registerHook, toggleHook } from "../../hook-state.ts";
 import { AnnoyedStore } from "./store.ts";
+import { AnnoyanceNudgeState } from "../../lib/swarm-annoyance-nudge.ts";
 
-const normalize = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-const toolName = (event: any) => event?.toolName ?? event?.tool_name ?? event?.tool ?? "";
-const outputText = (event: any) => {
-  const value = event?.error ?? event?.toolOutput ?? event?.tool_output ?? event?.result ?? event?.content;
-  if (typeof value === "string") return value;
-  try { return JSON.stringify(value ?? ""); } catch { return ""; }
-};
-// Never classify ordinary tool prose as failure. A successful read containing
-// words like "error" or "fallback" is not product friction. Prefer Pi's
-// structured terminal status and only use narrowly-recognized timeout/output
-// diagnostics when the host explicitly marks the result as degraded.
-const failed = (event: any) => event?.isError === true || event?.error != null || event?.result?.isError === true || event?.result?.error != null || event?.details?.isError === true || (event?.timedOut === true) || (event?.exitCode != null && Number(event.exitCode) !== 0);
-const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
-const safe = (value: unknown, max = 500) => String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-
+/**
+ * Swarm's builtin annoyance-nudge hook (internal/hooks/builtin/annoyance_nudge.go)
+ * ported 1:1 — see .pi/lib/swarm-annoyance-nudge.ts. Swarm collects every
+ * hook context produced while executing one assistant turn's tool calls and
+ * appends ONE standalone RoleUser message after the tool-result message
+ * (agent_tools.go). Pi's equivalent slot is a steered custom message: the
+ * steering queue drains right after turn_end, before the next model call.
+ */
 export function registerAnnoyanceNudgeHook(pi: any) {
-  const lastByKey = new Map<string, string>();
-  const handler = async (event: any, ctx: any) => {
-    const name = toolName(event); if (!name || normalize(name) === "annoyed" || !failed(event)) return;
-    if (event?.error_type === "tool.blocked_by_hook" || event?.error_type === "permission_denied" || event?.cancelled === true) return;
-    const conversation = ctx?.sessionId ?? ctx?.sessionManager?.getSessionId?.() ?? "session";
-    const reason = safe(outputText(event), 1000); const fingerprint = hash(`${normalize(name)}\0${reason}`);
-    const key = `${conversation}\0${normalize(name)}`;
-    if (lastByKey.get(key) === fingerprint) return;
-    lastByKey.set(key, fingerprint);
-    const message = `[ANNOYANCE REVIEW]\nTool: "${safe(name, 100)}"\nFailure fingerprint: "${fingerprint}"\n\nDecide whether this is a real product defect, not merely invalid input, an expected test failure, permission denial, or cancellation. If actionable, call annoyed ONCE with the mechanism, observed and expected behavior, bounded non-secret evidence, and objective acceptance tests. Include the exact reproduction shape and one near-miss that must remain allowed. Do not report vague frustration or duplicate this fingerprint.`;
-    // Return model-visible guidance from tool_result without modifying the result.
-    return { content: [...(Array.isArray(event.content) ? event.content : []), { type: "text", text: message }], details: { ...(event.details ?? {}), annoyanceNudge: { fingerprint, tool: name } } };
-  };
-  registerHook(pi, "annoyance", "tool_result", handler);
-  registerHook(pi, "annoyance", "tool_execution_end", handler);
+  const state = new AnnoyanceNudgeState();
+  const pending: string[] = [];
+  registerHook(pi, "annoyance", "tool_result", async (event: any, ctx: any) => {
+    const conversation = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? "session";
+    const reminder = state.onToolResult(conversation, { toolName: event?.toolName ?? "", isError: event?.isError, content: event?.content, details: event?.details });
+    if (reminder) pending.push(reminder);
+    return undefined; // never mutate the tool result; the nudge is its own message
+  });
+  registerHook(pi, "annoyance", "turn_end", async () => {
+    if (pending.length === 0) return undefined;
+    const content = pending.splice(0).join("\n\n");
+    // While the agent is streaming, Pi routes deliverAs:"steer" to
+    // agent.steer() only when triggerTurn !== false; with triggerTurn:false
+    // it parks the message in _pendingCustomMessages, which is flushed after
+    // the run and never enters the in-flight context. steer() does not start
+    // a turn — the loop drains the steering queue right after turn_end.
+    pi.sendMessage?.({ customType: "swarm-hook-context", content, display: false }, { deliverAs: "steer", triggerTurn: true });
+    return undefined;
+  });
   pi.registerCommand?.("annoyed", { description: "Control or inspect the local Annoyed board", handler: async (args: string, ctx: any) => {
     const [command, id, value] = args.trim().split(/\s+/, 3);
     if (command === "on" || command === "off") {
@@ -51,7 +48,7 @@ export function registerAnnoyanceNudgeHook(pi: any) {
     } catch (error) { ctx?.ui?.notify?.(error instanceof Error ? error.message : String(error), "error"); }
     finally { store.close(); }
   }});
-  return { lastByKey };
+  return { state };
 }
 
 // The directory's index.ts is the canonical auto-discovered entry point. This

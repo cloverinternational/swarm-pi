@@ -25,7 +25,15 @@ normalizeState();
 export function hookState() { normalizeState(); return shared.state; }
 export function setHookPi(pi: any) { shared.pi = pi; }
 export function setHookPresenter(present?: (data: any) => void) { shared.present = present; }
-export function isHookEnabled(group: string) { normalizeState(); return shared.state.enabled[group] !== false; }
+// Swarm `--no-hooks` / `--clean-agent` disable every builtin and custom hook
+// (swarm-tui/cmd/swarmos/main.go). Pi has no such flag; PI_SWARM_NO_HOOKS=1
+// is the headless equivalent so hook-driven model context (task nudges,
+// annoyance reminders, skill-budget blocks) is absent exactly when Swarm's is.
+export const hooksDisabledByEnv = (env: NodeJS.ProcessEnv = process.env) => /^(1|true|yes)$/i.test((env.PI_SWARM_NO_HOOKS ?? "").trim());
+// "swarm-prompt" is prompt assembly (skills catalog + context injection), which
+// Swarm keeps even under --no-hooks; only the real hook groups are gated.
+const SWARM_HOOK_GROUPS = new Set(["taskmanage", "autogenskills", "disk-hooks", "annoyance"]);
+export function isHookEnabled(group: string) { normalizeState(); if (SWARM_HOOK_GROUPS.has(group) && hooksDisabledByEnv()) return false; return shared.state.enabled[group] !== false; }
 export function toggleHook(group: string, enabled?: boolean) { shared.state.enabled[group] = enabled ?? !isHookEnabled(group); return isHookEnabled(group); }
 export function setHookVisibility(visible?: boolean) { shared.state.visible = visible ?? !shared.state.visible; return shared.state.visible; }
 export function hookRowsVisible() { return shared.state.visible; }

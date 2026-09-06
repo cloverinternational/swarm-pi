@@ -15,8 +15,9 @@ function okay(value: unknown, xml = false) {
 function failed(name: string, error: unknown) {
   let message = error instanceof Error ? error.message : String(error);
   if ((name === "HistorySearch" || name === "HistoryGet") && !message.startsWith(`${name}:`)) message = `${name}: ${message}`;
-  const text = `Error executing ${name}: ${message} (error_id=${newErrorID()})`;
-  return { content: [{ type: "text", text }], details: { error: message }, isError: true };
+  // Pi flags a tool result as failed only when execute() throws; the message
+  // becomes the result content verbatim (docs/extensions.md "Signaling errors").
+  throw new Error(`Error executing ${name}: ${message} (error_id=${newErrorID()})`);
 }
 
 export function registerSwarmHistoryVaultTools(pi: Pi, options: { historyRoot?: string; cwd?: string; vault?: VaultRuntime } = {}): void {

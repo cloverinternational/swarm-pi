@@ -8,6 +8,12 @@ import { spawn } from "node:child_process";
 
 const GENERATED_ID_KEYS = new Set(["tool_call_id"]);
 const PROBE_PROMPT = "PARITY_CAPTURE";
+/** Tool calls the scripted model issues, indexed by how many tool results it has seen. */
+const TOOL_SCRIPT = [
+  { id: "call_parity_probe", command: "printf parity-probe" },
+  { id: "call_parity_probe_fail", command: "printf out; printf err >&2; exit 3" },
+];
+export const EXPECTED_PRIMARY_REQUESTS = TOOL_SCRIPT.length + 1;
 const CLEAN_SYSTEM_PROMPT = "You are a parity capture agent.";
 
 function stableObject(value) {
@@ -34,7 +40,10 @@ export function canonicalizeRequest(request) {
       if (typeof value === "string" && parentKey === "content") {
         return value
           .replace(/ duration_ms="\d+"/g, ' duration_ms="<ms>"')
-          .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)");
+          .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
+          // annoyance-nudge fingerprints hash the failure text, which
+          // contains the random error_id above, so they are per-run too.
+          .replace(/(Fingerprint: ")[0-9a-f]{32}(")/g, "$1<fingerprint>$2");
       }
       return value;
     }
@@ -74,7 +83,8 @@ export function wireFingerprint(rawText) {
       return ids.get(match);
     })
     .replace(/ duration_ms=\\"\d+\\"/g, ' duration_ms=\\"<ms>\\"')
-    .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)");
+    .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
+    .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2");
 }
 
 export function wireComparison(piRaw, swarmRaw, probePrompt = PROBE_PROMPT) {
@@ -234,14 +244,20 @@ async function startRecorder() {
       connection: "close",
     });
     const emit = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
-    if (!hasToolResult && (body.tools ?? []).some(tool => tool?.function?.name === "bash")) {
+    // Scripted model: turn 1 runs a succeeding command, turn 2 a failing one
+    // (non-zero exit with stderr), turn 3 answers. Each follow-up request then
+    // carries the success envelope and the "Error executing bash" envelope
+    // respectively, so both result shapes are compared on the wire.
+    const toolResults = Array.isArray(body.messages) ? body.messages.filter(message => message?.role === "tool").length : 0;
+    const step = TOOL_SCRIPT[toolResults];
+    if (step && (body.tools ?? []).some(tool => tool?.function?.name === "bash")) {
       emit(openAIChunk(body.model, {
         role: "assistant",
         tool_calls: [{
           index: 0,
-          id: "call_parity_probe",
+          id: step.id,
           type: "function",
-          function: { name: "bash", arguments: "{\"command\":\"printf parity-probe\"}" },
+          function: { name: "bash", arguments: JSON.stringify({ command: step.command }) },
         }],
       }));
       emit(openAIChunk(body.model, {}, "tool_calls"));
@@ -331,11 +347,15 @@ async function capturePi(workspace, scratch, profile) {
     }
     // Trust the workspace so its .pi/extensions load (both profiles).
     args.push("--approve");
+    // --clean-agent also means --no-hooks on the Swarm side; Pi-Swarm's hook
+    // groups read PI_SWARM_NO_HOOKS (see .pi/hook-state.ts).
+    const hookEnv = profile === "clean" ? { PI_SWARM_NO_HOOKS: "1" } : {};
     args.push(PROBE_PROMPT);
     const processResult = await run("pi", args, {
       cwd: workspace,
       env: {
         HOME: home,
+        ...hookEnv,
         PI_CODING_AGENT_DIR: agentDir,
         PI_OFFLINE: "1",
         XDG_CONFIG_HOME: join(home, ".config"),

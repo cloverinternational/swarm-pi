@@ -95,7 +95,12 @@ export function swarmToolSchemaKeyOrder<T extends { tools?: unknown }>(payload: 
 
 /** Everything `before_provider_request` needs: key order at the top and inside tool schemas. */
 export function alignProviderPayload<T extends Record<string, unknown>>(payload: T): T | undefined {
-  const withSchemas = swarmToolSchemaKeyOrder(payload) ?? payload;
+  // Custom (extension) messages only become role:"user" in convertToLlm,
+  // which runs after the `context` event, so collapse again here where every
+  // message already carries its provider role.
+  const collapsed = Array.isArray(payload.messages) ? collapseUserText(payload.messages as MessageLike[]) : undefined;
+  const withMessages = collapsed ? { ...payload, messages: collapsed } : payload;
+  const withSchemas = swarmToolSchemaKeyOrder(withMessages) ?? withMessages;
   const ordered = swarmPayloadKeyOrder(withSchemas);
   if (ordered) return ordered;
   return withSchemas === payload ? undefined : withSchemas;

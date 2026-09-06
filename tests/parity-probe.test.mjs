@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  EXPECTED_PRIMARY_REQUESTS,
   canonicalizeRequest,
   captureParity,
   diffJson,
@@ -102,8 +103,8 @@ test("clean profile captures matched isolated Pi and Swarm request sequences", a
       output,
     });
     assert.equal(result.profile, "clean");
-    assert.equal(result.pi.requests.length, 2);
-    assert.equal(result.swarm.requests.length, 2);
+    assert.equal(result.pi.requests.length, EXPECTED_PRIMARY_REQUESTS);
+    assert.equal(result.swarm.requests.length, EXPECTED_PRIMARY_REQUESTS);
     assert.deepEqual(
       result.pi.tools.map(tool => tool.function?.name ?? tool.name),
       ["bash"],
@@ -131,8 +132,8 @@ test("project profile is wire-identical with full skills, context, and the 28-to
   const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
   try {
     const result = await captureParity({ profile: "project", workspace: resolve("."), output });
-    assert.equal(result.pi.requests.length, 2);
-    assert.equal(result.swarm.requests.length, 2);
+    assert.equal(result.pi.requests.length, EXPECTED_PRIMARY_REQUESTS);
+    assert.equal(result.swarm.requests.length, EXPECTED_PRIMARY_REQUESTS);
     assert.equal(result.pi.tools.length, 28);
     assert.equal(result.swarm.tools.length, 28);
     assert.equal(result.pi.skills.length, 1);

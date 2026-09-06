@@ -23,7 +23,11 @@ const registrations = new WeakSet<object>();
 export function registerSwarmBash(pi: Pi): void {
   if (registrations.has(pi as object)) return;
   registrations.add(pi as object);
-  const text = (value: string, details: Record<string, unknown> = {}, isError = false) => ({ content: [{ type: "text", text: value }], details, ...(isError ? { isError: true } : {}) });
+  const text = (value: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text", text: value }], details });
+  // Pi marks a tool result as failed only when execute() throws; the thrown
+  // message becomes the result content verbatim (docs/extensions.md,
+  // "Signaling errors"). Returning { isError: true } is silently ignored.
+  const fail = (value: string): never => { throw new Error(value); };
   pi.registerTool?.({
     name: "bash",
     label: "bash",
@@ -31,10 +35,10 @@ export function registerSwarmBash(pi: Pi): void {
     parameters: SWARM_BASH_PARAMETERS,
     async execute(_toolCallId: string, params: BashParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any) {
       const outcome = await runSwarmBash(params, { defaultCwd: ctx?.cwd ?? pi.getCwd?.() ?? process.cwd(), signal });
-      if ("error" in outcome) return text(outcome.error, { error: outcome.error }, true);
+      if ("error" in outcome) return fail(outcome.error);
       const details = { exit_code: outcome.exitCode, duration_ms: outcome.durationMs, timed_out: outcome.timedOut, command: params.command, ...(params.description ? { description: params.description } : {}) };
-      if (outcome.timedOut) return text(timedOutMessage(outcome.effectiveSecs, outcome.exitCode), details, true);
-      if (outcome.exitCode !== 0) return text(commandFailedMessage(outcome.exitCode, outcome.stdout, outcome.stderr), details, true);
+      if (outcome.timedOut) return fail(timedOutMessage(outcome.effectiveSecs, outcome.exitCode));
+      if (outcome.exitCode !== 0) return fail(commandFailedMessage(outcome.exitCode, outcome.stdout, outcome.stderr));
       return text(buildResultXML(outcome), details);
     },
   });
