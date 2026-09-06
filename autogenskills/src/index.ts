@@ -29,7 +29,7 @@ export interface SkillEntry { type: "pi-swarm-autogen-state"; data: State; }
 export type RevisionPlacement = "active" | "archived" | "absent";
 export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; /** history.go manifest.Placement; older manifests default to "active". */ placement?: RevisionPlacement; /** history.go manifest.RevertOf (undo revisions). */ revertOf?: string; }
 type StoredRevision = Revision & { blobs: Record<string, string> };
-export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean; absorbedInto?: string; archiveReason?: string }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; focusedTask?: boolean; curatorLastRun?: string; curatorLastReport?: string; skillReviewCalls?: number; }
+export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean; absorbedInto?: string; archiveReason?: string }>; activeSkill?: string; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; focusedTask?: boolean; curatorLastRun?: string; curatorLastReport?: string; skillReviewCalls?: number; }
 export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0, skilled: false, budgetCalls: 0, reviewRequired: false, focusedTask: false, skillReviewCalls: 0 });
 const HISTORY_FORMAT = 1;
 const SUPPORT_ROOTS = new Set(["references", "templates", "scripts", "assets"]);
@@ -156,7 +156,7 @@ export class AutoSkillManager {
   snapshot(): State { return clone(this.state); }
   restore(state: State) { this.state = { ...defaultState(), ...clone(state), skills: { ...(state.skills ?? {}) }, nudges: state.nudges ?? 0, nudgeIgnores: state.nudgeIgnores ?? 0, mutations: state.mutations ?? 0, skillReviewCalls: state.skillReviewCalls ?? 0 }; }
   metrics(): Metrics { return { turns: this.state.turns, toolCalls: this.state.toolCalls, errors: this.state.errors, resolved: this.state.resolved, nudges: this.state.nudges, nudgeIgnores: this.state.nudgeIgnores, reviews: this.state.reviews, mutations: this.state.mutations, skilled: this.state.skilled, budgetCalls: this.state.budgetCalls, reviewRequired: this.state.reviewRequired }; }
-  activeSkillNames(): string[] { return Object.entries(this.state.skills).filter(([, skill]) => (skill.uses ?? 0) > 0 && !skill.archived).map(([name]) => name).sort(); }
+  activeSkillName(): string | undefined { return this.state.activeSkill && !this.state.skills[this.state.activeSkill]?.archived ? this.state.activeSkill : undefined; }
   rehydrate(entries: readonly unknown[]) { this.state = defaultState(); const e = [...entries].reverse().find((x: any) => x?.type === "pi-swarm-autogen-state" || x?.type === "custom" && x?.customType === "pi-swarm-autogen-state") as SkillEntry | undefined; if (e?.data) this.restore(e.data); this.mergeCuratorState(); }
   private commit() { this.persist?.({ type: "pi-swarm-autogen-state", data: this.snapshot() }); }
   private curatorStatePath() { return join(this.config.dir, ".history", "curator-state.json"); }
@@ -256,11 +256,51 @@ export class AutoSkillManager {
     const path = this.revisionPath(name, id);
     this.safePath(this.config.dir, `.history/revisions/${name}/${id}.json`);
     if (!existsSync(path) || lstatSync(path).isSymbolicLink()) throw new Error("untrusted revision manifest");
-    const stored = JSON.parse(readFileSync(path, "utf8")) as Revision & { format?: number };
-    if (stored.format !== HISTORY_FORMAT || stored.id !== id || !stored.files || !stored.blobs) throw new Error("untrusted revision manifest");
+    const stored = JSON.parse(readFileSync(path, "utf8")) as Revision & { format?: number; files?: unknown; blobs?: unknown; skill?: string; created_at?: string; revert_of?: string; curator_set?: boolean; curator_meta?: unknown };
+    if (stored.format !== HISTORY_FORMAT || stored.id !== id) throw new Error("untrusted revision manifest");
+
+    // Swarm's history.go stores manifests as file metadata plus content blobs
+    // in `.history/blobs`; the first Pi port stored an inline `blobs` map.
+    // Accept both formats, but normalize the canonical Swarm representation
+    // into the internal form before the remaining integrity checks run.
+    let swarmManifest = false;
+    if (Array.isArray(stored.files) || stored.skill !== undefined) {
+      swarmManifest = true;
+      if (stored.skill !== name || !stored.action || !stored.placement || typeof stored.created_at !== "string") throw new Error("untrusted revision manifest");
+      const files: Record<string, string> = {}, blobs: Record<string, string> = {};
+      for (const entry of (Array.isArray(stored.files) ? stored.files : []) as Array<Record<string, unknown>>) {
+        const file = typeof entry?.path === "string" ? entry.path : "";
+        const blob = typeof entry?.blob === "string" ? entry.blob : "";
+        if (!file || !/^[a-f0-9]{64}$/.test(blob)) throw new Error("untrusted revision manifest");
+        if (files[file] !== undefined || !SUPPORT_ROOTS.has(file.split("/")[0]) && file !== "SKILL.md" || file.includes("\\") || file.split("/").some(part => !part || part === "." || part === "..")) throw new Error("untrusted revision path");
+        const blobPath = join(this.config.dir, ".history", "blobs", blob);
+        if (!existsSync(blobPath) || lstatSync(blobPath).isSymbolicLink()) throw new Error("untrusted revision manifest");
+        const content = readFileSync(blobPath);
+        if (this.hashBytes(content) !== blob || (typeof entry.size === "number" && entry.size !== content.length)) throw new Error("untrusted revision manifest");
+        files[file] = blob;
+        blobs[file] = content.toString("base64");
+      }
+      const canonical: Record<string, unknown> = { format: HISTORY_FORMAT, skill: name };
+      if (stored.parent) canonical.parent = stored.parent;
+      canonical.action = stored.action;
+      if (stored.revert_of) canonical.revert_of = stored.revert_of;
+      canonical.created_at = stored.created_at;
+      canonical.placement = stored.placement;
+      if (Array.isArray(stored.files) && stored.files.length) canonical.files = stored.files;
+      if (stored.curator_set) canonical.curator_set = true;
+      if (stored.curator_meta && typeof stored.curator_meta === "object") canonical.curator_meta = stored.curator_meta;
+      if (this.hashBytes(JSON.stringify(canonical)) !== id) throw new Error("untrusted revision manifest");
+      stored.files = files;
+      stored.blobs = blobs;
+      stored.createdAt = stored.created_at;
+      stored.revertOf = stored.revert_of;
+    }
+    if (!stored.files || !stored.blobs || typeof stored.files !== "object" || typeof stored.blobs !== "object") throw new Error("untrusted revision manifest");
     if (stored.placement === "absent" && Object.keys(stored.files).length) throw new Error("untrusted revision manifest");
-    const canonical = JSON.stringify({ format: HISTORY_FORMAT, skill: name, parent: stored.parent ?? "", action: stored.action, files: stored.files });
-    if (this.hashBytes(canonical) !== id) throw new Error("untrusted revision manifest");
+    if (!swarmManifest) {
+      const canonical = JSON.stringify({ format: HISTORY_FORMAT, skill: name, parent: stored.parent ?? "", action: stored.action, files: stored.files });
+      if (this.hashBytes(canonical) !== id) throw new Error("untrusted revision manifest");
+    }
     const blobFiles = Object.fromEntries(Object.entries(stored.blobs).map(([path, value]) => {
       if (path !== "SKILL.md" && !SUPPORT_ROOTS.has(path.split("/")[0]) ||
         path.includes("\\") || path.split("/").some(part => !part || part === "." || part === "..") ||
@@ -798,7 +838,7 @@ export class AutoSkillManager {
     autogenDebug("result", { tool: toolName, callId, success, toolCalls: this.state.toolCalls, budgetCalls: this.state.budgetCalls });
     void callId;
     const normalized = String(toolName ?? "").toLowerCase();
-    const isSkill = /^(skill|skillmanage|swarmskill)$/i.test(toolName ?? "");
+    const isSkill = /^(skill|swarmskill)$/i.test(toolName ?? "");
     if (isSkill && success) this.state.skillReviewCalls = 0;
     const operations = Array.isArray(input?.operations) ? input.operations : [input];
     if (success && normalized.replace(/[^a-z0-9]/g, "") === "taskmanage" && operations.some((operation: any) => operation?.status === "in_progress" || operation?.active === true || operation?.focused === true)) this.state.focusedTask = true;
@@ -810,9 +850,9 @@ export class AutoSkillManager {
       if (this.state.errors > this.state.resolved) this.state.resolved++;
     } else this.state.errors++;
     const skillName = input?.name ?? input?.skill ?? input?.skill_name;
-    // A skill tool unlocks the budget only after a successful execution.
-    // Failed Skill/SkillManage results must remain failed and leave counters intact.
-    if (success && toolName && /^(skill|skillmanage|swarmskill)$/i.test(toolName)) {
+    // Only an actual Skill invocation unlocks the budget. SkillManage edits the
+    // library but must not make a skill active or satisfy the reusable-skill gate.
+    if (success && toolName && /^(skill|swarmskill)$/i.test(toolName)) {
       autogenDebug("skill-reset", { tool: toolName, callId, beforeBudgetCalls: this.state.budgetCalls });
       this.withSkillLocks(["curator-state"], () => {
         this.mergeCuratorState();
@@ -825,6 +865,7 @@ export class AutoSkillManager {
           entry.lastUsed = now();
           if (!entry.pinned) { entry.curatorState = "active"; entry.archived = false; }
           this.state.skills[skillName] = entry;
+          this.state.activeSkill = skillName;
         }
         this.state.skilled = true;
         this.state.focusedTask = true;
@@ -1078,6 +1119,7 @@ export class AutoSkillManager {
       this.mergeCuratorState();
       const existing = this.state.skills[name] ?? { uses: 0 };
       this.state.skills[name] = { ...existing, version, uses: (existing.uses ?? 0) + 1, lastUsed: now() };
+      this.state.activeSkill = name;
       if (!this.state.skills[name].pinned) { this.state.skills[name].curatorState = "active"; this.state.skills[name].archived = false; }
       this.state.focusedTask = true; this.state.skilled = true; this.state.budgetCalls = 0;
       this.state.nudgeIgnores = 0; this.state.reviewRequired = false;
@@ -1171,23 +1213,27 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
     ctx?.ui?.setStatus?.("swarm-autogen", manager.config.mode === "never" ? undefined : `Autogen ${percent}%`);
   };
   const installFooter = (ctx: any) => {
-    if (!ctx?.ui?.setFooter || ctx.mode !== "tui") return;
-    const unsub = ctx.sessionManager?.onBranchChange?.(() => ctx.ui.requestRender?.());
-    ctx.ui.setFooter((_tui: any, theme: any) => ({
-      dispose: unsub,
-      invalidate() {},
-      render(width: number): string[] {
-        const usage = ctx.getContextUsage?.();
-        const contextPercent = usage?.percent == null ? "?" : `${Math.round(usage.percent)}%`;
-        const contextFilled = usage?.percent == null ? 0 : Math.max(0, Math.min(10, Math.round(usage.percent / 10)));
-        const contextBar = "█".repeat(contextFilled) + "░".repeat(10 - contextFilled);
-        const names = manager.activeSkillNames();
-        const skills = names.length ? names.join(", ") : "none";
-        const dim = (value: string) => theme?.fg ? theme.fg("dim", value) : value;
-        const line = dim(`Skills: ${skills} · Context ${contextBar} ${contextPercent}`);
-        return [width > 0 && line.length > width ? line.slice(0, Math.max(0, width - 1)) + "…" : line];
-      },
-    }));
+    if (ctx?.mode !== "tui") return;
+    // Pi has a single footer slot, owned by .pi/extensions/conversation-metrics.ts.
+    // Contribute a segment to its shared registry instead of calling setFooter,
+    // which would silently replace the metrics line (and vice versa) depending on
+    // extension load order. The registry is keyed by name, so re-registration on
+    // /reload simply overwrites the previous provider.
+    const g = globalThis as typeof globalThis & { [k: symbol]: Map<string, () => string | undefined> | undefined };
+    const key = Symbol.for("pi-swarm-footer-segments");
+    const segments = g[key] ?? (g[key] = new Map());
+    segments.set("autogen", () => {
+      if (manager.config.mode === "never") return undefined;
+      const usage = ctx.getContextUsage?.();
+      const contextPercent = usage?.percent == null ? "?" : `${Math.round(usage.percent)}%`;
+      const contextFilled = usage?.percent == null ? 0 : Math.max(0, Math.min(10, Math.round(usage.percent / 10)));
+      const contextBar = "█".repeat(contextFilled) + "░".repeat(10 - contextFilled);
+      const budget = manager.budgetStatus();
+      const skill = manager.activeSkillName?.() ?? "none";
+      return `Autogen ${budget.used}/${budget.budget} · Skill: ${skill} · Context ${contextBar} ${contextPercent}`;
+    });
+    ctx.sessionManager?.onBranchChange?.(() => ctx.ui?.requestRender?.());
+    ctx.ui?.requestRender?.();
   };
   const isSubagent = (ctx: any) => ctx?.isSubAgent || ctx?.isSubagent || ctx?.agent?.isSubAgent;
   register("tool_call", (e: any, ctx: any) => {
