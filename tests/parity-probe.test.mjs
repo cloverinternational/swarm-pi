@@ -159,7 +159,7 @@ test("unknown capture profiles are rejected before launching either runtime", as
 // sleep/stdin blockers, annoyance nudge) and every non-bash tool's result
 // envelope + error path must also be byte-identical, not only the 3-request
 // base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
-for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => !["default", "skills", "skills2", "mutations", "mutations2"].includes(name))) {
+for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => !["default", "skills", "skills2", "mutations", "mutations2", "home"].includes(name))) {
   // "agents" runs in the generic loop: its error paths need no foreign workspace.
   test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
     const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
@@ -296,6 +296,46 @@ test("project profile is wire-identical for in-session autogen Skill invocation 
     await rm(scratch, { recursive: true, force: true });
   }
 }, { timeout: 240_000 });
+
+// User-scoped skill roots live in the scratch HOMEs. The seed includes a
+// legacy ~/.swarmos/skills tree: both binaries run configmigrate before any
+// skill load, so the model must see the migrated ~/.swarm/skills path.
+async function makeHomeSeed(root) {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const write = async (path, text) => { await mkdir(join(root, path, ".."), { recursive: true }); await writeFile(join(root, path), text); };
+  const skill = (name, description) => `---\nname: ${name}\ndescription: ${description}\n---\n\nBody of ${name}.\n`;
+  await write(".claude/skills/home-claude-skill/SKILL.md", skill("home-claude-skill", "User skill from ~/.claude/skills"));
+  await write(".claude/commands/home-cmd/SKILL.md", skill("home-cmd", "A command-style skill"));
+  await write(".swarmos/skills/home-legacy-skill/SKILL.md", skill("home-legacy-skill", "Legacy ~/.swarmos install skill"));
+  await write(".swarmos/skills/home-skill-dup/SKILL.md", skill("home-skill-dup", "DUP from swarmos (should lose)"));
+  await write(".swarmos/skills/stale.bak/SKILL.md", skill("stale", "Skipped by configmigrate"));
+  await write(".swarm/skills/home-skill-dup/SKILL.md", skill("home-skill-dup", "DUP from ~/.swarm (should win)"));
+  await write(".swarm/skills/home-swarm-skill/SKILL.md", skill("home-swarm-skill", "User skill from ~/.swarm/skills"));
+}
+
+test("project profile is wire-identical for user-scoped skills in a seeded HOME with a legacy ~/.swarmos tree (home scenario)", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-home-"));
+  const workspace = join(scratch, "ws");
+  const seedHome = join(scratch, "seed-home");
+  const output = join(scratch, "out");
+  try {
+    await makeStressWorkspace(workspace);
+    await makeHomeSeed(seedHome);
+    const result = await captureParity({ profile: "project", scenario: "home", workspace, seedHome, output });
+    assert.equal(result.pi.requests.length, expectedPrimaryRequests("home"));
+    assert.equal(result.swarm.requests.length, expectedPrimaryRequests("home"));
+    assert.match(result.swarm.prompt.text, /<location><home>\/\.swarm\/skills\/home-legacy-skill\/SKILL\.md<\/location>/);
+    assert.match(result.swarm.prompt.text, /DUP from ~\/\.swarm \(should win\)/);
+    assert.doesNotMatch(result.swarm.prompt.text, /should lose/);
+    // configmigrate.shouldSkip inspects the file basename only, so a package
+    // DIRECTORY named *.bak still migrates (SKILL.md itself is not skipped).
+    assert.match(result.swarm.prompt.text, /<location><home>\/\.swarm\/skills\/stale\.bak\/SKILL\.md<\/location>/);
+    assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+    assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, { timeout: 180_000 });
 
 test("project profile is wire-identical for on-disk skill invocation in a foreign workspace (skills scenario)", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));

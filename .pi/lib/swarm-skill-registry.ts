@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { lstatSync } from "node:fs";
+import { runLegacyConfigMigration } from "./swarm-configmigrate.ts";
 import { SkillLoader, generateRankedAvailableSkillsXML, loadSkillFromDir, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
 
 /** Canonical registry shared by discovery, Forge catalogues, and Skill invocation. */
@@ -12,6 +13,9 @@ export class SwarmSkillRegistry {
     this.closed = !!options.closed;
     this.allowedNames = options.allowedNames ? [...options.allowedNames] : options.allowedSkills ? [...options.allowedSkills] : undefined;
     this.loader = new SkillLoader({ ...options, closed: this.closed, allowedNames: this.allowedNames, allowedSkills: this.allowedNames });
+    // Both swarm binaries run configmigrate.Run() before any config or skill
+    // load; legacy ~/.swarmos/skills land under ~/.swarm/skills first.
+    runLegacyConfigMigration({ home: options.home });
     this.result = this.loader.load();
   }
   enforcePolicy(closed: boolean, allowed?: string[]) {

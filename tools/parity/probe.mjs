@@ -293,6 +293,20 @@ export const TOOL_SCRIPTS = {
     { id: "call_p15", tool: "TaskOutput", args: { agent_id: "$LAST_AGENT", action: "cancel" } },
   ],
   // Message shapes the base scripts never exercise: assistant text next to a
+  // User-scoped discovery through a seeded HOME (--seed-home): skills from
+  // ~/.claude/skills, ~/.claude/commands, ~/.swarm/skills and the legacy
+  // ~/.swarmos/skills tree that configmigrate merges into ~/.swarm/skills on
+  // first launch. Invocations expose the resolved on-disk paths.
+  home: [
+    { id: "call_h1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "home probe", status: "in_progress", active: true }] } },
+    { id: "call_h2", tool: "Skill", args: { skill: "home-legacy-skill" } },
+    { id: "call_h3", tool: "Skill", args: { skill: "home-skill-dup" } },
+    { id: "call_h4", tool: "Skill", args: { skill: "home-claude-skill" } },
+    { id: "call_h5", tool: "Skill", args: { skill: "home-cmd" } },
+    { id: "call_h6", tool: "Skill", args: { skill: "home-swarm-skill" } },
+    { id: "call_h7", tool: "SkillManage", args: { action: "view", name: "home-swarm-skill" } },
+    { id: "call_h8", tool: "SkillManage", args: { action: "list" } },
+  ],
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
   // and the remaining tools' happy/error paths.
@@ -717,10 +731,21 @@ async function run(command, args, options) {
   });
 }
 
-async function capturePi(workspace, scratch, profile, script, maxTurns = 0) {
+// Optional HOME seed: a directory tree copied into BOTH scratch HOMEs before
+// launch (user-level CLAUDE.md/SWARM.md, ~/.claude/skills, ~/.swarmos/skills,
+// OAuth stubs…), so user-scoped discovery can be compared too.
+async function seedHome(home, seed) {
+  if (!seed) return;
+  const { cp } = await import("node:fs/promises");
+  await mkdir(home, { recursive: true });
+  await cp(seed, home, { recursive: true });
+}
+
+async function capturePi(workspace, scratch, profile, script, maxTurns = 0, seed) {
   const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "pi-home");
+    await seedHome(home, seed);
     const agentDir = join(home, ".pi", "agent");
     await mkdir(agentDir, { recursive: true });
     await writeFile(join(agentDir, "models.json"), JSON.stringify({
@@ -788,11 +813,12 @@ async function capturePi(workspace, scratch, profile, script, maxTurns = 0) {
   }
 }
 
-async function captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns = 0) {
+async function captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns = 0, seed) {
   const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "swarm-home");
     await mkdir(home, { recursive: true });
+    await seedHome(home, seed);
     const args = [
       "--no-update",
       "--approval-mode", "auto",
@@ -844,17 +870,18 @@ export async function captureParity(options = {}) {
   if (!TOOL_SCRIPTS[scenario]) throw new Error(`unknown parity scenario: ${scenario}`);
   const script = TOOL_SCRIPTS[scenario];
   const maxTurns = Number(options.maxTurns ?? 0) || 0;
+  const seed = options.seedHome ? resolve(options.seedHome) : undefined;
   if (profile !== "clean" && profile !== "project") {
     throw new Error(`unknown parity profile: ${profile}`);
   }
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-"));
   try {
-    const pi = await capturePi(workspace, scratch, profile, script, maxTurns);
+    const pi = await capturePi(workspace, scratch, profile, script, maxTurns, seed);
     const piArtifacts = requestArtifacts(pi.requests, PROBE_PROMPT);
     const projectSystemPrompt = profile === "project"
       ? sharedPromptPrefix(primarySystemPrompt(pi.requests))
       : undefined;
-    const swarm = await captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns);
+    const swarm = await captureSwarm(workspace, scratch, profile, projectSystemPrompt, script, maxTurns, seed);
     const swarmArtifacts = requestArtifacts(swarm.requests, PROBE_PROMPT);
     const sharedPrompt = projectSystemPrompt ? {
       bytes: Buffer.byteLength(projectSystemPrompt),
@@ -920,6 +947,7 @@ async function main() {
     profile: valueAfter("--profile"),
     scenario: valueAfter("--scenario"),
     maxTurns: valueAfter("--max-turns"),
+    seedHome: valueAfter("--seed-home"),
   });
   process.stdout.write(`${JSON.stringify({
     profile: result.profile,
