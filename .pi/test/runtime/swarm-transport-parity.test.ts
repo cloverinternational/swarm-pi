@@ -174,14 +174,25 @@ describe("prompt/context configure parity seams", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-configure-"));
     let active = ["bash", "Read"];
     const notifications: string[] = [];
-    const categoryChoices = ["Skills", "Tools", "Apply"];
+    // Scripted operator: pick a category from the main menu, toggle exactly
+    // one entry in its sub-menu, return with Done, and finally Apply. The
+    // sub-menu is re-shown after every toggle, so a fake that keeps answering
+    // with an entry (never Done) spins the configure loop forever in
+    // microtasks and no test timeout can interrupt it.
+    const mainMenu = ["Context", "Skills", "Tools", "Apply"];
+    const toggled = new Set<string>();
+    const toggleOnce = (menu: string, options: string[], suffix: string) => {
+      if (toggled.has(menu)) return "Done";
+      toggled.add(menu);
+      return options.find(option => option.endsWith(suffix));
+    };
     const ui = {
       select: async (title: string, options: string[]) => {
-        if (title.includes("Configure prompt and context")) return "Context";
-        if (title.includes("Configure Context")) return options.find(option => option.endsWith("agents_md"));
-        if (title.includes("Configure Skills")) return options.find(option => option.endsWith("alpha"));
-        if (title.includes("Configure Tools")) return options.find(option => option.endsWith("bash"));
-        return categoryChoices.shift();
+        if (title.includes("Configure prompt and context")) return mainMenu.shift() ?? "Cancel";
+        if (title.includes("Configure Context")) return toggleOnce("Context", options, "agents_md");
+        if (title.includes("Configure Skills")) return toggleOnce("Skills", options, "alpha");
+        if (title.includes("Configure Tools")) return toggleOnce("Tools", options, "bash");
+        throw new Error(`unexpected select: ${title}`);
       },
       input: async () => undefined,
       notify: (message: string) => notifications.push(message),
