@@ -271,6 +271,27 @@ export const TOOL_SCRIPTS = {
     { id: "call_g25", tool: "websearch", args: { query: "x", type: "bogus" } },
     { id: "call_g26", tool: "websearch", args: { query: "parity probe" } },
   ],
+  // Real sub-agent spawns: every orchestration tool's happy path against a
+  // scripted child that answers "SUBAGENT_OK" without tool calls.
+  spawn: [
+    { id: "call_p1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "spawn probe", status: "in_progress", active: true }] } },
+    { id: "call_p2", tool: "BackgroundTask", args: { task: "say hi" } },
+    { id: "call_p3", tool: "wait_for_agent", args: { agent_id: "$LAST_AGENT", timeout_seconds: 60 } },
+    { id: "call_p4", tool: "TaskOutput", args: { agent_id: "$LAST_AGENT", action: "result" } },
+    { id: "call_p5", tool: "TaskOutput", args: { agent_id: "$LAST_AGENT" } },
+    { id: "call_p6", tool: "SubagentOutput", args: { agent_id: "$LAST_AGENT", action: "result", offset: 3 } },
+    { id: "call_ps1", tool: "Skill", args: { skill: "loop" } },
+    { id: "call_p7", tool: "Subagent", args: { task: "say hi", agent_id: "general-assistant" } },
+    { id: "call_p8", tool: "Subagent", args: { task: "say hi", run_in_background: true } },
+    { id: "call_p9", tool: "multi_agent_wait", args: { agent_ids: ["$LAST_AGENT"], timeout_seconds: 60 } },
+    { id: "call_p10", tool: "TaskOutput", args: {} },
+    { id: "call_ps2", tool: "Skill", args: { skill: "loop" } },
+    { id: "call_p11", tool: "Delegate", args: { task: "say hi" } },
+    { id: "call_p12", tool: "DelegateOutput", args: { agent_id: "$LAST_AGENT", action: "poll" } },
+    { id: "call_p13", tool: "DelegateOutput", args: { agent_id: "$LAST_AGENT", action: "result" } },
+    { id: "call_p14", tool: "DelegateOutput", args: { agent_id: "$LAST_AGENT", action: "cancel" } },
+    { id: "call_p15", tool: "TaskOutput", args: { agent_id: "$LAST_AGENT", action: "cancel" } },
+  ],
   // Message shapes the base scripts never exercise: assistant text next to a
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
@@ -345,7 +366,10 @@ export function canonicalizeRequest(request) {
           // Task timestamps (RFC3339Nano) and bash spill files are per-run.
           .replace(/"(created_at|updated_at|completed_at)": ?"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
           .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
-          .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
+          .replace(/\b([A-Za-z][A-Za-z0-9_-]*?)-\d{16,20}\b/g, "$1-<nanos>")
+          // Orchestration results carry wall-clock durations/start times.
+          .replace(/"(duration|start_time)": ?"[^"]*"/g, '"$1":"<t>"')
+          .replace(/^(duration:|elapsed:)\s+\S+$/gm, "$1 <t>")
           .replace(/"fire_time": ?"[^"]+"/g, '"fire_time":"<ts>"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
           .replace(/conversation: \d{8}-\d{6}-[a-z0-9]{6}/g, "conversation: <id>")
           .replace(/ \| at: \d{4}-\d\d-\d\dT[^ ]+Z/g, " | at: <ts>")
@@ -401,7 +425,9 @@ export function wireFingerprint(rawText) {
       return ids.get(match);
     })
     .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
-    .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
+    .replace(/\b([A-Za-z][A-Za-z0-9_-]*?)-\d{16,20}\b/g, "$1-<nanos>")
+    .replace(/\\"(duration|start_time)\\": ?\\"[^\\"]*\\"/g, '\\"$1\\":\\"<t>\\"')
+    .replace(/(\\n)(duration:|elapsed:)\s+[^\\]+?(?=\\n)/g, "$1$2 <t>")
     .replace(/\\"fire_time\\": ?\\"[^\\"]+\\"/g, '\\"fire_time\\":\\"<ts>\\"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
     .replace(/conversation: \d{8}-\d{6}-[a-z0-9]{6}/g, "conversation: <id>")
     .replace(/ \| at: \d{4}-\d\d-\d\dT[^ \\]+Z/g, " | at: <ts>")
@@ -547,8 +573,8 @@ function openAIChunk(model, delta, finishReason = null) {
 }
 
 function substituteRevisions(args, messages) {
-  const text = JSON.stringify(args);
-  if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:") && !text.includes("$BASELINE:")) return args;
+  let text = JSON.stringify(args);
+  if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:") && !text.includes("$BASELINE:") && !text.includes("$LAST_AGENT")) return args;
   const byCall = new Map();
   const byName = new Map();
   const baseline = new Map();
@@ -567,6 +593,14 @@ function substituteRevisions(args, messages) {
     // "$BASELINE:<skill>": the oldest id in that skill's latest history listing.
     if (meta.name && meta.action === "history") baseline.set(meta.name, hexes[hexes.length - 1]);
   }
+  // "$LAST_AGENT": the agent_id reported by the most recent orchestration result.
+  let lastAgent = "";
+  for (const message of messages) {
+    if (message?.role !== "tool" || typeof message.content !== "string") continue;
+    const found = message.content.match(/"agent_id":\s*"([^"]+)"|agent_id[=:]\s*"?([A-Za-z0-9_.-]+)/g);
+    if (found) { const m = found[found.length - 1].match(/"agent_id":\s*"([^"]+)"|agent_id[=:]\s*"?([A-Za-z0-9_.-]+)/); lastAgent = m[1] ?? m[2]; }
+  }
+  text = text.replace(/\$LAST_AGENT/g, lastAgent || "$LAST_AGENT");
   return JSON.parse(text.replace(/\$REVISION:([a-z0-9-]+)/g, (match, name) => byName.get(name) ?? match).replace(/\$BASELINE:([a-z0-9-]+)/g, (match, name) => baseline.get(name) ?? match).replace(/\$LAST_REVISION/g, last || "$LAST_REVISION"));
 }
 
@@ -585,6 +619,17 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
     requests.push(body);
     rawRequests.push(rawText);
     const hasToolResult = Array.isArray(body.messages) && body.messages.some(message => message?.role === "tool");
+    // Sub-agents spawned by the orchestration tools share this model: answer
+    // them with a fixed sentence and no tool calls so the primary script's
+    // step indexing is unaffected. Their requests are kept in the raw log
+    // but excluded from the comparison (hasPrimaryPrompt).
+    if (!hasPrimaryPrompt(body, PROBE_PROMPT)) {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "close" });
+      res.write(`data: ${JSON.stringify(openAIChunk(body.model, { role: "assistant", content: "SUBAGENT_OK" }))}\n\n`);
+      res.write(`data: ${JSON.stringify(openAIChunk(body.model, {}, "stop"))}\n\n`);
+      res.end("data: [DONE]\n\n");
+      return;
+    }
     res.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
