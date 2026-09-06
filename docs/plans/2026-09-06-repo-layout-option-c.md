@@ -1,7 +1,20 @@
 # Repository layout: Option C (domain-layered, one-to-one mirror)
 
-Status: proposed. Executes as 8 green commits on `main`. Every commit must pass
-the gate listed for it before the next commit starts.
+Status: executed 2026-09-06 as commits 4630a8c (checkpoint), f263dc4, 56dc06e,
+94dd09e, fe5aa1a, 9c21db5, fc88acb, 9189f72, 1fd3609. Every gate below was run
+against the commit-0 baseline. Deviations from the plan as written:
+
+- the vitest hang is `swarm-transport-parity.test.ts` (never completes), not
+  a post-run non-exit; it hangs identically at the checkpoint commit;
+- `schedule` and `mcp` fail `tsc` at the checkpoint commit because their
+  `src/` imports `.pi/lib/swarm-tool-renderer.ts` outside `rootDir`; left as
+  found (no behaviour changes in this series);
+- `.tape/` went to `docs/parity/media/` as planned; `tools/integration/` was
+  created in commit 3 rather than 7;
+- the rewriter gained handling for bare `import "x"` and NodeNext `.js`->`.ts`
+  specifiers plus a `--check` mode; fixed-depth repo-root computations
+  (`resolve(__dirname, "../..")` and friends) were fixed by hand because the
+  check gate cannot see them.
 
 ## Findings that shape the design (verified in-repo)
 
