@@ -1,3 +1,0 @@
-{"path": "/v1/responses", "body": {"model": "mock-model", "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}], "stream": false, "instructions": "PROMPT-VIA-developer: Always announce your mode.", "tools": [{"type": "function", "name": "Bash", "description": "", "parameters": {"type": "object"}}]}}
-{"path": "/v1/responses", "body": {"model": "mock-model", "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}], "stream": false, "instructions": "PROMPT-VIA-system: Always announce your mode.", "tools": [{"type": "function", "name": "Bash", "description": "", "parameters": {"type": "object"}}]}}
-cleaned-lake

@@ -2,13 +2,13 @@
 .pi/config/api-keys.json
 .pi/config/*.local.json
 
-# Generated/runtime state
+# Runtime state (never a source of truth)
 .pi/agent-sessions/
 .swarm/
-autogenskills/dist/
-taskmanage/dist/
 
-# Dependencies
+# Probe outputs, baselines, recordings
+artifacts/
+
+# Build output and dependencies
+**/dist/
 **/node_modules/
-
-policy/dist/

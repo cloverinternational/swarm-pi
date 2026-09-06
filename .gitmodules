@@ -1,3 +1,6 @@
 [submodule "pi-ask-user"]
 	path = pi-ask-user
 	url = https://github.com/edlsh/pi-ask-user.git
+[submodule "opencode"]
+	path = upstream/opencode
+	url = https://github.com/anomalyco/opencode.git

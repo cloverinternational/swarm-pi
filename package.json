@@ -8,7 +8,7 @@
     "test": "npm run test:packages",
     "test:packages": "for d in autogenskills taskmanage agents mcp policy runtime-contracts swarm-contract swarm-core swarm-prompt skills schedule; do npm --prefix $d test || exit $?; done",
     "test:parity": "node --test tests/parity-probe.test.mjs",
-    "parity:probe": "node tools/parity/probe.mjs --profile project --workspace . --output .parity",
+    "parity:probe": "node tools/parity/probe.mjs --profile project --workspace . --output artifacts/parity/default",
     "dogfood": "npm run build && npm test",
     "test:integration": "node ./tools/run-postgres-integration.mjs"
   }

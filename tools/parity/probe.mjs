@@ -965,7 +965,7 @@ async function captureSwarm(workspace, scratch, profile, script, maxTurns = 0, s
 
 export async function captureParity(options = {}) {
   const workspace = resolve(options.workspace ?? process.cwd());
-  const output = resolve(options.output ?? join(workspace, ".parity"));
+  const output = resolve(options.output ?? join(workspace, "artifacts", "parity", "default"));
   const profile = options.profile ?? "clean";
   const scenario = options.scenario ?? "default";
   if (!TOOL_SCRIPTS[scenario]) throw new Error(`unknown parity scenario: ${scenario}`);
