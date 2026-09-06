@@ -80,6 +80,7 @@ export function registerAutoSkillsExtension(pi: any, options: AutoSkillsExtensio
     requireReadBeforeWrite: options.requireReadBeforeWrite ?? process.env.SWARM_AUTOGEN_REQUIRE_VIEW === "1",
     accountingExempt: options.accountingExempt ?? process.env.SWARM_AUTOGEN_ACCOUNTING_EXEMPT === "1",
     curatorRunner,
+    afterRevisionMutation: name => getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).refreshSkill(name, dir),
     skillInvoker: (name, args) => {
       const skill = getSwarmSkillRegistry(pi, { cwd, autogenDir: dir, closed, allowedNames, allowedSkills: allowedNames }).invoke(name, args, SWARM_TUI_SESSION_ID);
       return { skill: skill.name, version: skill.source === "autogen" ? "autogen" : "external", path: skill.filePath, instructions: skill.instructions, text: skill.text };

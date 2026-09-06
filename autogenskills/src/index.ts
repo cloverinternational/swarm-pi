@@ -18,7 +18,9 @@ export interface Config {
   curatorIdleDelayMs?: number; curatorConsolidate?: boolean; curatorTimeoutMs?: number; curatorMaxTurns?: number;
   protectSkill?: (name: string) => boolean; accountingExempt?: boolean;
   /** When false, the manager keeps accounting/curation but emits no model-visible gate/nudge text (Swarm's hooks are delivered by .pi/extensions/swarm-builtin-hooks.ts instead). */
-  modelContext?: boolean; skillInvoker?: (name: string, args?: string) => any; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
+  modelContext?: boolean; skillInvoker?: (name: string, args?: string) => any;
+  /** history.go refreshSkill: invoked after every revision transaction for the mutated package name (success or in-transaction failure). */
+  afterRevisionMutation?: (name: string) => void; budgetWidget?: (data: ReturnType<AutoSkillManager["budgetWidgetData"]>, ctx: any) => unknown;
 }
 export interface Metrics { turns: number; toolCalls: number; errors: number; resolved: number; nudges: number; nudgeIgnores: number; reviews: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; }
 export interface ReviewHook { (event: { action: string; name?: string; revision?: string; reason?: string }): void }
@@ -124,7 +126,7 @@ export class AutoSkillManager {
   // direct mutations subject to the normal budget while making the advertised
   // recovery path (blocked tool -> SkillManage(create)) usable.
   private onboardingRecoveryArmed = false;
-  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt" | "modelContext">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"] };
+  readonly config: Required<Pick<Config, "mode" | "dir" | "toolCallThreshold" | "errorResolutionThreshold" | "nudgeInterval" | "minInstructionsLength" | "toolCallBudget" | "workingBudget" | "maxNudgeIgnores" | "staleAfterDays" | "archiveAfterDays" | "lockTimeoutMs" | "previewOnly" | "requireReadBeforeWrite" | "curatorMinRunGapMs" | "curatorIdleDelayMs" | "curatorConsolidate" | "curatorTimeoutMs" | "curatorMaxTurns" | "accountingExempt" | "modelContext">> & { reviewHook?: ReviewHook; curatorRunner?: CuratorRunner; protectSkill?: (name: string) => boolean; skillInvoker?: Config["skillInvoker"]; budgetWidget?: Config["budgetWidget"]; afterRevisionMutation?: Config["afterRevisionMutation"] };
   constructor(config: Config = {}, private readonly persist?: (entry: SkillEntry) => void) {
     const home = process.env.HOME ?? process.cwd();
     const mode = config.mode ?? (process.env.SWARM_AUTOGEN_MODE as Mode) ?? "never";
@@ -147,6 +149,7 @@ export class AutoSkillManager {
       curatorRunner: config.curatorRunner, protectSkill: config.protectSkill, accountingExempt: config.accountingExempt ?? false, budgetWidget: config.budgetWidget,
       modelContext: config.modelContext ?? true,
       skillInvoker: config.skillInvoker,
+      afterRevisionMutation: config.afterRevisionMutation,
     };
     this.mergeCuratorState();
   }
@@ -503,9 +506,18 @@ export class AutoSkillManager {
       if (action === "archive" && safeName(input.absorbed_into)) names.push(String(input.absorbed_into));
       const stateful = !["read_file", "history"].includes(action);
       if (stateful) names.push("curator-state");
+      const transactional = ["create", "patch", "write_file", "absorb_files", "archive", "undo"].includes(action);
+      const refresh = () => { if (transactional) this.config.afterRevisionMutation?.(String(input.name)); };
       return this.withSkillLocks(names, () => {
         if (stateful) this.mergeCuratorState();
-        const result = this.executeLocked(input);
+        let result;
+        try { result = this.executeLocked(input); }
+        catch (error) {
+          // runRevisionMutation joins refreshSkill onto in-transaction failures.
+          if (error instanceof Error && error.message.endsWith("\nunsupported format 0")) refresh();
+          throw error;
+        }
+        refresh();
         if (stateful && !this.config.previewOnly) this.persistCuratorState();
         return result;
       });

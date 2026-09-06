@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
-import { SkillLoader, generateRankedAvailableSkillsXML, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
+import { lstatSync } from "node:fs";
+import { SkillLoader, generateRankedAvailableSkillsXML, loadSkillFromDir, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
 
 /** Canonical registry shared by discovery, Forge catalogues, and Skill invocation. */
 export class SwarmSkillRegistry {
@@ -14,12 +15,33 @@ export class SwarmSkillRegistry {
     this.result = this.loader.load();
   }
   enforcePolicy(closed: boolean, allowed?: string[]) {
+    const before = JSON.stringify([this.closed, this.allowedNames]);
     this.closed ||= closed;
     if (allowed) this.allowedNames = this.allowedNames ? this.allowedNames.filter(n => allowed.includes(n)) : [...allowed];
+    // Swarm's Registry is an in-memory map filled once by DiscoverAll; it is
+    // never re-discovered from disk mid-session. Only a policy change reloads.
+    if (JSON.stringify([this.closed, this.allowedNames]) === before) return;
     this.loader.configure({ closed: this.closed, allowedNames: this.allowedNames });
     this.refresh();
   }
   refresh() { this.result = this.loader.load(); return this.result; }
+  /**
+   * autogenskills history.go refreshSkill: after every revision transaction
+   * (success or in-transaction failure) the registry entry for `name` is
+   * replaced from the ACTIVE autogen package, or unloaded when the package is
+   * archived/absent — even if the name came from a project/builtin root.
+   */
+  refreshSkill(name: string, autogenDir: string) {
+    const active = join(autogenDir, name);
+    let isActive = false;
+    try { const info = lstatSync(active); isActive = info.isDirectory() && !info.isSymbolicLink(); } catch { isActive = false; }
+    const rest = this.result.skills.filter(s => s.name !== name);
+    if (!isActive) { this.result = { ...this.result, skills: rest }; return; }
+    const skill = loadSkillFromDir(active, "autogen");
+    if (skill.name !== name) throw new Error(`autogenskills: SKILL.md name ${JSON.stringify(skill.name)} does not match package name ${JSON.stringify(name)}`);
+    if (this.allowedNames && !this.allowedNames.includes(name)) { this.result = { ...this.result, skills: rest }; return; }
+    this.result = { ...this.result, skills: [...rest, skill].sort((a, b) => a.name.localeCompare(b.name)) };
+  }
   list() { return this.result.skills; }
   find(name: string) { return this.result.skills.find(s => s.name === name); }
   /** skills_manager.go GetPromptContextForQuery ranks loader.List() unfiltered: disable-model-invocation skills still appear in <available_skills> (only the Skill tool refuses them). */

@@ -158,6 +158,19 @@ export function resolveSkillFile(skill: LoadedSkill, filePath: string): string {
 }
 const walkFiles = (root:string,out:string[]) => { let es; try{es=readdirSync(root,{withFileTypes:true});}catch{return;} for(const e of es){const p=join(root,e.name); try{if(e.isDirectory())walkFiles(p,out); else if(e.isFile())out.push(p);}catch{}} };
 
+/**
+ * skills.LoadSkill(dir) for one package: parse + fatal validation. Throws with
+ * the loader's diagnostic message. Used by autogen refreshSkill, which
+ * re-registers a single package without re-discovering every root.
+ */
+export function loadSkillFromDir(dir: string, source: SkillSource, precedence = Number.MAX_SAFE_INTEGER): LoadedSkill {
+  const file = join(resolve(dir), "SKILL.md");
+  const raw = readFileSync(file, "utf8");
+  const parsed = parseSkillMDContent(raw);
+  const m = parsed.metadata; const fatal = fatalValidationError(m); if (fatal) throw new Error(fatal);
+  return { name: m.name, description: m.description, instructions: parsed.instructions, dir: resolve(dir), filePath: file, location: source === "builtin" ? builtinLocation(m.name) : file, source, precedence, supportFiles: packageFiles(resolve(dir)), disableModelInvocation: m.disableModelInvocation, whenToUse: m.whenToUse || undefined, category: m.category || undefined, tags: m.tags.length ? m.tags : undefined, priority: m.priority || undefined, arguments: m.arguments.length ? m.arguments : undefined };
+}
+
 export class SkillLoader {
   private watchers: FSWatcher[] = [];
   constructor(private readonly options: SkillLoaderOptions = {}) {}
