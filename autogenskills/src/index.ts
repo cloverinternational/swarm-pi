@@ -285,7 +285,10 @@ export class AutoSkillManager {
   private diskHead(name: string) {
     const hp = join(this.config.dir, ".history", "heads", name);
     this.safePath(this.config.dir, `.history/heads/${name}`);
-    if (!pathExists(hp)) return this.saveRevision(name, "external").id;
+    // history.go prepareMutationBase: with no head, an absent package yields
+    // a synthetic baseline id that is never persisted; an existing one is
+    // reconciled as an "external" revision.
+    if (!pathExists(hp)) return this.packageRoot(name) ? this.saveRevision(name, "external").id : this.snapshotRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z" }).id;
     if (lstatSync(hp).isSymbolicLink()) throw new Error("untrusted history HEAD");
     const id = readFileSync(hp, "utf8").trim();
     const rev = this.loadRevision(name, id);
@@ -485,7 +488,14 @@ export class AutoSkillManager {
     this.assertEnabled(); const action = input?.action;
     if (action === "list") return { skills: this.list() };
     // read_file validates the name itself with Go's wording (history.go isSafeSkillDirName).
-    if (!safeName(input?.name) && !["review", "metrics", "read_file"].includes(action)) throw new Error("name must match lowercase skill identifier syntax");
+    // Go validates the name at the first gate each action reaches:
+    // history.go withLock ("unsafe skill name") for revision mutations,
+    // ViewSkillRevisionSnapshot / SkillHistory / readSupportFile ("invalid
+    // skill name") for reads.
+    if (!safeName(input?.name) && !["review", "metrics", "read_file"].includes(action)) {
+      if (["view", "history"].includes(action)) throw new Error(`autogenskills: invalid skill name ${JSON.stringify(String(input?.name ?? ""))}`);
+      throw new Error(`autogenskills: unsafe skill name ${JSON.stringify(String(input?.name ?? ""))}`);
+    }
     const lockActions = new Set(["create", "patch", "view", "read_file", "write_file", "absorb_files", "history", "undo", "archive", "pin", "unpin"]);
     if (lockActions.has(action)) {
       const names = [String(input.name)];
@@ -540,6 +550,8 @@ export class AutoSkillManager {
     }
     if (action === "view") {
       const s = this.parse(name, true), offset = input.offset ?? 0, limit = input.limit ?? 80000;
+      if (input.offset !== undefined && offset < 0) throw new Error("view 'offset' must be non-negative");
+      if (input.limit !== undefined && limit <= 0) throw new Error("view 'limit' must be positive");
       const hash = this.diskHead(name);
       this.viewed.add(name);
       if (!this.config.previewOnly) {
@@ -548,7 +560,7 @@ export class AutoSkillManager {
       }
       return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit).join("") }, instructions_total: s.instructions, support_files: this.supportFiles(name), source: "autogen", revision: hash, expected_revision: hash, version: s.version };
     }
-    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const s = this.parse(name); const currentRevision = this.diskHead(name); if ((input.expected_revision ?? "") !== currentRevision) throw revisionConflict(name, String(input.expected_revision ?? ""), currentRevision); if (input.instructions) s.instructions = input.append ? `${s.instructions}\n\n${input.instructions}` : input.instructions; if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
+    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const currentRevision = this.diskHead(name); if ((input.expected_revision ?? "") !== currentRevision) throw revisionConflict(name, String(input.expected_revision ?? ""), currentRevision); if (!pathExists(this.file(name))) throw mutationFailure(`autogenskills: read ${this.file(name)}: open ${this.file(name)}: no such file or directory`); const s = this.parse(name); if (input.instructions) s.instructions = input.append ? `${s.instructions}\n\n${input.instructions}` : input.instructions; if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
     if (action === "absorb_files") {
       // skillmanage.go executeAbsorbFiles + absorb.go absorbSupportFiles: the
       // source/destination must both load, every carried file is one chained
@@ -563,13 +575,14 @@ export class AutoSkillManager {
       const available = this.supportFiles(from);
       if (!available.length) throw new Error(`skill ${JSON.stringify(from)} has no support files to absorb`);
       const requested = String(input.file_paths ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
-      const selected: string[] = [];
+      const selected: string[] = [], missing: string[] = [];
       for (const raw of requested.length ? requested : available) {
         // absorb.go selectSupportFiles: forward slashes, must be a listed support file.
         const clean = goCleanPath(raw.replaceAll("\\", "/"));
-        if (!available.includes(clean)) throw new Error(`support file ${JSON.stringify(raw)} not found in skill ${JSON.stringify(from)}`);
+        if (!available.includes(clean)) { missing.push(raw); continue; }
         if (!selected.includes(clean)) selected.push(clean);
       }
+      if (missing.length) throw new Error(`source has no such support file(s): ${missing.join(", ")}`);
       let expected = String(input.expected_revision ?? ""), revision = "";
       const files: string[] = [], sizes: Record<string, number> = {}, digests: Record<string, string> = {}, skipped: Record<string, string> = {};
       for (const rel of selected) {
@@ -585,25 +598,32 @@ export class AutoSkillManager {
       return { absorbed: files.filter(f => !skipped[f]).length, files, sizes, digests, skipped, revision };
     }
     if (action === "archive") {
+      // skillmanage.go executeArchive: parameter refusals (bare text) come
+      // before the revision transaction; inside it curator.archiveLocked
+      // inspects the ACTIVE directory, so archived/absent packages fail with
+      // the lstat error joined to "unsupported format 0".
       if (!input.curator_internal) this.assertMutationAllowed(action);
-      const meta = this.state.skills[name]; if (meta?.pinned || meta?.curatorState === "pinned") throw new Error(`skill ${name} is pinned`);
+      const meta = this.state.skills[name];
+      const absorbedInto = String(input.absorbed_into ?? ""), reason = String(input.pruning_reason ?? "");
+      if (absorbedInto.trim() === "" && reason.trim() === "") throw new Error("archive requires 'absorbed_into' after consolidation or 'pruning_reason' for true pruning");
+      if (absorbedInto === name) throw new Error("archive absorbed_into must name a different umbrella skill");
+      if (absorbedInto !== "" && !(safeName(absorbedInto) && pathExists(this.file(absorbedInto)))) throw new Error(`archive umbrella ${JSON.stringify(absorbedInto)} does not exist: ${safeName(absorbedInto) ? `autogenskills: skill ${JSON.stringify(absorbedInto)} not found` : `autogenskills: invalid skill name ${JSON.stringify(absorbedInto)}`}`);
+      const dropped = String(input.dropped_files ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
+      if (absorbedInto !== "") {
+        const digest = (skill: string, rel: string) => { try { return this.hashBytes(readFileSync(this.resolveSupportPath(skill, rel))); } catch { return undefined; } };
+        const sourceFiles = this.packageRoot(name) === this.dir(name) ? this.supportFiles(name) : [];
+        const missing = sourceFiles.filter(rel => digest(name, rel) !== digest(absorbedInto, rel));
+        const remaining = missing.filter(rel => !dropped.includes(rel));
+        if (remaining.length) throw new Error(`Archive refused: ${JSON.stringify(name)} still has ${remaining.length} support file(s) that ${JSON.stringify(absorbedInto)} does not hold byte-for-byte:\n  ${remaining.join("\n  ")}\n\nCarry them across first, without retyping them:\n  SkillManage(action="absorb_files", from_skill=${JSON.stringify(name)}, name=${JSON.stringify(absorbedInto)})\nthen rewrite the umbrella's instructions to the new paths and archive again.\nIf a file is genuinely obsolete, name it in 'dropped_files' and justify the loss in 'pruning_reason'.`);
+        if (dropped.length && reason.trim() === "") throw new Error("archive with 'dropped_files' requires 'pruning_reason' explaining why losing those files is safe");
+      }
       const expected = String(input.expected_revision ?? ""); const current = this.diskHead(name);
       if (expected !== current) throw revisionConflict(name, expected, current);
-      const sourceFiles = this.supportFiles(name), absorbedInto = input.absorbed_into ? String(input.absorbed_into) : "";
-      if (absorbedInto && !safeName(absorbedInto)) throw new Error("absorbed_into must name a valid skill");
-      const dropped = String(input.dropped_files ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
-      const reason = String(input.pruning_reason ?? "").trim();
-      if (!absorbedInto && !reason) throw new Error("archive requires absorbed_into or nonblank pruning_reason");
-      if (absorbedInto && (!existsSync(this.file(absorbedInto)) || absorbedInto === name)) throw new Error("absorbed_into must name a different existing skill");
-      if (sourceFiles.length && absorbedInto) {
-        const targetFiles = this.supportFiles(absorbedInto);
-        const missing = sourceFiles.filter(p => !targetFiles.includes(p) || this.hashBytes(readFileSync(join(this.dir(name), p))) !== this.hashBytes(readFileSync(join(this.dir(absorbedInto), p))));
-        if (missing.some(p => !dropped.includes(p))) throw new Error(`archive refused: support files not preserved; use absorb_files first (${missing.join(", ")})`);
-      }
-      if (dropped.length && !reason) throw new Error("dropped_files requires pruning_reason");
+      if (meta?.pinned || meta?.curatorState === "pinned") throw mutationFailure(`curator: skill ${JSON.stringify(name)} is pinned and cannot be archived`);
+      if (!pathExists(this.dir(name))) throw mutationFailure(`curator: inspect ${name}: lstat ${this.dir(name)}: no such file or directory`);
       const s = this.parse(name), target = join(this.config.dir, "archive", name);
       this.safePath(this.config.dir, `archive/${name}`);
-      if (pathExists(target)) throw new Error(`archive placement already exists for ${name}`);
+      if (pathExists(target)) throw mutationFailure(`curator: archive destination already exists for ${JSON.stringify(name)}`);
       mkdirSync(join(this.config.dir, "archive"), { recursive: true });
       renameSync(s.path, target);
       let provenance: Revision;
@@ -616,6 +636,7 @@ export class AutoSkillManager {
     }
     if (action === "history") {
       const headPath = join(this.config.dir, ".history", "heads", name);
+      const limit = input.limit;
       this.safePath(this.config.dir, `.history/heads/${name}`);
       if (!existsSync(headPath)) {
         // history.go historySnapshot: with no recorded head, the live state
@@ -641,6 +662,7 @@ export class AutoSkillManager {
         revisions.push(revision);
         cursor = revision.parent ?? "";
       }
+      if (typeof limit === "number" && limit < 1) throw new Error(`limit must be >= 1, got ${limit}`);
       return { revisions: revisions.map(r => ({ id: r.id, parent: r.parent, action: r.action, revert_of: r.revertOf, createdAt: r.createdAt, placement: r.placement ?? "active", files: r.files })) };
     }
     if (action === "undo") {
@@ -707,6 +729,7 @@ export class AutoSkillManager {
     if (action === "write_file") {
       this.assertMutationAllowed(action);
       const raw = String(input.file_path ?? "");
+      if (!input.file_content) throw new Error("write_file requires non-empty 'file_content'");
       // history.go WriteSupportFileRevisioned: resolveSupportPath runs before
       // the revision transaction, so its errors carry no errors.Join suffix.
       const p = this.resolveSupportPath(name, raw, "unsafe skill name");

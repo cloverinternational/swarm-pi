@@ -159,7 +159,7 @@ test("unknown capture profiles are rejected before launching either runtime", as
 // sleep/stdin blockers, annoyance nudge) and every non-bash tool's result
 // envelope + error path must also be byte-identical, not only the 3-request
 // base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
-for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default" && name !== "skills" && name !== "mutations")) {
+for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => !["default", "skills", "mutations", "mutations2"].includes(name))) {
   test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
     const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
     try {
@@ -260,6 +260,22 @@ test("project profile is wire-identical for the autogen SkillManage lifecycle in
     await rm(scratch, { recursive: true, force: true });
   }
 }, { timeout: 240_000 });
+
+test("project profile is wire-identical for SkillManage edge cases in a foreign workspace (mutations2 scenario)", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));
+  const workspace = join(scratch, "ws");
+  const output = join(scratch, "out");
+  try {
+    await makeStressWorkspace(workspace);
+    const result = await captureParity({ profile: "project", scenario: "mutations2", workspace, output });
+    assert.equal(result.pi.requests.length, expectedPrimaryRequests("mutations2"));
+    assert.equal(result.swarm.requests.length, expectedPrimaryRequests("mutations2"));
+    assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+    assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, { timeout: 300_000 });
 
 test("project profile is wire-identical for on-disk skill invocation in a foreign workspace (skills scenario)", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));

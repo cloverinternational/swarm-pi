@@ -85,6 +85,14 @@ export function renderSkillManageResult(action: string, params: any, result: any
   }
 }
 
+const BARE_REFUSALS = [
+  /^view '(offset|limit)' must be /,
+  /^limit must be >= 1, got /,
+  /^write_file requires non-empty 'file_content'$/,
+  /^absorb_files (source|destination) ".*" does not exist: /,
+  /^archive (requires|absorbed_into|umbrella|with 'dropped_files'|preservation check failed)/,
+  /^Archive refused: /,
+];
 export const SKILL_MANAGE_ACTIONS = ["create", "patch", "write_file", "absorb_files", "read_file", "review", "view", "history", "undo", "list", "archive"];
 export const unknownActionText = (action: unknown) =>
   `Unknown action ${q(action)}. Use create, patch, write_file, absorb_files, read_file, review, view, history, undo, list, or archive.`;
@@ -92,6 +100,9 @@ export const unknownActionText = (action: unknown) =>
 /** Swarm's non-error validation prose for a failed action; undefined keeps Pi's error path. */
 export function renderSkillManageError(action: string, params: any, message: string): string | undefined {
   const name = params?.name;
+  // Tool-level parameter refusals that skillmanage.go returns verbatim,
+  // without the per-action failure prefix.
+  if (BARE_REFUSALS.some(pattern => pattern.test(message))) return message;
   switch (action) {
     case "create": return `Skill creation failed: ${message}`;
     case "patch": return !name ? "patch requires a 'name' parameter" : `Patch failed: ${message}`;

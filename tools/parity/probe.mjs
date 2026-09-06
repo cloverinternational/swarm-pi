@@ -163,6 +163,50 @@ export const TOOL_SCRIPTS = {
     { id: "call_m19", tool: "SkillManage", args: { action: "list" } },
     { id: "call_m20", tool: "SkillManage", args: { action: "review", review_reason: "nothing reusable to save" } },
   ],
+  // SkillManage edge cases the lifecycle scenario does not reach: invalid and
+  // reserved names, paging, history limits, missing packages, patch merges,
+  // empty write_file bodies, absorb_files with explicit/missing paths,
+  // archive with dropped_files, read_file/undo against archived and absent
+  // placements, and undo back to the absent baseline.
+  mutations2: [
+    { id: "call_n1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "edge probe", status: "in_progress", active: true }] } },
+    { id: "call_n2", tool: "SkillManage", args: { action: "create", name: "Bad_Name", description: "x", instructions: "y" } },
+    { id: "call_n3", tool: "SkillManage", args: { action: "create", name: "archive", description: "x", instructions: "y" } },
+    { id: "call_n4", tool: "SkillManage", args: { action: "create", name: "edge-a", instructions: "y" } },
+    { id: "call_n5", tool: "SkillManage", args: { action: "create", name: "edge-a", description: "Edge A — it's \"quoted\": yes", instructions: "Line one\n\nLine two with unicode café ✓\n", tags: " one, two ,, three ", category: "cat: egory" } },
+    { id: "call_n6", tool: "SkillManage", args: { action: "view", name: "edge-a", offset: 5, limit: 7 } },
+    { id: "call_n7", tool: "SkillManage", args: { action: "view", name: "edge-a", offset: 999 } },
+    { id: "call_n8", tool: "SkillManage", args: { action: "view", name: "edge-a", limit: 0 } },
+    { id: "call_n9", tool: "SkillManage", args: { action: "view", name: "missing-skill" } },
+    { id: "call_n10", tool: "SkillManage", args: { action: "patch", name: "missing-skill", instructions: "z", expected_revision: "0000000000000000000000000000000000000000000000000000000000000000" } },
+    { id: "call_n11", tool: "SkillManage", args: { action: "patch", name: "edge-a", description: "Edge A v2", tags: "two, four", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n12", tool: "SkillManage", args: { action: "patch", name: "edge-a", instructions: "", append: true, expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n13", tool: "SkillManage", args: { action: "write_file", name: "edge-a", file_path: "references/empty.md", file_content: "", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n14", tool: "SkillManage", args: { action: "write_file", name: "edge-a", file_path: "references/../../escape.md", file_content: "x", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n15", tool: "SkillManage", args: { action: "write_file", name: "edge-a", file_path: "scripts/run.sh", file_content: "#!/bin/sh\necho hi\n", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n16", tool: "SkillManage", args: { action: "write_file", name: "edge-a", file_path: "scripts/run.sh", file_content: "#!/bin/sh\necho hi\n" } },
+    { id: "call_n17", tool: "SkillManage", args: { action: "history", name: "edge-a", limit: 2 } },
+    { id: "call_n18", tool: "SkillManage", args: { action: "history", name: "edge-a", limit: 0 } },
+    { id: "call_n19", tool: "SkillManage", args: { action: "history", name: "missing-skill" } },
+    { id: "call_n20", tool: "SkillManage", args: { action: "create", name: "edge-b", description: "Edge B", instructions: "Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length." } },
+    { id: "call_n21", tool: "SkillManage", args: { action: "absorb_files", name: "edge-b", from_skill: "edge-a", file_paths: "scripts/run.sh, references/nope.md", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n22", tool: "SkillManage", args: { action: "absorb_files", name: "edge-b", from_skill: "edge-a", file_paths: "scripts/run.sh", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n23", tool: "SkillManage", args: { action: "absorb_files", name: "edge-b", from_skill: "edge-a", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n24", tool: "SkillManage", args: { action: "absorb_files", name: "edge-b", from_skill: "missing-skill", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n25", tool: "SkillManage", args: { action: "absorb_files", name: "edge-b", from_skill: "edge-b", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n26", tool: "SkillManage", args: { action: "archive", name: "edge-a", absorbed_into: "edge-b", dropped_files: "references/empty.md", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n27", tool: "SkillManage", args: { action: "archive", name: "edge-a", absorbed_into: "edge-b", dropped_files: "references/empty.md", pruning_reason: "empty placeholder", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n28", tool: "SkillManage", args: { action: "read_file", name: "edge-a", file_path: "scripts/run.sh" } },
+    { id: "call_n29", tool: "SkillManage", args: { action: "patch", name: "edge-a", instructions: "after archive", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n30", tool: "SkillManage", args: { action: "archive", name: "edge-a", pruning_reason: "again", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n31", tool: "SkillManage", args: { action: "undo", name: "edge-a", expected_revision: "$REVISION:edge-a" } },
+    { id: "call_n32", tool: "SkillManage", args: { action: "history", name: "edge-b" } },
+    { id: "call_n33", tool: "SkillManage", args: { action: "undo", name: "edge-b", revision: "$REVISION:edge-b", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n34", tool: "SkillManage", args: { action: "undo", name: "edge-b", revision: "$BASELINE:edge-b", expected_revision: "$REVISION:edge-b" } },
+    { id: "call_n35", tool: "SkillManage", args: { action: "history", name: "edge-b" } },
+    { id: "call_n36", tool: "SkillManage", args: { action: "view", name: "edge-b" } },
+    { id: "call_n37", tool: "SkillManage", args: { action: "list" } },
+  ],
   // Message shapes the base scripts never exercise: assistant text next to a
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
@@ -440,9 +484,10 @@ function openAIChunk(model, delta, finishReason = null) {
 
 function substituteRevisions(args, messages) {
   const text = JSON.stringify(args);
-  if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:")) return args;
+  if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:") && !text.includes("$BASELINE:")) return args;
   const byCall = new Map();
   const byName = new Map();
+  const baseline = new Map();
   let last = "";
   for (const message of messages) {
     if (Array.isArray(message?.tool_calls)) for (const call of message.tool_calls) {
@@ -455,8 +500,10 @@ function substituteRevisions(args, messages) {
     const revision = meta.action === "history" ? hexes[0] : hexes[hexes.length - 1];
     last = revision;
     if (meta.name) byName.set(meta.name, revision);
+    // "$BASELINE:<skill>": the oldest id in that skill's latest history listing.
+    if (meta.name && meta.action === "history") baseline.set(meta.name, hexes[hexes.length - 1]);
   }
-  return JSON.parse(text.replace(/\$REVISION:([a-z0-9-]+)/g, (match, name) => byName.get(name) ?? match).replace(/\$LAST_REVISION/g, last || "$LAST_REVISION"));
+  return JSON.parse(text.replace(/\$REVISION:([a-z0-9-]+)/g, (match, name) => byName.get(name) ?? match).replace(/\$BASELINE:([a-z0-9-]+)/g, (match, name) => baseline.get(name) ?? match).replace(/\$LAST_REVISION/g, last || "$LAST_REVISION"));
 }
 
 async function startRecorder(script = TOOL_SCRIPTS.default) {
