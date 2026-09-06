@@ -92,7 +92,14 @@ Important UI locations:
 
 - **Bottom/footer:** `.pi/extensions/conversation-metrics.ts`; it calls
   `ctx.ui.setFooter(...)`, shows running/idle walltime and output tokens, and
-  refreshes with `requestRender()`.
+  refreshes with `requestRender()`. Pi has exactly one footer slot, so this
+  extension is its sole owner: other extensions must not call `setFooter`.
+  They contribute a text segment through the process-wide registry
+  `globalThis[Symbol.for("pi-swarm-footer-segments")]` (a `Map<name, () =>
+  string | undefined>`; `autogenskills` registers `"autogen"` there). Extension
+  factories must guard re-entry per `pi` instance (WeakSet/WeakMap), never with
+  a process-wide boolean: `/reload` re-evaluates modules with a fresh `pi`
+  while `globalThis` survives, and a boolean guard silently skips registration.
 - **Inline hook rows:** `.pi/hook-render-bridge.ts` and `.pi/hook-presenter.ts`.
 - **Themes:** `.pi/themes/*.json`.
 
@@ -147,7 +154,7 @@ When changing discovery, preserve these invariants:
 | Governance | `hooks`, `swarm-disk-hooks`, `upstream-readonly`, `swarm-plan-mode`, `annoyed/nudge` |
 | State/history | `conversation-metrics`, `memory-history`, `history-search`, `cache-telemetry` |
 | Skills/MCP/network | `swarm-skills`, `autogenskills`, `codemode`, `swarm-search`, `exa-search`, `research-tools` |
-| Control/integration | `control-panel`, `swarm-transport-parity`, `schedule`, `pi-ask-user`, `swarm-history-vault-tools` |
+| Control/integration | `control-panel`, `swarm-transport-parity`, `schedule`, `pi-ask-user`, `swarm-history-vault-tools`, `vault` |
 | UI | `conversation-metrics`, `swarm-themes`, `swarm-thinking`, `system-inspector` |
 
 An extension is an adapter, not a second agent runtime. Prefer Pi native
@@ -180,6 +187,7 @@ belongs in `policy`, and rendering belongs in the extension/render bridge.
 | `control_plane_status` | `.pi/extensions/control-panel.ts` | `runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
 | `daemon_status`, goal/task/run tools | `.pi/extensions/swarm-runtime.ts`, `.pi/extensions/control-task-tools.ts` | `runtime-contracts/src/daemon-rpc.ts`, `goal-loop.ts`, `control-task.ts`; unavailable daemon must fail closed. |
 | `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `.pi/extensions/swarm-history-vault-tools.ts` | `.pi/lib/swarm-vault-tools.ts`; never expose secret values. |
+| `vault` | `.pi/extensions/vault.ts` | `.pi/lib/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
 | `mcp__<server>__<tool>` | `.pi/extensions/swarm-runtime.ts` / `mcp/src/index.ts` | `mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |
 | `annoyed` | `.pi/extensions/annoyed/index.ts` | `.pi/extensions/annoyed/store.ts`; issue persistence is separate from the nudge hook. |
 
