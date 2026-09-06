@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
+import { newErrorID } from "../lib/swarm-bash.ts";
 
 function exaKey() {
   const env = process.env.EXA_API_KEY?.trim(); if (env) return env;
@@ -36,10 +37,42 @@ export default function exaSearchExtension(rawPi: any) {
     description: "Search the web using Exa AI, matching Swarm's websearch tool. Requires EXA_API_KEY or ~/.swarmos/credentials.json providers.Exa.api_key. Returns concise highlights and source URLs.",
     parameters: schema,
     async execute(_id: string, params: any, signal: AbortSignal) {
-      const key = exaKey();
-      if (!key) return { content: [{ type: "text", text: "EXA_API_KEY is not configured" }], isError: true, details: {} };
+      // websearch/tool.go Validate: plain fmt.Errorf, so registry_impl.go's
+      // "validation failed for websearch: …" carries a single error_id.
+      const invalid = (message: string): never => { throw new Error(`Error executing websearch: validation failed for websearch: ${message} (error_id=${newErrorID()})`); };
+      const failure = (message: string): never => { throw new Error(`Error executing websearch: ${message} (error_id=${newErrorID()})`); };
+      if (typeof params?.query !== "string") invalid("query parameter is required and must be a string");
+      if (params.query === "") invalid("query cannot be empty");
+      if (Buffer.byteLength(params.query) > 1000) invalid("query exceeds maximum length of 1000 characters");
+      if (typeof params.max_results === "number" && (params.max_results < 1 || params.max_results > 20)) invalid("max_results must be between 1 and 20");
+      if ("allowed_domains" in params && "blocked_domains" in params) invalid("allowed_domains and blocked_domains cannot both be specified in the same request");
+      if (typeof params.type === "string" && params.type !== "" && !["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"].includes(params.type)) invalid(`invalid search type ${JSON.stringify(params.type)}; must be one of: auto, neural, fast, instant, deep-lite, deep, deep-reasoning, deep-max`);
+      // websearch.New: EXA_API_KEY selects the Exa backend, otherwise the
+      // Anthropic OAuth backend reads ~/.swarm/config/oauth/anthropic.json
+      // (provider/anthropic/oauth_config.go: a missing file is an empty config).
+      const key = process.env.EXA_API_KEY?.trim() || undefined;
+      if (!key) {
+        const oauthPath = join(process.env.SWARM_HOME || join(process.env.HOME ?? process.cwd(), ".swarm"), "config", "oauth", "anthropic.json");
+        let token: any;
+        try { token = JSON.parse(readFileSync(oauthPath, "utf8"))?.token; }
+        catch (error: any) {
+          if (error?.code !== "ENOENT") failure(`failed to get OAuth token: failed to ${error instanceof SyntaxError ? "parse" : "read"} OAuth config: ${error?.message ?? error} (run 'claude login')`);
+        }
+        if (!token) failure("failed to get OAuth token: no OAuth token stored (run 'claude login')");
+        if (!token.access_token) failure("OAuth token is empty — run 'claude login' to authenticate");
+        // The Anthropic server-side search itself is not ported; Pi falls back
+        // to Exa when a key is configured outside the environment.
+        const fallback = exaKey();
+        if (!fallback) failure("Anthropic web search backend is not available in Pi; set EXA_API_KEY");
+        return runExa(fallback, params, signal);
+      }
+      return runExa(key, params, signal);
+    },
+  });
+}
+
+async function runExa(key: string, params: any, signal: AbortSignal) {
       const query = String(params.query ?? "").trim();
-      if (!query) return { content: [{ type: "text", text: "query is required" }], isError: true, details: {} };
       // Prefer the allow-list if both are supplied. This keeps permissive model
       // tool calls from becoming provider validation failures.
       const allowedDomains = Array.isArray(params.allowed_domains) ? params.allowed_domains.filter((v: any) => typeof v === "string" && v.trim()) : [];
@@ -106,6 +139,4 @@ export default function exaSearchExtension(rawPi: any) {
       if (!response.ok) return { content: [{ type: "text", text: `Exa HTTP ${response.status}: ${data?.message ?? data?.error ?? "request failed"}` }], isError: true, details: {} };
       const results = (data.results ?? []).map((r: any) => ({ title: r.title, url: r.url, author: r.author, publishedDate: r.publishedDate, highlights: r.highlights ?? [], summary: r.summary }));
       return { content: [{ type: "text", text: JSON.stringify({ query, backend: "exa", searchType: data.searchType, results, costDollars: data.costDollars }, null, 2) }], details: { requestId: data.requestId, resultCount: results.length } };
-    },
-  });
 }

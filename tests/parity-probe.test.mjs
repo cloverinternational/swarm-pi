@@ -160,6 +160,7 @@ test("unknown capture profiles are rejected before launching either runtime", as
 // envelope + error path must also be byte-identical, not only the 3-request
 // base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
 for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => !["default", "skills", "skills2", "mutations", "mutations2"].includes(name))) {
+  // "agents" runs in the generic loop: its error paths need no foreign workspace.
   test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
     const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
     try {

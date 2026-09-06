@@ -40,11 +40,20 @@ function parseChunk(data: Buffer): string {
   return parts.join("");
 }
 
+/** subagent.go getAllAvailableAgents builtin ids (custom definitions are merged in and sorted). */
+export const BUILTIN_AGENT_IDS = ["general-assistant", "code-reviewer", "research-agent", "explore", "background-worker", "agent_constructor", "code_formatter", "text_summarizer", "data_validator", "error_analyzer", "question_answerer"];
+export class AgentToolValidationError extends Error {}
 export class SwarmAgentTools {
+  availableAgents(): string[] {
+    const custom = typeof (this.manager as any).profileNames === "function" ? (this.manager as any).profileNames() as string[] : [];
+    return [...new Set([...custom, ...BUILTIN_AGENT_IDS])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
   private entries = new Map<string, Entry>();
   constructor(readonly manager: AgentManager) {}
 
   private fail(message: string): never { throw new Error(message); }
+  /** Errors Swarm raises from the tool's Validate() (registry_impl.go wraps them as "validation failed for X: …"). */
+  private invalid(message: string): never { throw new AgentToolValidationError(message); }
   private entry(id: string): Entry | undefined { return this.entries.get(id); }
   private status(e: Entry): Status { return (e.result?.status ?? "running") as Status; }
 
@@ -71,7 +80,7 @@ export class SwarmAgentTools {
   }
 
   async backgroundTask(p: AgentToolParams): Promise<ToolResult> {
-    if (typeof p.task !== "string" || p.task === "") this.fail("task parameter is required");
+    if (typeof p.task !== "string" || p.task === "") this.invalid("task parameter is required");
     const id = p.agent_id || `bg-${process.hrtime.bigint()}`;
     const e = this.spawn(p.task, p, id);
     return { text: json({
@@ -82,12 +91,17 @@ export class SwarmAgentTools {
   }
 
   async subagent(p: AgentToolParams): Promise<ToolResult> {
-    if (typeof p.task !== "string" || p.task === "") this.fail("task parameter is required");
-    if (p.agent_id && p.preset) this.fail("Cannot specify both 'agent_id' and 'preset'. The 'preset' parameter is deprecated - use 'agent_id' instead.");
-    if (p.run_in_background && Number(p.auto_background_seconds) > 0) this.fail("Cannot specify both 'run_in_background' and 'auto_background_seconds'. Choose one background mode.");
-    if (Number(p.auto_background_seconds) < 0) this.fail("auto_background_seconds must be positive");
+    // subagent.go Validate()
+    if (typeof p.task !== "string" || p.task === "") this.invalid("task parameter is required");
+    if (p.agent_id && p.preset) this.invalid("Cannot specify both 'agent_id' and 'preset'. The 'preset' parameter is deprecated - use 'agent_id' instead.");
+    if (p.run_in_background && Number(p.auto_background_seconds) > 0) this.invalid("Cannot specify both 'run_in_background' and 'auto_background_seconds'. Choose one background mode.");
+    if (Number(p.auto_background_seconds) < 0) this.invalid("auto_background_seconds must be positive");
     if (p.agent_id === "agent_constructor" && (p.run_in_background || Number(p.auto_background_seconds) > 0)) {
-      this.fail("agent_constructor cannot run in background mode: its output must be parsed and persisted synchronously. Remove 'run_in_background' or 'auto_background_seconds'.");
+      this.invalid("agent_constructor cannot run in background mode: its output must be parsed and persisted synchronously. Remove 'run_in_background' or 'auto_background_seconds'.");
+    }
+    // subagent.go Execute: unknown agent ids list every custom + builtin id, sorted.
+    if (typeof p.agent_id === "string" && p.agent_id !== "" && !this.availableAgents().includes(p.agent_id)) {
+      this.fail(`Agent '${p.agent_id}' not found. Available agents: ${this.availableAgents().join(", ")}`);
     }
     const prefix = p.agent_id || p.preset || "subagent";
     const e = this.spawn(p.task, p, `${prefix}-${id8()}`);
@@ -171,21 +185,22 @@ export class SwarmAgentTools {
     const timeout = p.timeout_seconds === undefined ? 600 : Number(p.timeout_seconds);
     if (timeout < 0) this.fail("timeout_seconds must be zero or greater");
     const e = this.entry(p.agent_id);
-    if (!e) this.fail(`agent '${p.agent_id}' not found: agent ${p.agent_id} not found`);
+    if (!e) this.fail(`agent '${p.agent_id}' not found: agent '${p.agent_id}' not found`);
     const result = await this.wait(e, timeout);
     if (!result) return { text: json({ wait_status: "timeout", timeout_seconds: timeout, agent: { agent_id: e.id, status: this.status(e) }, message: "Wait timeout; agent execution was not cancelled." }) };
     return { text: json(this.resultObject(result, e.outputFile)) };
   }
 
   async multiWait(p: AgentToolParams): Promise<ToolResult> {
-    if (!("agent_ids" in p)) this.fail("agent_ids parameter is required");
-    if (!Array.isArray(p.agent_ids)) this.fail("agent_ids must be an array");
-    if (!p.agent_ids.length) this.fail("agent_ids array cannot be empty");
-    p.agent_ids.forEach((id: unknown, i: number) => { if (typeof id !== "string") this.fail(`agent_ids[${i}] must be a string`); });
+    // multi_agent_wait.go Validate()
+    if (!("agent_ids" in p)) this.invalid("agent_ids parameter is required");
+    if (!Array.isArray(p.agent_ids)) this.invalid("agent_ids must be an array");
+    if (!p.agent_ids.length) this.invalid("agent_ids array cannot be empty");
+    p.agent_ids.forEach((id: unknown, i: number) => { if (typeof id !== "string") this.invalid(`agent_ids[${i}] must be a string`); });
     const timeout = p.timeout_seconds === undefined ? 600 : Number(p.timeout_seconds);
     if (timeout < 0) this.fail("timeout_seconds must be zero or greater");
     const entries = p.agent_ids.map((id: string) => {
-      const e = this.entry(id); if (!e) this.fail(`agent '${id}' not found: agent ${id} not found`); return e;
+      const e = this.entry(id); if (!e) this.fail(`agent '${id}' not found: agent '${id}' not found`); return e;
     });
     const all = Promise.all(entries.map(e => e.done));
     const results = timeout === 0 ? await all : await Promise.race([all, new Promise<undefined>(r => setTimeout(r, timeout * 1000))]);

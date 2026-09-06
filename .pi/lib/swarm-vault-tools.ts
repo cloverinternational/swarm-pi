@@ -63,7 +63,7 @@ function metadata(c: AnyMap): AnyMap { return { id: c.id, name: c.name ?? "", ki
 export async function vaultAdd(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
   if (!p.id) return { success: false, credentialId: "", scope: "", kind: "", error: "id is required" };
   if (!p.kind) return { success: false, credentialId: "", scope: "", kind: "", error: "kind is required" };
-  if (!kinds.has(p.kind)) return { success: false, credentialId: "", scope: "", kind: "", error: `invalid credential kind: ${p.kind}` };
+  // vault_add.go never validates Kind against the known set; unknown kinds are stored verbatim.
   if (p.secret && p.kind === "ssh_key" && !validSSH(p.secret)) return { success: false, credentialId: "", scope: "", kind: "", error: "secret does not look like a valid ssh_key (expected PEM or OpenSSH private key material starting with a \"-----BEGIN ... PRIVATE KEY-----\" line); the credential was NOT modified. Omit 'secret' to update allowedTools/allowedCommands/allowedHosts/tags on an existing credential without touching its stored key." };
   if (p.expire) { const ms = durationMs(p.expire); if (!ms) return { success: false, credentialId: "", scope: "", kind: "", error: `invalid expiration duration '${p.expire}': time: invalid duration \"${p.expire}\"` }; }
   if (locked(rt)) return { success: false, credentialId: "", scope: "", kind: "", error: "vault is locked — tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI) before adding credentials" };

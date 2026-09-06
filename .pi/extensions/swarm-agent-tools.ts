@@ -1,6 +1,6 @@
 import { AgentManager, createPiRunner } from "../../agents/src/index.ts";
 import { applySwarmSurface } from "../lib/swarm-tool-surface.ts";
-import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, SwarmAgentTools, type ToolResult } from "../lib/swarm-agent-tools.ts";
+import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, type ToolResult } from "../lib/swarm-agent-tools.ts";
 import { newErrorID } from "../lib/swarm-bash.ts";
 
 type Pi = any;
@@ -11,7 +11,11 @@ const methods: Record<string, keyof SwarmAgentTools> = {
 };
 // Pi flags a tool result as failed only when execute() throws; the message
 // becomes the result content verbatim (docs/extensions.md "Signaling errors").
-const text = (r: ToolResult) => { if (r.isError) throw new Error(r.text); return { content: [{ type: "text", text: r.text }], details: r.details ?? {} }; };
+// A Go ToolResult{IsError: true} reaches the wire as its Output verbatim (no
+// "Error executing" envelope) while still counting as a failure for hooks;
+// a returned Go error gets the agent_tools.go + sdkerr envelope.
+class PlainToolFailure extends Error {}
+const text = (r: ToolResult) => { if (r.isError) throw new PlainToolFailure(r.text); return { content: [{ type: "text", text: r.text }], details: r.details ?? {} }; };
 
 export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManager; cwd?: string } = {}): SwarmAgentTools {
   const host = pi as Record<PropertyKey, any>;
@@ -36,7 +40,9 @@ export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManage
         try { return text(await (logic[method] as any).call(logic, params)); }
         catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          if (message.startsWith("Error executing ")) throw err;
+          if (message.startsWith("Error executing ") || err instanceof PlainToolFailure) throw err;
+          // registry_impl.go: Validate failures are sdkerr-wrapped a second time.
+          if (err instanceof AgentToolValidationError) throw new Error(`Error executing ${name}: validation failed for ${name}: ${message} (error_id=${newErrorID()}) (error_id=${newErrorID()})`);
           throw new Error(`Error executing ${name}: ${message} (error_id=${newErrorID()})`);
         }
       },
