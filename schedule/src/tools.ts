@@ -6,7 +6,7 @@ interface ToolResult {
   isError?: boolean;
 }
 
-const objectSchema = { type: "object", additionalProperties: false } as const;
+const objectSchema = { type: "object" } as const;
 const text = (details: unknown, message?: string): ToolResult => ({
   content: [{ type: "text", text: message ?? JSON.stringify(details, null, 2) }],
   details,
@@ -33,20 +33,20 @@ export interface ScheduleToolAPI {
 
 export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler): void {
   pi.registerTool({
-    name: "cron_create",
+    name: "CronCreate",
     label: "Create schedule",
-    description: "Schedule a prompt to run at a future time, either recurring on a standard five-field cron schedule or once at its next occurrence.",
+    description: "Schedule a prompt to run at a future time - either recurring on a cron schedule, or once at a specific time. Uses standard 5-field cron. Pass durable: true to persist to disk; otherwise session-only.",
     promptSnippet: "Create recurring or one-shot prompt schedules",
     executionMode: "parallel",
     parameters: {
       ...objectSchema,
       required: ["prompt", "cron"],
       properties: {
-        prompt: { type: "string", minLength: 1, maxLength: 100_000, description: "The prompt to execute on the scheduled agent." },
-        cron: { type: "string", minLength: 1, maxLength: 256, description: "Standard five-field cron: minute hour day-of-month month day-of-week." },
-        recurring: { type: "boolean", default: false, description: "Keep scheduling after the first occurrence." },
-        durable: { type: "boolean", default: false, description: "Persist across process restarts." },
-        agent_id: { type: "string", maxLength: 256, description: "Optional target agent identity." },
+        prompt: { type: "string", description: "The prompt to execute on the scheduled agent." },
+        cron: { type: "string", description: "Cron expression (5-field: minute hour day-of-month month day-of-week). Examples: '*/5 * * * *' every 5min, '0 9 * * 1-5' weekdays at 9am, '0 0 1 * *' monthly." },
+        recurring: { type: "boolean", description: "Recurring job? (default: false for one-shot)" },
+        durable: { type: "boolean", description: "Persist to disk? (default: false, session-only)" },
+        agent_id: { type: "string", description: "Specific agent to use for execution" },
       },
     },
     execute: executable(async (params: { prompt: string; cron: string; recurring?: boolean; durable?: boolean; agent_id?: string }) => {
@@ -60,9 +60,9 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
   });
 
   pi.registerTool({
-    name: "cron_list",
+    name: "CronList",
     label: "List schedules",
-    description: "List scheduled cron jobs with IDs, expressions, schedule type, persistence, and next fire time.",
+    description: "List all scheduled cron jobs. Shows task ID, cron expression, schedule type (recurring/one-shot), and persistence mode (durable/session-only).",
     promptSnippet: "List active prompt schedules",
     executionMode: "parallel",
     parameters: { ...objectSchema, properties: {} },
@@ -78,15 +78,15 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
   });
 
   pi.registerTool({
-    name: "cron_delete",
+    name: "CronDelete",
     label: "Delete schedule",
-    description: "Cancel a scheduled cron job by ID, including its persisted record when durable.",
+    description: "Cancel a scheduled cron job by ID. Removes it from the scheduler and from disk if it was a durable (persisted) task.",
     promptSnippet: "Cancel a prompt schedule by ID",
     executionMode: "parallel",
     parameters: {
       ...objectSchema,
       required: ["id"],
-      properties: { id: { type: "string", minLength: 1, description: "Task ID to cancel." } },
+      properties: { id: { type: "string", description: "Task ID to cancel" } },
     },
     execute: executable(async (params: { id: string }) => {
       await scheduler.remove(params.id);
@@ -95,17 +95,17 @@ export function registerScheduleTools(pi: ScheduleToolAPI, scheduler: Scheduler)
   });
 
   pi.registerTool({
-    name: "schedule_wakeup",
+    name: "ScheduleWakeup",
     label: "Schedule wakeup",
-    description: "Schedule a one-shot prompt after a positive delay. Wakeups are session-only.",
+    description: "Schedule a prompt to run after a delay. Used for dynamic scheduling where the model decides when to resume.",
     promptSnippet: "Wake the current agent after a delay",
     executionMode: "parallel",
     parameters: {
       ...objectSchema,
       required: ["prompt", "delay"],
       properties: {
-        prompt: { type: "string", minLength: 1, maxLength: 100_000, description: "The prompt to execute on wakeup." },
-        delay: { type: "string", minLength: 1, description: "Positive Go-style duration such as 30s, 5m, 1h, or 1h30m." },
+        prompt: { type: "string", description: "The prompt to execute on wakeup." },
+        delay: { type: "string", description: "Delay before wakeup (e.g., '5m', '1h')." },
       },
     },
     execute: executable(async (params: { prompt: string; delay: string }) => {

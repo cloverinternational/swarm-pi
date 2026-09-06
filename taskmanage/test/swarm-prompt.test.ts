@@ -21,10 +21,10 @@ describe("Forge prompt assembly", () => {
     const result = assembleForgePrompt("Pi's original system prompt", { cwd, userPrompt: "request", tools: [{ name: "read", guidance: "read safely" }], skills: [{ name: "review", instructions: "review carefully" }], restrictions: ["stay in workspace"] });
     expect(result.prompt).not.toContain("Pi's original system prompt");
     expect(result.prompt.indexOf("## Core Principles:")).toBeLessThan(result.prompt.indexOf("# Delegation (the Task tool)"));
-    expect(result.prompt).toContain("workspace instructions");
+    expect(result.prompt).toContain("<swarmos_cached_context>\nAs you answer the user's questions, you can use the following context:\n<context name=\"agentsMd\">\nworkspace instructions\n</context>");
     expect(result.prompt).toContain("stay in workspace");
     expect(result.hash).toMatch(/^sha256:/);
-    expect(result.provenance.map((entry) => entry.section)).toEqual(["workspace", "forge", "user", "tools", "skills", "context", "restrictions"]);
+    expect(result.provenance.map((entry) => entry.section)).toEqual(["workspace", "forge", "user", "tools", "skills", "restrictions", "context"]);
     expect(result.provenance.every((entry) => !entry.ref.includes("workspace instructions"))).toBe(true);
   });
   it("rejects context traversal and supports golden comparison", () => {

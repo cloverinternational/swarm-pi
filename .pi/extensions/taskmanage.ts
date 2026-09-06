@@ -2,9 +2,9 @@ import {
   registerTaskHooks,
   registerTaskManage,
   type HookConfig,
-  registerInteractionTools,
 } from "../../taskmanage/src/index.ts";
 import "../hook-state.ts";
+import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
 
 /**
  * Minimal structural subset of Pi's ExtensionAPI used by TaskManage.
@@ -46,12 +46,14 @@ export function registerTaskManageExtension(
   const manager = registerTaskManage(registrationPi);
   (pi as any).codemodeTools = [...((pi as any).codemodeTools ?? []), ...bridged];
   const hooks = registerTaskHooks(pi, manager, options);
-  const interactions = registerInteractionTools(pi as any, { headless: options?.headless, timeoutMs: options?.interactionTimeoutMs });
-  const result = { manager, hooks, interactions };
+  // ask_user_question is provided by the dedicated pi-ask-user extension.
+  // Keep interaction registration here out of the root extension: Pi rejects
+  // duplicate tool names when both extensions are auto-loaded.
+  const result = { manager, hooks };
   taskRuntimeByPi.set(owner, result);
   return result;
 }
 
 export default function taskManageExtension(pi: TaskManageExtensionAPI): void {
-  registerTaskManageExtension(pi);
+  registerTaskManageExtension(withSwarmToolSurface(pi));
 }

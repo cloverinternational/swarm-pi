@@ -32,7 +32,7 @@ describe("Pi schedule extension", () => {
     });
     expect(tools.size).toBe(4);
 
-    await tools.get("schedule_wakeup").execute("call", { prompt: "continue", delay: "1s" });
+    await tools.get("ScheduleWakeup").execute("call", { prompt: "continue", delay: "1s" });
     await vi.advanceTimersByTimeAsync(1_000);
     await scheduler.idle();
     expect(messages).toEqual([{ content: "continue", options: { deliverAs: "followUp" } }]);

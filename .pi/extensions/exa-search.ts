@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
 
 function exaKey() {
   const env = process.env.EXA_API_KEY?.trim(); if (env) return env;
@@ -28,7 +29,8 @@ const schema = {
   },
 } as const;
 
-export default function exaSearchExtension(pi: any) {
+export default function exaSearchExtension(rawPi: any) {
+  const pi = withSwarmToolSurface(rawPi);
   pi.registerTool({
     name: "websearch", label: "Web Search (Exa)",
     description: "Search the web using Exa AI, matching Swarm's websearch tool. Requires EXA_API_KEY or ~/.swarmos/credentials.json providers.Exa.api_key. Returns concise highlights and source URLs.",

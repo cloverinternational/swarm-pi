@@ -3,6 +3,7 @@ import extension, { registerTaskManageExtension } from "../../.pi/extensions/tas
 import promptExtension from "../../.pi/extensions/swarm-prompt.ts";
 import thinkingExtension from "../../.pi/extensions/swarm-thinking.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
+import { loadSwarmToolSurface } from "../../.pi/lib/swarm-tool-surface.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -32,10 +33,16 @@ describe("root Pi TaskManage extension", () => {
 
     extension(runtime.pi);
 
-    expect(runtime.tools).toHaveLength(5);
+    expect(runtime.tools).toHaveLength(1);
+    expect(runtime.tools.find((tool: any) => tool.name === "ask_user_question")).toBeUndefined();
+    // The model-facing contract is Swarm's canonical TaskManage definition
+    // (tools/parity/fixtures/swarm-tools.json); Pi's internal schema may carry
+    // extra runtime-validated fields that are never advertised.
+    const canonical = loadSwarmToolSurface().get("TaskManage")!;
     expect(runtime.tools[0]).toMatchObject({
       name: "TaskManage",
-      parameters: taskManageSchema,
+      description: canonical.description,
+      parameters: canonical.parameters,
       promptSnippet: expect.any(String),
       renderCall: expect.any(Function),
       renderResult: expect.any(Function),
@@ -53,6 +60,19 @@ describe("root Pi TaskManage extension", () => {
     expect(await broker.approve({ title: "Deploy" })).toMatchObject({ approved: false, status: "headless" });
     expect(broker.update({ message: "Working", progress: 0.5 })).toMatchObject({ message: "Working" });
     expect(sent[0]).toMatchObject({ customType: "swarm-agent-update" });
+  });
+
+  it("supports structured option values and batched questionnaires", async () => {
+    const broker = new InteractionBroker({ ui: { select: async () => "PostgreSQL — relational", input: async (title) => title === "First" ? "answer-1" : "answer-2" } });
+    await expect(broker.ask({ id: "db", header: "Database", question: "Which DB?", options: [{ value: "pg", label: "PostgreSQL", description: "relational" }, { value: "sqlite", label: "SQLite" }] })).resolves.toMatchObject({ status: "answered", question: "Which DB?" });
+    const result = await broker.askQuestionnaire({ questions: [{ id: "one", question: "First" }, { id: "two", question: "Second" }] });
+    expect(result.status).toBe("answered");
+    expect(result.answers).toHaveLength(2);
+  });
+
+  it("rejects invalid questionnaire shape and reserved custom options", async () => {
+    const broker = new InteractionBroker({});
+    await expect(broker.askQuestionnaire({ questions: [{ question: "Pick", options: [{ label: "Other" }, { label: "A" }] }] })).rejects.toThrow("custom options");
   });
 
   it("times out unanswered questions and approvals", async () => {

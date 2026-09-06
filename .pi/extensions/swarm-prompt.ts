@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { registerHook } from "../hook-state.ts";
 import { getSwarmSkillRegistry } from "../lib/swarm-skill-registry.ts";
+import { BUILTIN_SOURCES, buildContextBlock, candidateContextPath, injectSwarmContext } from "../lib/swarm-context.ts";
 
 import {
   UPSTREAM_SOURCE,
@@ -17,6 +18,7 @@ const forgeMarker = "<!-- pi-swarm:forge-prompt:v1 -->";
 
 export interface PromptExtensionEvent {
   systemPrompt: string;
+  prompt?: string;
   systemPromptOptions?: { cwd?: string };
   /** Optional Forge prompt controls supplied by the host/bridge. */
   swarmPrompt?: PromptAssemblyOptions;
@@ -81,6 +83,8 @@ function conventionalFiles(root: string, names: string[], max: number): ContextF
   return names.flatMap((name) => { const path = safeRef(root, name); if (!path || !existsSync(path)) return []; try { const content = readFileSync(path, "utf8"); return [{ path: name, content: content.slice(0, max) }]; } catch { return []; } });
 }
 
+const PROJECT_MEMORY_SOURCES = ["project_claude_md", "project_swarm_md", "agents_md", "index_md"] as const;
+
 export function assembleForgePrompt(_base: string, options: PromptAssemblyOptions = {}): PromptAssembly {
   const workspace = resolveWorkspace(options.cwd);
   const root = workspace.cwd;
@@ -96,13 +100,20 @@ export function assembleForgePrompt(_base: string, options: PromptAssemblyOption
   add("tools", tools.map((tool) => `### ${tool.name}\n${tool.guidance}`).join("\n\n"), "configuration", "tools");
   add("skills", (options.skills || []).map((skill) => `### ${skill.name}${skill.version ? ` (v${skill.version})` : ""}\n${skill.instructions}`).join("\n\n"), "skill", "skills");
 
-  const names = options.contextFileNames || ["AGENTS.md", "SWARM.md"];
-  const files = [...(options.contextFiles || []).flatMap((name) => conventionalFiles(root, [name], max)), ...(options.discoverContextFiles === false ? [] : conventionalFiles(root, names, max))];
-  const unique = [...new Map(files.map((file) => [file.path, file])).values()].sort((a, b) => a.path.localeCompare(b.path));
-  add("context", unique.map((file) => `<context_file path="${file.path}">\n${file.content}\n</context_file>`).join("\n\n"), "context-file", unique.map((file) => file.path).join(","));
   add("restrictions", (options.restrictions || []).map((r) => `- ${r}`).join("\n"), "policy", "restrictions");
+  // Swarm TUI appends its context orchestrator output (AGENTS.md / SWARM.md /
+  // CLAUDE.md, projectName, gitStatus, currentDate) as tagged
+  // <swarmos_cached_context> / <swarmos_context> blocks after the base prompt,
+  // joined by "\n\n" (injection.go InjectContextBlocks). Mirror it exactly so
+  // the bytes crossing the model boundary match `swarm -p`.
+  // discoverContextFiles=false ⇔ Swarm --no-project-memory: only the file
+  // sources are excluded; projectName/gitStatus/currentDate still inject.
+  const enabled = options.discoverContextFiles === false ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
+  const context = buildContextBlock({ workDir: root, enabled });
+  const contextPaths = BUILTIN_SOURCES.filter((source) => (enabled?.[source.id] ?? source.enabled)).map((source) => candidateContextPath(source.id, root)).filter((path): path is string => Boolean(path));
+  add("context", context.block, "swarm-context", contextPaths.join(","));
   const prompt = sections.join("\n\n");
-  return { prompt, hash: hash(prompt), workspace, provenance, contextFiles: unique.map((file) => file.path) };
+  return { prompt, hash: hash(prompt), workspace, provenance, contextFiles: contextPaths };
 }
 
 export function comparePromptGolden(actual: PromptAssembly | string, golden: string): { equal: boolean; actualHash: string; goldenHash: string } {
@@ -112,28 +123,65 @@ export function comparePromptGolden(actual: PromptAssembly | string, golden: str
 
 export interface PromptExtensionAPI { on(event: "before_agent_start", handler: (event: PromptExtensionEvent, ctx: PromptExtensionContext) => unknown): void; }
 const promptRegistrations = new WeakSet<object>();
+// Swarm TUI (sdk_integration_skills.go InjectSkillsContext) prepends the
+// <available_skills> XML to the system prompt with NO separator and ranks it
+// with an empty query. Swarm's own source flags the missing boundary as a
+// known defect; we reproduce it verbatim because the goal is byte parity at
+// the model boundary. Fix it upstream first, then here.
+const withSkillCatalog = (prompt: string, catalog: string) => {
+  const withoutCatalog = prompt
+    .replace(/^(?:<available_skills>[\s\S]*?<\/available_skills>\n*)+/, "")
+    .replace(/\n*<available_skills>[\s\S]*?<\/available_skills>\n*/g, "\n\n")
+    .trim();
+  return catalog ? `${catalog}${withoutCatalog}` : withoutCatalog;
+};
+/**
+ * Pi CLI isolation flags mapped onto Swarm's headless isolation
+ * (swarm-tui/cmd/swarmos/main.go resolveHeadlessIsolation +
+ * sdk_integration_config.go applyContextExclusions):
+ *   --system-prompt X    ⇔ --system-prompt X   (explicit base; no Forge/default)
+ *   --no-context-files   ⇔ --no-project-memory (drop claudeMd/swarmMd/agentsMd/indexMd)
+ *   --no-skills          ⇔ --no-skills         (no <available_skills> block)
+ */
+export function cliIsolation(argv: readonly string[] = process.argv): { systemPrompt?: string; noContextFiles: boolean; noSkills: boolean } {
+  let systemPrompt: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--system-prompt" && i + 1 < argv.length) systemPrompt = argv[i + 1];
+    else if (arg.startsWith("--system-prompt=")) systemPrompt = arg.slice("--system-prompt=".length);
+  }
+  return { systemPrompt, noContextFiles: argv.includes("--no-context-files"), noSkills: argv.includes("--no-skills") };
+}
+
 export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   if (promptRegistrations.has(pi as object)) return;
   promptRegistrations.add(pi as object);
   registerHook(pi, "swarm-prompt", "before_agent_start", (event: PromptExtensionEvent, ctx: PromptExtensionContext) => {
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
+    const isolation = cliIsolation();
+    const catalogFor = () => (isolation.noSkills ? "" : getSwarmSkillRegistry(pi as any, { cwd }).catalog(""));
+    if (isolation.systemPrompt !== undefined) {
+      // Swarm keeps an explicit --system-prompt as the base and still applies
+      // skills (prepend, no separator) and context injection on top of it.
+      const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : undefined;
+      const base = injectSwarmContext(isolation.systemPrompt, { workDir: cwd, enabled });
+      return { systemPrompt: withSkillCatalog(base, catalogFor()) };
+    }
     const selected = resolveActiveSystemPrompt(cwd);
     // Pi-native and explicitly custom prompts own their exact system-prompt
     // contents. Leave them untouched; their respective canonical skill loaders
     // remain responsible for making skills available to the model.
     if (selected.kind === "pi") return;
     if (selected.kind === "custom") return { systemPrompt: selected.content };
-    const registry = getSwarmSkillRegistry(pi as any, { cwd });
-    const catalog = registry.catalog();
-    const skillGuidance = catalog && !event.systemPrompt.includes("<available_skills>") ? `\n\n${catalog}\nWhen a user request matches an available skill, invoke the Skill tool before responding; do not reproduce the skill instructions instead of invoking it.` : "";
+    const catalog = catalogFor();
     // Forge may already have been assembled by another prompt layer. Keep its
-    // content intact and make catalog injection idempotent.
-    if (event.systemPrompt.includes(forgeMarker)) return skillGuidance ? { systemPrompt: event.systemPrompt + skillGuidance } : undefined;
-    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, ...event.swarmPrompt });
-    // Pi's native skill loader owns the Pi ecosystem. Do not inject Swarm's
-    // install/autogen skills into the system prompt; Swarm skills remain an
-    // explicit, user-invoked capability only.
-    return { systemPrompt: assembly.prompt + skillGuidance };
+    // content intact and replace any stale/native partial catalogue.
+    if (event.systemPrompt.includes(forgeMarker)) {
+      const next = withSkillCatalog(event.systemPrompt, catalog);
+      return next === event.systemPrompt ? undefined : { systemPrompt: next };
+    }
+    const assembly = assembleForgePrompt(event.systemPrompt, { cwd, discoverContextFiles: !isolation.noContextFiles, ...event.swarmPrompt });
+    return { systemPrompt: withSkillCatalog(assembly.prompt, catalog) };
   });
 }
 export default function swarmPromptExtension(pi: PromptExtensionAPI): void { registerSwarmPrompt(pi); }

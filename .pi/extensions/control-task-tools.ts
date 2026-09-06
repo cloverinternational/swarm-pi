@@ -8,7 +8,6 @@ const text = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringi
 export function registerControlTaskTools(pi: Pi, control: ControlTaskInterface): void {
   const add = (name: string, description: string, required: string[], properties: Record<string, unknown>, call: (p: any) => Promise<unknown>) => pi.registerTool({ name, label: name, description, parameters: schema(required, properties), async execute(_id: string, p: unknown) { try { return text(await call(p)); } catch (error) { return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: {} }; } } });
   const id = { type: "string", minLength: 1 };
-  add("goal_create", "Create a goal through the authoritative control plane.", ["description"], { description: { type: "string" }, idempotencyKey: { type: "string" } }, p => control.goalCreate(p));
   add("goal_get", "Get a goal from the authoritative control plane.", ["id"], { id }, p => control.goalGet(p.id as ID));
   add("task_create", "Create a task through the authoritative control plane.", ["prompt"], { prompt: { type: "string" }, goalId: id, idempotencyKey: { type: "string" } }, p => control.taskCreate(p));
   add("task_get", "Get a task from the authoritative control plane.", ["id"], { id }, p => control.taskGet(p.id as ID));

@@ -21,9 +21,9 @@ describe("schedule tools", () => {
     await scheduler.start();
     const tools = new Map<string, any>();
     registerScheduleTools({ registerTool: (tool: any) => tools.set(tool.name, tool) }, scheduler);
-    expect([...tools.keys()]).toEqual(["cron_create", "cron_list", "cron_delete", "schedule_wakeup"]);
+    expect([...tools.keys()]).toEqual(["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]);
 
-    const created = await tools.get("cron_create").execute("call-1", {
+    const created = await tools.get("CronCreate").execute("call-1", {
       prompt: "run",
       cron: "*/5 * * * *",
       recurring: true,
@@ -36,9 +36,9 @@ describe("schedule tools", () => {
       persistence: "durable",
     }));
 
-    const listed = await tools.get("cron_list").execute("call-2", {});
+    const listed = await tools.get("CronList").execute("call-2", {});
     expect(listed.details.total_tasks).toBe(1);
-    const deleted = await tools.get("cron_delete").execute("call-3", { id: "task-12345678" });
+    const deleted = await tools.get("CronDelete").execute("call-3", { id: "task-12345678" });
     expect(deleted.details.message).toContain("Cancelled");
   });
 
@@ -49,7 +49,7 @@ describe("schedule tools", () => {
     await scheduler.start();
     const tools = new Map<string, any>();
     registerScheduleTools({ registerTool: (tool: any) => tools.set(tool.name, tool) }, scheduler);
-    const result = await tools.get("schedule_wakeup").execute("call", { prompt: "x", delay: "-1m" });
+    const result = await tools.get("ScheduleWakeup").execute("call", { prompt: "x", delay: "-1m" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("invalid delay");
   });

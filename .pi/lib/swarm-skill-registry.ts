@@ -1,54 +1,74 @@
-import { resolve } from "node:path";
-import { SkillLoader, generateAvailableSkillsXML, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
+import { join, resolve } from "node:path";
+import { SkillLoader, generateRankedAvailableSkillsXML, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
 
-/** One registry shared by the model-facing Skill tool, prompt catalog, and /skill command. */
+/** Canonical registry shared by discovery, Forge catalogues, and Skill invocation. */
 export class SwarmSkillRegistry {
   readonly loader: SkillLoader;
   private result: SkillLoadResult;
-  private closed = false;
+  private closed: boolean;
   private allowedNames?: string[];
-  constructor(options: SkillLoaderOptions = {}) { this.closed = !!options.closed; this.allowedNames = options.allowedNames; this.loader = new SkillLoader({ ...options, closed: this.closed, allowedNames: this.allowedNames }); this.result = this.loader.load(); }
-  enforcePolicy(closed: boolean, allowedNames?: string[]) {
-    this.closed = this.closed || closed;
-    if (allowedNames) this.allowedNames = this.allowedNames ? this.allowedNames.filter(name => allowedNames.includes(name)) : [...allowedNames];
+  constructor(readonly options: SkillLoaderOptions = {}) {
+    this.closed = !!options.closed;
+    this.allowedNames = options.allowedNames ? [...options.allowedNames] : options.allowedSkills ? [...options.allowedSkills] : undefined;
+    this.loader = new SkillLoader({ ...options, closed: this.closed, allowedNames: this.allowedNames, allowedSkills: this.allowedNames });
+    this.result = this.loader.load();
+  }
+  enforcePolicy(closed: boolean, allowed?: string[]) {
+    this.closed ||= closed;
+    if (allowed) this.allowedNames = this.allowedNames ? this.allowedNames.filter(n => allowed.includes(n)) : [...allowed];
     this.loader.configure({ closed: this.closed, allowedNames: this.allowedNames });
     this.refresh();
   }
-  refresh(): SkillLoadResult { this.result = this.loader.load(); return this.result; }
-  list(): LoadedSkill[] { return this.result.skills; }
-  find(name: string): LoadedSkill | undefined { return this.result.skills.find(s => s.name === name); }
-  catalog(): string { return generateAvailableSkillsXML(this.result.skills.filter(s => !s.disableModelInvocation)); }
-  invoke(name: string, args = ""): LoadedSkill {
+  refresh() { this.result = this.loader.load(); return this.result; }
+  list() { return this.result.skills; }
+  find(name: string) { return this.result.skills.find(s => s.name === name); }
+  catalog(query = "") { return generateRankedAvailableSkillsXML(rankSkillsForContext(this.result.skills.filter(s => !s.disableModelInvocation), query)); }
+  invoke(name: string, args = "") {
     const skill = this.find(name);
     if (!skill) throw new Error(`skill not found: ${name}`);
     if (skill.disableModelInvocation) throw new Error(`skill invocation is disabled: ${name}`);
     return { ...skill, instructions: args ? skill.instructions.replaceAll("{{arg}}", args) : skill.instructions };
   }
 }
-
 export type { LoadedSkill, SkillLoaderOptions, SkillLoadResult };
 
-const registries = new WeakMap<object, Map<string, SwarmSkillRegistry>>();
-export function getSwarmSkillRegistry(pi: object, options: SkillLoaderOptions = {}): SwarmSkillRegistry {
-  // All entry points must derive the same policy when callers omit options;
-  // otherwise prompt construction and invocation can observe different
-  // registries depending on extension initialization order.
-  const cwd = options.cwd ?? process.cwd();
-  const explicitAllowed = options.allowedNames ?? (process.env.SWARM_SKILLS_ALLOWED?.split(",").map(s => s.trim()).filter(Boolean));
-  const effective: SkillLoaderOptions = {
-    ...options, cwd,
-    closed: options.closed ?? (process.env.SWARM_SKILLS_CLOSED === "1"),
-    cliPaths: options.cliPaths ?? [],
-    allowedNames: explicitAllowed,
-    allowedSkills: explicitAllowed,
-  };
-  // Exactly one policy/registry per Pi and working directory. Later callers
-  // cannot accidentally replace a stricter registry with a permissive one.
-  const key = resolve(cwd);
+const registries = new WeakMap<object, Map<string, { registry: SwarmSkillRegistry; signature: string; cliPaths: string[]; allowed?: string[] }>>();
+const envAllowed = () => process.env.SWARM_SKILLS_ALLOWED?.split(",").map(s => s.trim()).filter(Boolean);
+/** Normalize discovery inputs before comparing registry identity.  The loader applies
+ * these defaults too, so omitted values must not look like conflicting paths.
+ * Keep this limited to discovery roots: policy is intentionally enforced below
+ * by intersection (narrowing), rather than becoming part of identity.
+ */
+const discoverySignature = (o: SkillLoaderOptions, cliPaths: string[]) => {
+  const cwd = resolve(o.cwd ?? process.cwd());
+  const home = resolve(o.home ?? process.env.HOME ?? cwd);
+  const managedDir = o.managedDir ?? process.env.SWARM_MANAGED_SKILLS_DIR ?? "";
+  return JSON.stringify({
+    cwd,
+    home,
+    managedDir: managedDir ? resolve(managedDir) : "",
+    installDir: resolve(o.installDir ?? join(home, ".swarm", "skills")),
+    autogenDir: resolve(o.autogenDir ?? join(home, ".swarm", "skills", "autogen")),
+    cliPaths: cliPaths.map(path => resolve(path)).sort(),
+  });
+};
+export function getSwarmSkillRegistry(pi: object, options: SkillLoaderOptions = {}) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const supplied = options.allowedNames ?? options.allowedSkills;
+  const allowed = supplied ?? envAllowed();
+  const cliPaths = [...(options.cliPaths ?? [])].map(path => resolve(path)).sort();
+  const effective: SkillLoaderOptions = { ...options, cwd, cliPaths, closed: options.closed ?? process.env.SWARM_SKILLS_CLOSED === "1", allowedNames: allowed, allowedSkills: allowed };
   let byCwd = registries.get(pi);
   if (!byCwd) { byCwd = new Map(); registries.set(pi, byCwd); }
-  let registry = byCwd.get(key);
-  if (!registry) { registry = new SwarmSkillRegistry(effective); byCwd.set(key, registry); }
-  registry.enforcePolicy(!!effective.closed, effective.allowedNames);
-  return registry;
+  const signature = discoverySignature(effective, cliPaths);
+  const existing = byCwd.get(cwd);
+  if (!existing) {
+    const registry = new SwarmSkillRegistry(effective);
+    byCwd.set(cwd, { registry, signature, cliPaths, allowed: allowed ? [...allowed] : undefined });
+    return registry;
+  }
+  if (existing.signature !== signature || JSON.stringify(existing.cliPaths) !== JSON.stringify(cliPaths)) throw new Error("conflicting Swarm skill discovery paths for the same Pi and cwd");
+  const narrowed = allowed ? (existing.allowed ? existing.allowed.filter(n => allowed.includes(n)) : [...allowed]) : existing.allowed;
+  existing.registry.enforcePolicy(!!effective.closed, narrowed);
+  return existing.registry;
 }

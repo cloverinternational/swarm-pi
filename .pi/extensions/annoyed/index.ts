@@ -1,5 +1,6 @@
 import { AnnoyedStore, type AnnoyedStatus, type AnnoyedSeverity } from "./store.ts";
 import { registerAnnoyanceNudgeHook } from "./nudge.ts";
+import { withSwarmToolSurface } from "../../lib/swarm-tool-surface.ts";
 
 const schema = {
   type: "object", required: ["issue"], additionalProperties: false,
@@ -14,7 +15,8 @@ const schema = {
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const notify = (ctx: any, message: string, level: "info" | "warning" | "error" = "info") => ctx?.ui?.notify?.(message, level);
 
-export default function annoyedExtension(pi: any) {
+export default function annoyedExtension(rawPi: any) {
+  const pi = withSwarmToolSurface(rawPi);
   registerAnnoyanceNudgeHook(pi);
   const store = new AnnoyedStore();
   pi.registerTool({

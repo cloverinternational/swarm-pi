@@ -3,10 +3,10 @@
 Swarm-compatible scheduling for Pi. The package exposes a host-neutral scheduler,
 an atomic JSON persistence adapter, and Pi tool registrations:
 
-- `cron_create`
-- `cron_list`
-- `cron_delete`
-- `schedule_wakeup`
+- `CronCreate`
+- `CronList`
+- `CronDelete`
+- `ScheduleWakeup`
 
 Durable tasks are stored in the upstream-compatible
 `<workspace>/.swarm/scheduled_tasks.json` array. Session-only tasks and wakeups
