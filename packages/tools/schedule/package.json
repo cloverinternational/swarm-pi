@@ -1,0 +1,11 @@
+{
+  "name": "@pi-swarm/schedule",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "croner": "^10.0.1"
+  }
+}

@@ -2,7 +2,7 @@ import {
   registerTaskHooks,
   registerTaskManage,
   type HookConfig,
-} from "../../taskmanage/src/index.ts";
+} from "../../packages/tools/taskmanage/src/index.ts";
 import "../hook-state.ts";
 import { withSwarmToolSurface } from "../lib/swarm-tool-surface.ts";
 import { registerSwarmBuiltinHooks } from "../lib/swarm-builtin-hooks-runtime.ts";

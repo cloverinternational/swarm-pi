@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { lstatSync } from "node:fs";
 import { runLegacyConfigMigration } from "./swarm-configmigrate.ts";
-import { SkillLoader, generateRankedAvailableSkillsXML, loadSkillFromDir, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../skills/src/index.ts";
+import { SkillLoader, generateRankedAvailableSkillsXML, loadSkillFromDir, rankSkillsForContext, type LoadedSkill, type SkillLoaderOptions, type SkillLoadResult } from "../../packages/context/skills/src/index.ts";
 import { effectiveSelection } from "./swarm-prompt-context-config.ts";
 
 /** Canonical registry shared by discovery, Forge catalogues, and Skill invocation. */

@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
-import { Policy } from "../../policy/src/index.ts";
-import { AgentManager, createPiRunner, registerAgents } from "../../agents/src/index.ts";
-import { MCPManager } from "../../mcp/src/index.ts";
+import { Policy } from "../../packages/policy/policy/src/index.ts";
+import { AgentManager, createPiRunner, registerAgents } from "../../packages/tools/agents/src/index.ts";
+import { MCPManager } from "../../packages/tools/mcp/src/index.ts";
 import { registerSwarmPrompt } from "./swarm-prompt.ts";
-import { DaemonRpcClient, createDaemonControlTask, createDaemonGoalLoop } from "../../runtime-contracts/src/daemon-rpc.ts";
-import { registerGoalLoop } from "../../runtime-contracts/src/goal-loop.ts";
+import { DaemonRpcClient, createDaemonControlTask, createDaemonGoalLoop } from "../../packages/runtime/runtime-contracts/src/daemon-rpc.ts";
+import { registerGoalLoop } from "../../packages/runtime/runtime-contracts/src/goal-loop.ts";
 import { registerControlTaskTools } from "./control-task-tools.ts";
 import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { swarmForgeSystemPrompt } from "../../swarm-prompt/src/index.ts";
+import { swarmForgeSystemPrompt } from "../../packages/context/prompt/src/index.ts";
 import { loadPromptContextConfig, savePromptContextConfig } from "../lib/swarm-prompt-context-config.ts";
 
 /**

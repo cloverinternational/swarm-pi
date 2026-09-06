@@ -4,7 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { registerHook } from "../hook-state.ts";
 import { getSwarmSkillRegistry } from "../lib/swarm-skill-registry.ts";
-import type { LoadedSkill } from "../../skills/src/index.ts";
+import type { LoadedSkill } from "../../packages/context/skills/src/index.ts";
 import { autogenMode } from "./autogenskills.ts";
 import { BUILTIN_SOURCES, DEFAULT_MAX_EXPLICIT_FILE_BYTES, DEFAULT_MAX_EXPLICIT_FILE_LINES, DEFAULT_MAX_EXPLICIT_FILES_BYTES, buildContextBlock, candidateContextPath, discoverAgentsMdPaths, injectContextBlocks, injectSwarmContext } from "../lib/swarm-context.ts";
 
@@ -13,7 +13,7 @@ import {
   forgeSwarmSystemPrompt,
   swarmForgeDelegationAddendum,
   swarmForgeSystemPrompt,
-} from "../../swarm-prompt/src/index.ts";
+} from "../../packages/context/prompt/src/index.ts";
 import { resolveActiveSystemPrompt } from "./system-prompts.ts";
 import { loadPromptContextConfig } from "../lib/swarm-prompt-context-config.ts";
 

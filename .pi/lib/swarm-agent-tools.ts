@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { BUILTIN_AGENT_PROFILES, type AgentManager, type AgentResult, type BackgroundHandle } from "../../agents/src/index.ts";
+import { BUILTIN_AGENT_PROFILES, type AgentManager, type AgentResult, type BackgroundHandle } from "../../packages/tools/agents/src/index.ts";
 
 export type ToolResult = { text: string; isError?: boolean; details?: unknown };
 export type AgentToolParams = Record<string, any>;

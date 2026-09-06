@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { registerScheduleTools, Scheduler, type SchedulerOptions } from "../../schedule/src/index.ts";
+import { registerScheduleTools, Scheduler, type SchedulerOptions } from "../../packages/tools/schedule/src/index.ts";
 import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 export interface ScheduleExtensionAPI {

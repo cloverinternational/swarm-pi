@@ -1,0 +1,8 @@
+{
+  "name": "@pi-swarm/policy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

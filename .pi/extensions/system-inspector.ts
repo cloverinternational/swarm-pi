@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { SkillLoader } from "../../skills/src/index.ts";
+import { SkillLoader } from "../../packages/context/skills/src/index.ts";
 import { resolveActiveSystemPrompt } from "./system-prompts.ts";
 
 /** Inspect the exact prompt/resources exposed by the current Pi-Swarm process. */

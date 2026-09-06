@@ -1,0 +1,9 @@
+{
+  "name": "@pi-swarm/prompt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "sync": "node scripts/sync.mjs"
+  }
+}

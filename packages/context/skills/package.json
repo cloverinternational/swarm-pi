@@ -1,0 +1,11 @@
+{
+  "name": "@pi-swarm/skills",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  }
+}

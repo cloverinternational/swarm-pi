@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { getSwarmSkillRegistry, type SkillLoaderOptions } from "../lib/swarm-skill-registry.ts";
-import { resolveSkillFile } from "../../skills/src/index.ts";
+import { resolveSkillFile } from "../../packages/context/skills/src/index.ts";
 import { loadPromptContextConfig, selectionAllows } from "../lib/swarm-prompt-context-config.ts";
 import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 

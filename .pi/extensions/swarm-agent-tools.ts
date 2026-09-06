@@ -1,4 +1,4 @@
-import { AgentManager, createPiRunner } from "../../agents/src/index.ts";
+import { AgentManager, createPiRunner } from "../../packages/tools/agents/src/index.ts";
 import { applySwarmSurface } from "../lib/swarm-tool-surface.ts";
 import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, type ToolResult } from "../lib/swarm-agent-tools.ts";
 import { newErrorID } from "../lib/swarm-bash.ts";

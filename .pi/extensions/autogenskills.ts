@@ -1,4 +1,4 @@
-import { registerAutoSkills, type Config } from "../../autogenskills/src/index.ts";
+import { registerAutoSkills, type Config } from "../../packages/context/autogenskills/src/index.ts";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";

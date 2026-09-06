@@ -1,4 +1,4 @@
-import type { ControlTaskInterface, ID } from "../../runtime-contracts/src/control-task.ts";
+import type { ControlTaskInterface, ID } from "../../packages/runtime/runtime-contracts/src/control-task.ts";
 import { withDefaultToolRenderer } from "../lib/swarm-tool-renderer.ts";
 
 type Pi = { registerTool(tool: unknown): void };
