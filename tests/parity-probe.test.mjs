@@ -159,7 +159,7 @@ test("unknown capture profiles are rejected before launching either runtime", as
 // sleep/stdin blockers, annoyance nudge) and every non-bash tool's result
 // envelope + error path must also be byte-identical, not only the 3-request
 // base probe. Each scenario is a scripted tool-call sequence in TOOL_SCRIPTS.
-for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default" && name !== "skills")) {
+for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "default" && name !== "skills" && name !== "mutations")) {
   test(`project profile is wire-identical for the ${scenario} scenario`, async () => {
     const output = await mkdtemp(join(tmpdir(), "pi-swarm-parity-test-"));
     try {
@@ -240,6 +240,26 @@ test("project profile is wire-identical for a foreign workspace with nested cont
     await rm(scratch, { recursive: true, force: true });
   }
 }, { timeout: 180_000 });
+
+// The autogen package lifecycle (create/view/patch/write_file/read_file/
+// absorb_files/archive/history/undo) runs inside each side's scratch HOME;
+// revision ids are per-run (they hash created_at) and are numbered by first
+// appearance so reuse still has to agree.
+test("project profile is wire-identical for the autogen SkillManage lifecycle in a foreign workspace (mutations scenario)", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));
+  const workspace = join(scratch, "ws");
+  const output = join(scratch, "out");
+  try {
+    await makeStressWorkspace(workspace);
+    const result = await captureParity({ profile: "project", scenario: "mutations", workspace, output });
+    assert.equal(result.pi.requests.length, expectedPrimaryRequests("mutations"));
+    assert.equal(result.swarm.requests.length, expectedPrimaryRequests("mutations"));
+    assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+    assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, { timeout: 240_000 });
 
 test("project profile is wire-identical for on-disk skill invocation in a foreign workspace (skills scenario)", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));

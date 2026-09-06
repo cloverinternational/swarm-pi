@@ -137,6 +137,32 @@ export const TOOL_SCRIPTS = {
     { id: "call_k11", tool: "SkillManage", args: { action: "list" } },
     { id: "call_k12", tool: "SkillManage", args: { action: "read_file", name: "args-skill", file_path: "references/notes.md" } },
   ],
+  // Autogen package lifecycle inside the sandbox HOME: create (too short,
+  // then valid), view → revision, patch (stale/valid revision), write_file,
+  // read_file, absorb_files, archive (refused, then valid), history, undo,
+  // and the list afterwards. Revision hashes are per-run and masked.
+  mutations: [
+    { id: "call_m1", tool: "TaskManage", args: { operations: [{ key: "a", op: "create", subject: "mutations probe", status: "in_progress", active: true }] } },
+    { id: "call_m2", tool: "SkillManage", args: { action: "create", name: "probe-alpha", description: "Alpha probe", instructions: "too short" } },
+    { id: "call_m3", tool: "SkillManage", args: { action: "create", name: "probe-alpha", description: "Alpha probe", instructions: "Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length.", tags: "probe, alpha", category: "testing" } },
+    { id: "call_m4", tool: "SkillManage", args: { action: "create", name: "probe-alpha", description: "Alpha again", instructions: "Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length." } },
+    { id: "call_m5", tool: "SkillManage", args: { action: "view", name: "probe-alpha" } },
+    { id: "call_m6", tool: "SkillManage", args: { action: "patch", name: "probe-alpha", instructions: "Patched body Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length.", expected_revision: "0000000000000000000000000000000000000000000000000000000000000000" } },
+    { id: "call_m7", tool: "SkillManage", args: { action: "patch", name: "probe-alpha", instructions: "Patched body Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length.", append: true, expected_revision: "$LAST_REVISION" } },
+    { id: "call_m8", tool: "SkillManage", args: { action: "write_file", name: "probe-alpha", file_path: "references/notes.md", file_content: "notes body\n", expected_revision: "$LAST_REVISION" } },
+    { id: "call_m9", tool: "SkillManage", args: { action: "write_file", name: "probe-alpha", file_path: "secrets/x.md", file_content: "nope", expected_revision: "$LAST_REVISION" } },
+    { id: "call_m10", tool: "SkillManage", args: { action: "read_file", name: "probe-alpha", file_path: "references/notes.md" } },
+    { id: "call_m11", tool: "SkillManage", args: { action: "read_file", name: "probe-alpha", file_path: "references/missing.md" } },
+    { id: "call_m12", tool: "SkillManage", args: { action: "create", name: "probe-beta", description: "Beta probe", instructions: "Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length. Step-by-step instructions that are long enough to satisfy the minimum instruction length." } },
+    { id: "call_m13", tool: "SkillManage", args: { action: "absorb_files", name: "probe-beta", from_skill: "probe-alpha", expected_revision: "$LAST_REVISION" } },
+    { id: "call_m14", tool: "SkillManage", args: { action: "archive", name: "probe-alpha", expected_revision: "$REVISION:probe-alpha" } },
+    { id: "call_m15", tool: "SkillManage", args: { action: "archive", name: "probe-alpha", absorbed_into: "probe-beta", expected_revision: "$REVISION:probe-alpha" } },
+    { id: "call_m16", tool: "SkillManage", args: { action: "view", name: "probe-alpha" } },
+    { id: "call_m17", tool: "SkillManage", args: { action: "history", name: "probe-beta" } },
+    { id: "call_m18", tool: "SkillManage", args: { action: "undo", name: "probe-beta", expected_revision: "$REVISION:probe-beta" } },
+    { id: "call_m19", tool: "SkillManage", args: { action: "list" } },
+    { id: "call_m20", tool: "SkillManage", args: { action: "review", review_reason: "nothing reusable to save" } },
+  ],
   // Message shapes the base scripts never exercise: assistant text next to a
   // tool call, reasoning_content, two tool calls in one assistant message,
   // an unknown tool name, an image Read (vision content in a tool result),
@@ -184,21 +210,32 @@ export function canonicalizeRequest(request) {
     if (!ids.has(value)) ids.set(value, `<tool-call-${nextId++}>`);
     return ids.get(value);
   };
+  // Autogen revision ids hash a manifest that embeds created_at (history.go
+  // capture → time.Now()), so they are per-run. Number them in order of
+  // first appearance across the request so reuse (view returning the create
+  // revision, the model echoing it back as expected_revision) still has to
+  // agree on both sides.
+  const revisions = new Map();
+  const revisionId = value => value.replace(/\b[0-9a-f]{64}\b/g, match => {
+    if (!revisions.has(match)) revisions.set(match, `<rev-${revisions.size + 1}>`);
+    return revisions.get(match);
+  });
   const visit = (value, parentKey = "") => {
     if (Array.isArray(value)) return value.map(item => visit(item, parentKey));
     if (!value || typeof value !== "object") {
       if (GENERATED_ID_KEYS.has(parentKey) && typeof value === "string") return generatedId(value);
+      if (typeof value === "string" && parentKey === "arguments") return revisionId(value);
       // Swarm-format tool results carry wall-clock timing and random error
       // ids; both runtimes emit the same shape, so normalise the values.
       if (typeof value === "string" && parentKey === "content") {
-        return value
+        return revisionId(value)
           .replace(/ duration_ms="\d+"/g, ' duration_ms="<ms>"')
           .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
           // annoyance-nudge fingerprints hash the failure text, which
           // contains the random error_id above, so they are per-run too.
           .replace(/(Fingerprint: ")[0-9a-f]{32}(")/g, "$1<fingerprint>$2")
           // Task timestamps (RFC3339Nano) and bash spill files are per-run.
-          .replace(/"(created_at|updated_at|completed_at)":"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
+          .replace(/"(created_at|updated_at|completed_at)": ?"\d{4}-\d\d-\d\dT[^"]+"/g, '"$1":"<ts>"')
           .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
           .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
           .replace(/"fire_time": ?"[^"]+"/g, '"fire_time":"<ts>"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
@@ -250,7 +287,11 @@ export function wireFingerprint(rawText) {
     .replace(/\(error_id=err_[0-9a-f]+\)/g, "(error_id=<id>)")
     .replace(/(Fingerprint: \\")[0-9a-f]{32}(\\")/g, "$1<fingerprint>$2")
     .replace(/\/tmp\/pi-swarm-parity-[A-Za-z0-9]+\/(?:pi|swarm)-home/g, "<home>")
-    .replace(/\\"(created_at|updated_at|completed_at)\\":\\"\d{4}-\d\d-\d\dT[^\\"]+\\"/g, '\\"$1\\":\\"<ts>\\"')
+    .replace(/\\"(created_at|updated_at|completed_at)\\": ?\\"\d{4}-\d\d-\d\dT[^\\"]+\\"/g, '\\"$1\\":\\"<ts>\\"')
+    .replace(/\b[0-9a-f]{64}\b/g, match => {
+      if (!ids.has(match)) ids.set(match, `<rev-${next++}>`);
+      return ids.get(match);
+    })
     .replace(/bash-full-\d+\.txt/g, "bash-full-<rand>.txt")
     .replace(/\b(task|wakeup)-\d{16,20}\b/g, "$1-<nanos>")
     .replace(/\\"fire_time\\": ?\\"[^\\"]+\\"/g, '\\"fire_time\\":\\"<ts>\\"').replace(/\(at \d\d:\d\d:\d\d\)/g, "(at <clock>)")
@@ -397,6 +438,27 @@ function openAIChunk(model, delta, finishReason = null) {
   };
 }
 
+function substituteRevisions(args, messages) {
+  const text = JSON.stringify(args);
+  if (!text.includes("$LAST_REVISION") && !text.includes("$REVISION:")) return args;
+  const byCall = new Map();
+  const byName = new Map();
+  let last = "";
+  for (const message of messages) {
+    if (Array.isArray(message?.tool_calls)) for (const call of message.tool_calls) {
+      try { const parsed = JSON.parse(call.function?.arguments ?? "{}"); byCall.set(call.id, { name: parsed.name ?? "", action: parsed.action ?? "" }); } catch { /* not JSON */ }
+    }
+    if (message?.role !== "tool" || typeof message.content !== "string") continue;
+    const hexes = message.content.match(/\b[0-9a-f]{64}\b/g);
+    if (!hexes) continue;
+    const meta = byCall.get(message.tool_call_id) ?? { name: "", action: "" };
+    const revision = meta.action === "history" ? hexes[0] : hexes[hexes.length - 1];
+    last = revision;
+    if (meta.name) byName.set(meta.name, revision);
+  }
+  return JSON.parse(text.replace(/\$REVISION:([a-z0-9-]+)/g, (match, name) => byName.get(name) ?? match).replace(/\$LAST_REVISION/g, last || "$LAST_REVISION"));
+}
+
 async function startRecorder(script = TOOL_SCRIPTS.default) {
   const requests = [];
   const rawRequests = [];
@@ -427,7 +489,13 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
     // one index per call) so multi-call steps line up on both runtimes.
     let consumed = 0, step;
     for (const candidate of script) { if (consumed >= toolResults) { step = candidate; break; } consumed += candidate.calls?.length ?? 1; }
-    const calls = step ? (step.calls ?? [{ id: step.id, tool: step.tool ?? "bash", args: step.args ?? { command: step.command, ...(step.cwd ? { cwd: step.cwd } : {}), ...(step.description ? { description: step.description } : {}), ...(step.timeout_seconds ? { timeout_seconds: step.timeout_seconds } : {}) } }]) : [];
+    let calls = step ? (step.calls ?? [{ id: step.id, tool: step.tool ?? "bash", args: step.args ?? { command: step.command, ...(step.cwd ? { cwd: step.cwd } : {}), ...(step.description ? { description: step.description } : {}), ...(step.timeout_seconds ? { timeout_seconds: step.timeout_seconds } : {}) } }]) : [];
+    // Scripted SkillManage mutations need the revision hash the runtime
+    // reported earlier in THIS conversation (per-run, per-side). Resolve
+    // "$LAST_REVISION" and "$REVISION:<skill>" from prior tool results: the
+    // newest 64-hex token in a result (history lists newest first, so its
+    // first token) keyed by the call's `name` argument.
+    calls = calls.map(call => ({ ...call, args: substituteRevisions(call.args, body.messages ?? []) }));
     if (step && consumed === toolResults && (body.tools ?? []).length > 0) {
       if (step.reasoning) emit(openAIChunk(body.model, { role: "assistant", reasoning_content: step.reasoning }));
       if (step.text) emit(openAIChunk(body.model, { role: "assistant", content: step.text }));

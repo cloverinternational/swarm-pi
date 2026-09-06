@@ -23,18 +23,25 @@ export function renderSkillManageResult(action: string, params: any, result: any
     }
     case "review":
       return `Skill review completed without mutation: ${String(result?.reason ?? params?.review_reason ?? "").trim()}`;
+    // factory.go reports Path = <package>/SKILL.md for create and patch.
     case "create":
-      return `Created skill ${q(result?.skill?.name)} at ${result?.skill?.path}\nRevision: ${result?.revision}`;
+      return `Created skill ${q(result?.skill?.name)} at ${result?.skill?.path}/SKILL.md\nRevision: ${result?.revision}`;
     case "patch":
-      return `Patched skill ${q(result?.skill?.name)} (v${previousVersion(String(result?.version ?? result?.skill?.version ?? ""))} → v${result?.version ?? result?.skill?.version}) at ${result?.skill?.path}\nRevision: ${result?.revision}`;
+      return `Patched skill ${q(result?.skill?.name)} (v${previousVersion(String(result?.version ?? result?.skill?.version ?? ""))} → v${result?.version ?? result?.skill?.version}) at ${result?.skill?.path}/SKILL.md\nRevision: ${result?.revision}`;
     case "write_file":
       return `Wrote support file for ${q(params?.name)} at ${result?.path}\nRevision: ${result?.revision}`;
     case "absorb_files": {
       const files: string[] = result?.files ?? [];
       let b = `Absorbed ${files.length} support file(s) from ${q(params?.from_skill)} into ${q(params?.name)}, byte-for-byte:\n`;
-      for (const file of files) b += `  + ${file} (${result?.sizes?.[file] ?? 0} bytes, sha256:${short(String(result?.digests?.[file] ?? ""))})\n`;
+      let copied = 0;
+      for (const file of files) {
+        const skippedReason = result?.skipped?.[file];
+        if (skippedReason) { b += `  = ${file} (${result?.sizes?.[file] ?? 0} bytes, ${skippedReason})\n`; continue; }
+        copied++;
+        b += `  + ${file} (${result?.sizes?.[file] ?? 0} bytes, sha256:${short(String(result?.digests?.[file] ?? ""))})\n`;
+      }
       if (result?.revision) b += `Revision: ${result.revision}\n`;
-      if (files.length > 0) b += "Every copy was verified by re-hashing the destination.\n";
+      if (copied > 0) b += "Every copy was verified by re-hashing the destination.\n";
       return b + "Now update the destination instructions to reference the new paths.";
     }
     case "read_file": {

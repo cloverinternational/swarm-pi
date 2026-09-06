@@ -24,7 +24,8 @@ export interface Metrics { turns: number; toolCalls: number; errors: number; res
 export interface ReviewHook { (event: { action: string; name?: string; revision?: string; reason?: string }): void }
 export interface Skill { name: string; description: string; instructions: string; tags: string[]; category?: string; version: string; path: string; updatedAt: string; }
 export interface SkillEntry { type: "pi-swarm-autogen-state"; data: State; }
-export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; }
+export type RevisionPlacement = "active" | "archived" | "absent";
+export interface Revision { id: string; parent?: string; action: string; createdAt: string; files: Record<string, string>; blobs?: Record<string, string>; /** history.go manifest.Placement; older manifests default to "active". */ placement?: RevisionPlacement; /** history.go manifest.RevertOf (undo revisions). */ revertOf?: string; }
 type StoredRevision = Revision & { blobs: Record<string, string> };
 export interface State { skills: Record<string, { version: string; uses: number; lastUsed?: string; archived?: boolean; hash?: string; curatorState?: CuratorState; pinned?: boolean; absorbedInto?: string; archiveReason?: string }>; turns: number; toolCalls: number; errors: number; resolved: number; lastNudgeTurn: number; reviews: number; nudges: number; nudgeIgnores: number; mutations: number; skilled: boolean; budgetCalls: number; reviewRequired: boolean; focusedTask?: boolean; curatorLastRun?: string; curatorLastReport?: string; skillReviewCalls?: number; }
 export const defaultState = (): State => ({ skills: {}, turns: 0, toolCalls: 0, errors: 0, resolved: 0, lastNudgeTurn: 0, reviews: 0, nudges: 0, nudgeIgnores: 0, mutations: 0, skilled: false, budgetCalls: 0, reviewRequired: false, focusedTask: false, skillReviewCalls: 0 });
@@ -64,6 +65,17 @@ export function goCleanPath(value: string): string {
 }
 /** Go os.PathError text for lstat: "lstat <path>: no such file or directory". */
 const goLstatError = (path: string, error: any) => new Error(`lstat ${path}: ${error?.code === "ENOENT" ? "no such file or directory" : error?.code === "EACCES" ? "permission denied" : error?.code === "ENOTDIR" ? "not a directory" : String(error?.message ?? error)}`);
+/**
+ * history.go runRevisionMutation: when mutate() fails the error is
+ * errors.Join-ed with store.apply(baseline) — and the baseline manifest from
+ * capture() never has Format set, so validateManifest always contributes
+ * "unsupported format 0" as a second line. Mirror the joined text verbatim.
+ */
+/** history.go revisionConflict. */
+const revisionConflict = (name: string, expected: string, current: string) => new Error(expected === ""
+  ? `autogenskills: expected_revision is required for existing skill ${JSON.stringify(name)}; view it and retry with revision ${current}`
+  : `autogenskills: revision conflict for skill ${JSON.stringify(name)}: expected ${expected}, current ${current}; view the skill and retry`);
+const mutationFailure = (message: string) => new Error(`${message}\nunsupported format 0`);
 const safeName = (n: unknown) => typeof n === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n) && n.length <= 64 && n !== "archive";
 const now = () => new Date().toISOString();
 const AUTOGEN_GUIDANCE_MARKER = "<!-- pi-swarm:autogenskills-guidance:v1 -->";
@@ -120,7 +132,10 @@ export class AutoSkillManager {
     this.config = {
       mode, dir: config.dir ?? process.env.SWARM_AUTOGEN_DIR ?? join(home, ".swarm", "skills", "autogen"),
       toolCallThreshold: config.toolCallThreshold ?? 15, errorResolutionThreshold: config.errorResolutionThreshold ?? 1,
-      nudgeInterval: Math.max(1, config.nudgeInterval ?? 15), minInstructionsLength: config.minInstructionsLength ?? 200,
+      nudgeInterval: Math.max(1, config.nudgeInterval ?? 15),
+      // config.go DefaultConfig and the TUI's autogenCfg.Trigger leave
+      // MinInstructionsLength at 0: no minimum unless a user config sets one.
+      minInstructionsLength: config.minInstructionsLength ?? 0,
       toolCallBudget: config.toolCallBudget ?? 5, workingBudget: config.workingBudget ?? 90,
       maxNudgeIgnores: config.maxNudgeIgnores ?? 3, staleAfterDays: config.staleAfterDays ?? 30,
       archiveAfterDays: config.archiveAfterDays ?? 90, lockTimeoutMs: Math.max(10, config.lockTimeoutMs ?? 5000),
@@ -178,16 +193,16 @@ export class AutoSkillManager {
     if (archived.length > 1) throw new Error(`skill ${name} has multiple archived placements`);
     return pathExists(active) ? active : archived[0];
   }
-  private parse(name: string): Skill {
+  private parse(name: string, allowArchived = false): Skill {
     const root = this.packageRoot(name);
     // history.go: a package that is neither active nor archived reports
     // "not found in active or archived packages"; an archived one is not active.
     if (!root) throw new Error(`autogenskills: skill ${JSON.stringify(name)} not found in active or archived packages`);
-    if (root !== this.dir(name)) throw new Error(`active skill ${name} does not exist`);
+    if (!allowArchived && root !== this.dir(name)) throw new Error(`active skill ${name} does not exist`);
     const content = readFileSync(join(root, "SKILL.md"), "utf8"), match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
     if (!match) throw new Error(`invalid SKILL.md for ${name}`);
     const fields: Record<string,string> = {}; for (const line of match[1].split("\n")) { const i = line.indexOf(":"); if (i > 0) fields[line.slice(0,i).trim()] = line.slice(i+1).trim(); }
-    return { name: fields.name || name, description: fields.description || "", instructions: match[2].trimEnd(), tags: fields.tags ? fields.tags.split(",").map(x=>x.trim()).filter(Boolean) : [], category: fields.category || undefined, version: fields.version || "1.0.0", path: root, updatedAt: fields.updated_at || now() };
+    return { name: fields.name || name, description: fields.description || "", instructions: match[2].trim(), tags: fields.tags ? fields.tags.split(",").map(x=>x.trim()).filter(Boolean) : [], category: fields.category || undefined, version: fields.version || "1.0.0", path: root, updatedAt: fields.updated_at || now() };
   }
   private body(skill: Skill) { return `---\nname: ${skill.name}\ndescription: ${skill.description}\nversion: ${skill.version}\n${skill.tags.length ? `tags: ${skill.tags.join(", ")}\n` : ""}${skill.category ? `category: ${skill.category}\n` : ""}updated_at: ${skill.updatedAt}\n---\n\n${skill.instructions}\n`; }
   private hashBytes(data: string | Buffer) { return createHash("sha256").update(data).digest("hex"); }
@@ -223,13 +238,14 @@ export class AutoSkillManager {
     walk(source, destination);
   }
   private supportFiles(name: string) { return Object.keys(this.packageFiles(name)).filter(p => SUPPORT_ROOTS.has(p.split("/")[0])); }
-  private snapshotRevision(name: string, action: string, parent?: string): Revision {
+  private snapshotRevision(name: string, action: string, parent?: string, options: { absent?: boolean; revertOf?: string; createdAt?: string } = {}): Revision {
     const root = this.packageRoot(name);
-    if (!root) throw new Error(`skill ${name} does not exist`);
-    const files = this.packageFiles(name), blobs: Record<string,string> = {};
-    for (const path of Object.keys(files)) blobs[path] = readFileSync(join(root, path)).toString("base64");
+    if (!root && !options.absent) throw new Error(`skill ${name} does not exist`);
+    const placement: RevisionPlacement = !root ? "absent" : root === this.dir(name) ? "active" : "archived";
+    const files = root ? this.packageFiles(name) : {}, blobs: Record<string,string> = {};
+    for (const path of Object.keys(files)) blobs[path] = readFileSync(join(root!, path)).toString("base64");
     const canonical = JSON.stringify({ format: HISTORY_FORMAT, skill: name, parent: parent ?? "", action, files });
-    return { id: this.hashBytes(canonical), parent, action, createdAt: now(), files, blobs };
+    return { id: this.hashBytes(canonical), parent, action, createdAt: options.createdAt ?? now(), files, blobs, placement, ...(options.revertOf ? { revertOf: options.revertOf } : {}) };
   }
   private revisionPath(name: string, id: string) { return join(this.config.dir, ".history", "revisions", name, `${id}.json`); }
   private loadRevision(name: string, id: string): StoredRevision {
@@ -239,6 +255,7 @@ export class AutoSkillManager {
     if (!existsSync(path) || lstatSync(path).isSymbolicLink()) throw new Error("untrusted revision manifest");
     const stored = JSON.parse(readFileSync(path, "utf8")) as Revision & { format?: number };
     if (stored.format !== HISTORY_FORMAT || stored.id !== id || !stored.files || !stored.blobs) throw new Error("untrusted revision manifest");
+    if (stored.placement === "absent" && Object.keys(stored.files).length) throw new Error("untrusted revision manifest");
     const canonical = JSON.stringify({ format: HISTORY_FORMAT, skill: name, parent: stored.parent ?? "", action: stored.action, files: stored.files });
     if (this.hashBytes(canonical) !== id) throw new Error("untrusted revision manifest");
     const blobFiles = Object.fromEntries(Object.entries(stored.blobs).map(([path, value]) => {
@@ -250,13 +267,14 @@ export class AutoSkillManager {
     if (JSON.stringify(stored.files) !== JSON.stringify(blobFiles)) throw new Error("untrusted revision manifest");
     return stored as StoredRevision;
   }
-  private saveRevision(name: string, action: string, parent?: string) {
-    const rev = this.snapshotRevision(name, action, parent);
+  private saveRevision(name: string, action: string, parent?: string, options: { absent?: boolean; revertOf?: string; createdAt?: string; publish?: boolean } = {}) {
+    const rev = this.snapshotRevision(name, action, parent, options);
     const root = join(this.config.dir, ".history", "revisions", name);
     this.safePath(this.config.dir, `.history/revisions/${name}`);
     mkdirSync(root, { recursive: true, mode: 0o755 });
     try { writeFileSync(this.revisionPath(name, rev.id), JSON.stringify({ format: HISTORY_FORMAT, ...rev }, null, 2) + "\n", { flag: "wx", mode: 0o444 }); }
     catch (e: any) { if (e?.code !== "EEXIST") throw e; this.loadRevision(name, rev.id); }
+    if (options.publish === false) return rev;
     this.safePath(this.config.dir, ".history/heads");
     mkdirSync(join(this.config.dir, ".history", "heads"), { recursive: true });
     const head = join(this.config.dir, ".history", "heads", name), temporary = `${head}.${process.pid}.${Date.now()}.tmp`;
@@ -275,8 +293,8 @@ export class AutoSkillManager {
     return id;
   }
   /** skillmanage.go resolveSupportPath (preceded by the isSafeSkillDirName check in history.go). */
-  private resolveSupportPath(name: string, relativePath: string): string {
-    if (!safeName(name)) throw new Error(`autogenskills: invalid skill name ${JSON.stringify(name)}`);
+  private resolveSupportPath(name: string, relativePath: string, unsafeName = `autogenskills: invalid skill name ${JSON.stringify(name)}`): string {
+    if (!safeName(name)) throw new Error(unsafeName);
     const clean = goCleanPath(relativePath);
     if (clean.startsWith("/") || clean === "." || clean === ".." || clean.startsWith("../")) throw new Error("path must stay inside the skill package");
     const first = clean.split("/")[0];
@@ -504,68 +522,73 @@ export class AutoSkillManager {
     if (action === "metrics") return { metrics: this.metrics() };
     const name = input.name as string;
     if (action === "pin" || action === "unpin") { const skill = this.parse(name); const old = this.state.skills[name] ?? { version: skill.version, uses: 0 }; old.pinned = action === "pin"; old.curatorState = old.pinned ? "pinned" : "active"; this.state.skills[name] = old; this.config.reviewHook?.({ action, name, revision: old.hash }); this.commit(); return { name, pinned: old.pinned, state: old.curatorState }; }
-    if (action === "create") { this.assertMutationAllowed(action); this.safePath(this.config.dir, name); if (pathExists(this.dir(name))) throw new Error(`skill ${name} already exists; view and patch it instead`); if (!input.description || !input.instructions) throw new Error("description and instructions are required"); if (input.instructions.length < this.config.minInstructionsLength) throw new Error(`instructions must contain at least ${this.config.minInstructionsLength} characters`); const s: Skill = { name, description: input.description, instructions: input.instructions, tags: String(input.tags ?? "").split(",").map((x:string)=>x.trim()).filter(Boolean), category: input.category, version: "1.0.0", path: this.dir(name), updatedAt: now() }; this.write(s, "create"); this.commit(); return { skill: s, revision: this.state.skills[name].hash, expected_revision: this.state.skills[name].hash }; }
+    if (action === "create") {
+      this.assertMutationAllowed(action); this.safePath(this.config.dir, name);
+      // factory.go Create runs inside runRevisionMutation's mutate(): its
+      // errors come back errors.Join-ed with the (always failing) baseline
+      // restore, in CreateOptions.Validate → MinInstructionsLength → exists order.
+      if (!input.description) throw mutationFailure("autogenskills: create options: description is required");
+      if (!input.instructions) throw mutationFailure("autogenskills: create options: instructions are required");
+      if (this.config.minInstructionsLength > 0 && [...String(input.instructions)].length < this.config.minInstructionsLength) throw mutationFailure(`autogenskills: instructions must contain at least ${this.config.minInstructionsLength} characters under the configured policy`);
+      if (pathExists(this.file(name))) throw mutationFailure(`autogenskills: skill ${JSON.stringify(name)} already exists; view and patch the existing skill instead`);
+      const s: Skill = { name, description: input.description, instructions: input.instructions, tags: String(input.tags ?? "").split(",").map((x:string)=>x.trim()).filter(Boolean), category: input.category, version: "1.0.0", path: this.dir(name), updatedAt: now() };
+      const headPath = join(this.config.dir, ".history", "heads", name); this.safePath(this.config.dir, `.history/heads/${name}`);
+      const parent = pathExists(headPath) ? readFileSync(headPath, "utf8").trim()
+        : this.saveRevision(name, "baseline", undefined, { absent: true, createdAt: "0001-01-01T00:00:00Z", publish: false }).id;
+      this.write(s, "create", parent); this.commit();
+      return { skill: s, revision: this.state.skills[name].hash, expected_revision: this.state.skills[name].hash };
+    }
     if (action === "view") {
-      const s = this.parse(name), offset = input.offset ?? 0, limit = input.limit ?? 80000;
+      const s = this.parse(name, true), offset = input.offset ?? 0, limit = input.limit ?? 80000;
       const hash = this.diskHead(name);
       this.viewed.add(name);
       if (!this.config.previewOnly) {
         this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: s.version, hash, lastUsed: now() };
         this.commit();
       }
-      return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit) }, revision: hash, expected_revision: hash, version: s.version };
+      return { skill: { ...s, instructions: [...s.instructions].slice(offset, offset + limit).join("") }, instructions_total: s.instructions, support_files: this.supportFiles(name), source: "autogen", revision: hash, expected_revision: hash, version: s.version };
     }
-    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const s = this.parse(name); const currentRevision = this.diskHead(name); if (!input.expected_revision) throw new Error(`expected_revision is required for existing skill ${name}`); if (input.expected_revision !== currentRevision) throw new Error(`revision conflict: expected ${input.expected_revision}, current ${currentRevision}`); s.instructions = input.append ? `${s.instructions}\n\n${input.instructions ?? ""}` : (input.instructions || s.instructions); if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
+    if (action === "patch") { this.assertMutationAllowed(action); if (this.config.mode !== "auto" && this.config.mode !== "manual") throw new Error("disabled"); const s = this.parse(name); const currentRevision = this.diskHead(name); if ((input.expected_revision ?? "") !== currentRevision) throw revisionConflict(name, String(input.expected_revision ?? ""), currentRevision); if (input.instructions) s.instructions = input.append ? `${s.instructions}\n\n${input.instructions}` : input.instructions; if (input.description) s.description = input.description; if (input.tags) s.tags = [...new Set([...s.tags, ...String(input.tags).split(",").map(x=>x.trim())])]; const parts = s.version.split("."); s.version = parts.length === 3 && /^\d+$/.test(parts[2]) ? `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}` : s.version; s.updatedAt = now(); this.write(s, "patch", currentRevision); this.commit(); return { skill: s, revision: this.state.skills[name].hash, version: s.version }; }
     if (action === "absorb_files") {
+      // skillmanage.go executeAbsorbFiles + absorb.go absorbSupportFiles: the
+      // source/destination must both load, every carried file is one chained
+      // write_file revision (so history shows "write_file", not "absorb"),
+      // and byte-identical destinations are reported as skipped.
       this.assertMutationAllowed(action);
-      const from = String(input.from_skill ?? ""), source = this.dir(from), destination = this.dir(name);
-      if (!safeName(from) || from === name || !existsSync(source)) throw new Error("from_skill must name an existing, different skill");
-      const current = this.diskHead(name);
-      if (!input.expected_revision) throw new Error(`expected_revision is required for existing skill ${name}`);
-      if (input.expected_revision !== current) throw new Error(`revision conflict: expected ${input.expected_revision}, current ${current}`);
-      const requested = input.file_paths ? String(input.file_paths).split(",").map((x: string) => x.trim()).filter(Boolean) : this.supportFiles(from);
-      const plans: { p: string, src: string, dst: string }[] = [];
-      for (const raw of requested) {
-        const p = raw.replaceAll("\\", "/"), first = p.split("/")[0], src = resolve(source, p), dst = resolve(destination, p);
-        if (!SUPPORT_ROOTS.has(first) || !existsSync(src) || !lstatSync(src).isFile()) throw new Error(`invalid support file: ${raw}`);
-        this.safePath(source, p); this.safePath(destination, p); plans.push({ p, src, dst });
+      const from = String(input.from_skill ?? "");
+      const exists = (skill: string) => safeName(skill) && pathExists(this.file(skill));
+      if (!exists(from)) throw new Error(`absorb_files source ${JSON.stringify(from)} does not exist: ${safeName(from) ? `autogenskills: skill ${JSON.stringify(from)} not found` : `autogenskills: invalid skill name ${JSON.stringify(from)}`}`);
+      if (!exists(name)) throw new Error(`absorb_files destination ${JSON.stringify(name)} does not exist: autogenskills: skill ${JSON.stringify(name)} not found`);
+      if (from === name) throw new Error("source and destination must differ");
+      const available = this.supportFiles(from);
+      if (!available.length) throw new Error(`skill ${JSON.stringify(from)} has no support files to absorb`);
+      const requested = String(input.file_paths ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
+      const selected: string[] = [];
+      for (const raw of requested.length ? requested : available) {
+        // absorb.go selectSupportFiles: forward slashes, must be a listed support file.
+        const clean = goCleanPath(raw.replaceAll("\\", "/"));
+        if (!available.includes(clean)) throw new Error(`support file ${JSON.stringify(raw)} not found in skill ${JSON.stringify(from)}`);
+        if (!selected.includes(clean)) selected.push(clean);
       }
-      const stage = `${destination}.absorb-${process.pid}-${Date.now()}`, backup = `${destination}.absorb-backup-${process.pid}-${Date.now()}`;
-      const copied: string[] = [];
-      try {
-        this.copyPackage(destination, stage);
-        for (const x of plans) {
-          const q = this.safePath(stage, x.p);
-          mkdirSync(resolve(q, ".."), { recursive: true });
-          const data = readFileSync(x.src);
-          writeFileSync(q, data);
-          if (this.hashBytes(data) !== this.hashBytes(readFileSync(q))) throw new Error(`hash verification failed for ${x.p}`);
-          copied.push(x.p);
-        }
-        renameSync(destination, backup);
-        try { renameSync(stage, destination); }
-        catch (error) { renameSync(backup, destination); throw error; }
-      } catch (error) {
-        rmSync(stage, { recursive: true, force: true });
-        throw error;
+      let expected = String(input.expected_revision ?? ""), revision = "";
+      const files: string[] = [], sizes: Record<string, number> = {}, digests: Record<string, string> = {}, skipped: Record<string, string> = {};
+      for (const rel of selected) {
+        const data = readFileSync(this.resolveSupportPath(from, rel));
+        const digest = this.hashBytes(data);
+        sizes[rel] = data.length; digests[rel] = digest; files.push(rel);
+        let destDigest: string | undefined;
+        try { destDigest = this.hashBytes(readFileSync(this.resolveSupportPath(name, rel))); } catch { destDigest = undefined; }
+        if (destDigest === digest) { skipped[rel] = "already identical"; continue; }
+        const written = this.executeLocked({ action: "write_file", name, file_path: rel, file_content: data, expected_revision: expected, curator_internal: input.curator_internal });
+        expected = written.revision; revision = written.revision;
       }
-      let rev: Revision;
-      try { rev = this.saveRevision(name, "absorb_files", current); }
-      catch (error) {
-        rmSync(destination, { recursive: true, force: true });
-        renameSync(backup, destination);
-        throw error;
-      }
-      rmSync(backup, { recursive: true, force: true });
-      this.state.skills[name] = { ...(this.state.skills[name] ?? { version: this.parse(name).version, uses: 0 }), hash: rev.id, lastUsed: now() };
-      this.state.mutations++; this.commit();
-      return { absorbed: copied.length, files: copied, revision: rev.id };
+      return { absorbed: files.filter(f => !skipped[f]).length, files, sizes, digests, skipped, revision };
     }
     if (action === "archive") {
       if (!input.curator_internal) this.assertMutationAllowed(action);
       const meta = this.state.skills[name]; if (meta?.pinned || meta?.curatorState === "pinned") throw new Error(`skill ${name} is pinned`);
       const expected = String(input.expected_revision ?? ""); const current = this.diskHead(name);
-      if (!expected || expected !== current) throw new Error(`expected_revision is required and must match current revision ${current}`);
+      if (expected !== current) throw revisionConflict(name, expected, current);
       const sourceFiles = this.supportFiles(name), absorbedInto = input.absorbed_into ? String(input.absorbed_into) : "";
       if (absorbedInto && !safeName(absorbedInto)) throw new Error("absorbed_into must name a valid skill");
       const dropped = String(input.dropped_files ?? "").split(",").map((x: string) => x.trim()).filter(Boolean);
@@ -603,7 +626,11 @@ export class AutoSkillManager {
           const manifest = `{"format":${HISTORY_FORMAT},"skill":${JSON.stringify(name)},"action":"untracked","created_at":"0001-01-01T00:00:00Z","placement":"absent","curator_meta":{"state":"","last_used_at":"0001-01-01T00:00:00Z","created_at":"0001-01-01T00:00:00Z","pinned":false,"version":""}}`;
           return { revisions: [{ id: this.hashBytes(manifest), action: "untracked", createdAt: "0001-01-01T00:00:00Z", placement: "absent", files: {}, blobs: {} }] };
         }
-        return { revisions: [] };
+        // An existing package with no head is "untracked" live state whose
+        // synthetic id is per-package (hashes are per-run on the wire anyway).
+        const placement = this.packageRoot(name) === this.dir(name) ? "active" : "archived";
+        const files = this.packageFiles(name);
+        return { revisions: [{ id: this.hashBytes(JSON.stringify({ format: HISTORY_FORMAT, skill: name, action: "untracked", placement, files })), action: "untracked", createdAt: "0001-01-01T00:00:00Z", placement, files, blobs: {} }] };
       }
       const revisions: Revision[] = [], seen = new Set<string>();
       let cursor = readFileSync(headPath, "utf8").trim();
@@ -614,22 +641,32 @@ export class AutoSkillManager {
         revisions.push(revision);
         cursor = revision.parent ?? "";
       }
-      return { revisions: revisions.map(r => ({ id: r.id, parent: r.parent, action: r.action, createdAt: r.createdAt, files: r.files })) };
+      return { revisions: revisions.map(r => ({ id: r.id, parent: r.parent, action: r.action, revert_of: r.revertOf, createdAt: r.createdAt, placement: r.placement ?? "active", files: r.files })) };
     }
     if (action === "undo") {
+      // history.go UndoSkill: expected must name HEAD, the target defaults to
+      // HEAD's parent, must be a strict ancestor, and is restored with its
+      // recorded placement; the new revision records revert_of.
       this.assertMutationAllowed(action);
-      const id = String(input.revision ?? ""), expected = String(input.expected_revision ?? "");
-      if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("undo requires a valid revision hash");
-      const p = this.revisionPath(name, id); if (!existsSync(p)) throw new Error(`revision ${id} not found`);
-      const root = this.dir(name);
+      const expected = String(input.expected_revision ?? "");
       const currentRoot = this.packageRoot(name);
-      if (!currentRoot) throw new Error(`skill ${name} does not exist`);
-      const current = this.diskHead(name); if (!expected || expected !== current) throw new Error(`expected_revision is required and must match current revision ${current}`);
-      let cursor = current, ancestor = false;
-      while (cursor) { if (cursor === id) { ancestor = true; break; } const cp = this.revisionPath(name, cursor); if (!existsSync(cp)) break; cursor = this.loadRevision(name, cursor).parent ?? ""; }
-      if (!ancestor) throw new Error(`undo target ${id} is not an ancestor of current HEAD ${current}`);
-      const rev = this.loadRevision(name, id);
-      const stage = `${root}.undo-${process.pid}-${Date.now()}`, backup = `${root}.undo-backup-${process.pid}`;
+      if (!currentRoot) throw new Error(`autogenskills: skill ${JSON.stringify(name)} not found in active or archived packages`);
+      const current = this.diskHead(name);
+      if (expected !== current) throw revisionConflict(name, expected, current);
+      const currentManifest = this.loadRevision(name, current);
+      let id = String(input.revision ?? "");
+      if (!id) id = currentManifest.parent ?? "";
+      if (!id) throw new Error(`autogenskills: revision ${current} has no prior state to undo`);
+      let rev: StoredRevision;
+      try { rev = this.loadRevision(name, id); }
+      catch (error) { throw new Error(`autogenskills: undo target ${JSON.stringify(id)} is not a revision of skill ${JSON.stringify(name)}: ${(error as Error).message}`); }
+      let ancestor = currentManifest.parent ?? "";
+      while (ancestor && ancestor !== id) ancestor = this.loadRevision(name, ancestor).parent ?? "";
+      if (ancestor !== id) throw new Error(`autogenskills: undo target ${id} is not an ancestor of current HEAD ${current}`);
+      const placement = rev.placement ?? "active";
+      const root = placement === "archived" ? join(this.config.dir, "archive", name) : this.dir(name);
+      if (placement === "archived") { this.safePath(this.config.dir, `archive/${name}`); mkdirSync(join(this.config.dir, "archive"), { recursive: true }); }
+      const stage = `${this.dir(name)}.undo-${process.pid}-${Date.now()}`, backup = `${this.dir(name)}.undo-backup-${process.pid}`;
       mkdirSync(stage, { recursive: true });
       try {
         for (const [path, encoded] of Object.entries(rev.blobs)) {
@@ -637,17 +674,19 @@ export class AutoSkillManager {
           const target = this.safePath(stage, path); mkdirSync(resolve(target, ".."), { recursive: true }); writeFileSync(target, Buffer.from(encoded, "base64"), { mode: 0o644 });
         }
         renameSync(currentRoot, backup);
-        try { renameSync(stage, root); } catch (e) { renameSync(backup, currentRoot); throw e; }
+        if (placement !== "absent") { try { renameSync(stage, root); } catch (e) { renameSync(backup, currentRoot); throw e; } }
       } catch (e) { rmSync(stage, { recursive: true, force: true }); throw e; }
-      let s: Skill, next: Revision;
-      try { s = this.parse(name); next = this.saveRevision(name, "undo", current); }
+      rmSync(stage, { recursive: true, force: true });
+      let s: Skill | undefined, next: Revision;
+      try { s = placement === "absent" ? undefined : this.parse(name, true); next = this.saveRevision(name, "undo", current, { absent: placement === "absent", revertOf: id }); }
       catch (error) {
-        rmSync(root, { recursive: true, force: true });
+        if (placement !== "absent") rmSync(root, { recursive: true, force: true });
         renameSync(backup, currentRoot);
         throw error;
       }
       rmSync(backup, { recursive: true, force: true });
-      this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: s.version, hash: next.id, lastUsed: now(), archived: false, curatorState: "active" };
+      const meta = this.state.skills[name] ?? { uses: 0 } as any;
+      this.state.skills[name] = { ...meta, version: s?.version ?? meta.version ?? "unknown", hash: next.id, lastUsed: now(), archived: placement !== "active", curatorState: placement === "active" ? "active" : "archived" };
       this.state.mutations++;
       this.config.reviewHook?.({ action, name, revision: next.id });
       this.commit(); return { restored: id, revision: next.id };
@@ -667,16 +706,19 @@ export class AutoSkillManager {
     }
     if (action === "write_file") {
       this.assertMutationAllowed(action);
-      const raw = String(input.file_path ?? ""), first = raw.replaceAll("\\", "/").split("/")[0];
-      if (raw.includes("\\")) throw new Error("support paths must use forward slashes");
-      const p = this.safePath(this.dir(name), raw);
-      if (!SUPPORT_ROOTS.has(first)) throw new Error("support path must stay under references/, templates/, scripts/, or assets/");
+      const raw = String(input.file_path ?? "");
+      // history.go WriteSupportFileRevisioned: resolveSupportPath runs before
+      // the revision transaction, so its errors carry no errors.Join suffix.
+      const p = this.resolveSupportPath(name, raw, "unsafe skill name");
       const current = this.diskHead(name);
-      if (!input.expected_revision || input.expected_revision !== current) throw new Error(`expected_revision is required and must match current revision ${current}`);
+      const expected = String(input.expected_revision ?? "");
+      if (expected !== current) throw revisionConflict(name, expected, current);
+      const content: string | Buffer = input.file_content ?? "";
+      if (Buffer.byteLength(content) > 1 << 20) throw mutationFailure(`autogenskills: support file size ${Buffer.byteLength(content)} exceeds ${1 << 20}-byte history limit`);
       const rev = this.mutateActivePackage(name, "write_file", current, false, stage => {
-        const target = this.safePath(stage, raw);
+        const target = this.safePath(stage, goCleanPath(raw));
         mkdirSync(resolve(target, ".."), { recursive: true });
-        writeFileSync(target, input.file_content ?? "", { mode: 0o644 });
+        writeFileSync(target, content, { mode: 0o644 });
       });
       this.state.skills[name] = { ...(this.state.skills[name] ?? { uses: 0 }), version: this.parse(name).version, hash: rev.id, lastUsed: now() };
       this.state.mutations++;
