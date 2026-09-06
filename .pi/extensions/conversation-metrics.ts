@@ -10,7 +10,19 @@ export interface ConversationMetrics {
 
 const ENTRY = "pi-conversation-metrics";
 const ROOT_KEY = Symbol.for("pi-swarm-conversation-metrics");
-type Shared = { metrics?: ConversationMetrics; pi?: any; ctx?: any; timer?: ReturnType<typeof setInterval>; frame: number; registered?: boolean; footer?: MetricsFooter };
+/**
+ * Pi exposes exactly one native footer slot (`ctx.ui.setFooter`). This extension
+ * owns it; other extensions contribute text segments through this process-wide
+ * registry instead of competing for the slot (autogenskills registers its
+ * budget/skill/context segment here). Providers return `undefined` to hide.
+ */
+export const FOOTER_SEGMENTS_KEY = Symbol.for("pi-swarm-footer-segments");
+type FooterSegments = Map<string, () => string | undefined>;
+export function footerSegments(): FooterSegments {
+  const g = globalThis as typeof globalThis & { [FOOTER_SEGMENTS_KEY]?: FooterSegments };
+  return g[FOOTER_SEGMENTS_KEY] ?? (g[FOOTER_SEGMENTS_KEY] = new Map());
+}
+type Shared = { metrics?: ConversationMetrics; pi?: any; ctx?: any; timer?: ReturnType<typeof setInterval>; frame: number; registered?: WeakSet<object>; footer?: MetricsFooter };
 const root = globalThis as typeof globalThis & { [ROOT_KEY]?: Shared };
 const shared: Shared = root[ROOT_KEY] ?? (root[ROOT_KEY] = { frame: 0 });
 
@@ -51,10 +63,18 @@ function currentWalltime(now = Date.now()): number {
 
 class MetricsFooter {
   constructor(private readonly theme: any, private readonly onInvalidate: () => void) {}
-  render(): string[] {
+  render(width: number): string[] {
     const m = shared.metrics ?? blank();
     const state = m.active ? "running" : "idle";
-    return [this.theme.fg("dim", `${state}  ${formatWalltime(currentWalltime())}  ·  out ${m.outputTokens.toLocaleString()} tok`)];
+    const parts = [`${state}  ${formatWalltime(currentWalltime())}  ·  out ${m.outputTokens.toLocaleString()} tok`];
+    for (const [, provider] of footerSegments()) {
+      let text: string | undefined;
+      try { text = provider(); } catch { text = undefined; }
+      if (text) parts.push(text);
+    }
+    const line = parts.join("  ·  ");
+    const clipped = width > 0 && line.length > width ? line.slice(0, Math.max(0, width - 1)) + "…" : line;
+    return [this.theme.fg("dim", clipped)];
   }
   dispose() {}
   invalidate() { this.onInvalidate(); }
@@ -78,8 +98,13 @@ function working(ctx: any, visible: boolean) {
 function saveAndRender(ctx: any) { persist(); render(ctx); }
 
 export default function conversationMetricsExtension(pi: any) {
-  if (shared.registered) return;
-  shared.registered = true;
+  // Guard per ExtensionAPI instance, not per process: Pi's /reload re-evaluates
+  // this module and hands it a fresh `pi`, while `globalThis` (and therefore
+  // `shared`) survives. A process-wide boolean made the factory return early on
+  // reload, so no handlers, no /metrics command and no footer were registered.
+  const registered = shared.registered ?? (shared.registered = new WeakSet<object>());
+  if (registered.has(pi)) return;
+  registered.add(pi);
   shared.pi = pi;
   pi.on?.("session_start", (_event: any, ctx: any) => {
       const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;

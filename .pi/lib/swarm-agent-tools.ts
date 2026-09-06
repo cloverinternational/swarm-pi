@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { AgentManager, AgentResult, BackgroundHandle } from "../../agents/src/index.ts";
+import { BUILTIN_AGENT_PROFILES, type AgentManager, type AgentResult, type BackgroundHandle } from "../../agents/src/index.ts";
 
 export type ToolResult = { text: string; isError?: boolean; details?: unknown };
 export type AgentToolParams = Record<string, any>;
@@ -71,6 +71,7 @@ function formatTaskChunk(data: Buffer, fromStart: boolean): string {
 
 /** subagent.go getAllAvailableAgents builtin ids (custom definitions are merged in and sorted). */
 export const BUILTIN_AGENT_IDS = ["general-assistant", "code-reviewer", "research-agent", "explore", "background-worker", "agent_constructor", "code_formatter", "text_summarizer", "data_validator", "error_analyzer", "question_answerer"];
+export { BUILTIN_AGENT_PROFILES };
 export class AgentToolValidationError extends Error {}
 export class SwarmAgentTools {
   availableAgents(): string[] {

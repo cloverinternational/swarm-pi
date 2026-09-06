@@ -152,6 +152,9 @@ function findContext(file: string[], context: string[], cursor: number, eof: boo
   for (let tier = 0; tier <= 3; tier++) {
     const found: number[] = [];
     for (let i = cursor; i + context.length <= file.length; i++) if (matchAt(file, context, i, tier)) found.push(i);
+    // An @@ anchor has already selected the target region.  Do not make the
+    // rest of the file's repeated generic context make an otherwise valid
+    // hunk ambiguous; the first match is the one nearest that anchor.
     if (anchored && found.length) return [found[0], tier];
     if (found.length > 1) throw new Error(`ambiguous context at lines ${found.map(i => i + 1).join(", ")} for:\n${context.join("\n")}\nAdd an @@ class/function anchor or more surrounding lines`);
     if (found.length === 1) return [found[0], tier];

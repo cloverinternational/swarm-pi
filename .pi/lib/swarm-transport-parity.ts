@@ -33,6 +33,16 @@
 
 export const SWARM_TEMPERATURE = 0;
 export const SWARM_REASONING_EFFORT = "high";
+/**
+ * Interactive TUI sampling differs from `swarm -p`: the agent request carries
+ * no temperature, max_tokens is the SDKIntegration default (31999,
+ * sdk_integration.go) regardless of the provider model entry, and
+ * reasoning_effort is derived from the render-settings thinking budget
+ * (EnableThinking → 2048 → translate.go budget<4096 ⇒ "medium").
+ */
+export const SWARM_TUI_MAX_TOKENS = 31999;
+export const SWARM_TUI_REASONING_EFFORT = "medium";
+export interface TransportMode { interactive?: boolean }
 import { overlaySwarmToolSchemas } from "./swarm-tool-surface.ts";
 
 /** internal/provider/openai/models.go ChatCompletionRequest field order. */
@@ -95,20 +105,21 @@ export function swarmToolSchemaKeyOrder<T extends { tools?: unknown }>(payload: 
 }
 
 /** Everything `before_provider_request` needs: key order at the top and inside tool schemas. */
-export function alignProviderPayload<T extends Record<string, unknown>>(payload: T): T | undefined {
+export function alignProviderPayload<T extends Record<string, unknown>>(payload: T, mode: TransportMode = {}): T | undefined {
   // Custom (extension) messages only become role:"user" in convertToLlm,
   // which runs after the `context` event, so collapse again here where every
   // message already carries its provider role.
   const collapsed = Array.isArray(payload.messages) ? collapseUserText(payload.messages as MessageLike[]) : undefined;
   const trimmed = trimWireContent((collapsed ?? payload.messages ?? []) as MessageLike[]);
-  const withMessages = trimmed ? { ...payload, messages: trimmed } : collapsed ? { ...payload, messages: collapsed } : payload;
+  let withMessages: Record<string, unknown> = trimmed ? { ...payload, messages: trimmed } : collapsed ? { ...payload, messages: collapsed } : payload;
+  if (mode.interactive && "max_tokens" in withMessages && withMessages.max_tokens !== SWARM_TUI_MAX_TOKENS) withMessages = { ...withMessages, max_tokens: SWARM_TUI_MAX_TOKENS };
   // Canonical Swarm schemas replace the permissive validator schemas the
   // tools register with (see swarm-tool-surface.ts PERMISSIVE_PARAMETERS).
   const withCanonical = overlaySwarmToolSchemas(withMessages) ?? withMessages;
   const withSchemas = swarmToolSchemaKeyOrder(withCanonical) ?? withCanonical;
-  const ordered = swarmPayloadKeyOrder(withSchemas);
+  const ordered = swarmPayloadKeyOrder(withSchemas as T);
   if (ordered) return ordered;
-  return withSchemas === payload ? undefined : withSchemas;
+  return withSchemas === payload ? undefined : withSchemas as T;
 }
 
 export function bytewiseCompare(a: string, b: string): number {
@@ -127,8 +138,10 @@ export interface ModelLike {
   [key: string]: unknown;
 }
 
+/** Sampling keys this module set on a model (never user-supplied ones). */
+const OWNED_SAMPLING = new WeakMap<object, Set<string>>();
 /** Apply Swarm's request-option defaults onto a Pi model object in place. */
-export function applySwarmModelCompat(model: ModelLike | undefined): boolean {
+export function applySwarmModelCompat(model: ModelLike | undefined, mode: TransportMode = {}): boolean {
   if (!model || typeof model !== "object") return false;
   let changed = false;
   const compat = (model.compat ??= {});
@@ -141,12 +154,20 @@ export function applySwarmModelCompat(model: ModelLike | undefined): boolean {
     if (compat[key] !== value) { compat[key] = value; changed = true; }
   }
   const sampling = (model.samplingParams ??= {});
-  const samplingDefaults: Record<string, unknown> = {
-    temperature: SWARM_TEMPERATURE,
-    reasoning_effort: SWARM_REASONING_EFFORT,
-  };
+  let ownedKeys = OWNED_SAMPLING.get(model);
+  if (!ownedKeys) { ownedKeys = new Set<string>(); OWNED_SAMPLING.set(model, ownedKeys); }
+  const samplingDefaults: Record<string, unknown> = mode.interactive
+    ? { reasoning_effort: SWARM_TUI_REASONING_EFFORT }
+    : { temperature: SWARM_TEMPERATURE, reasoning_effort: SWARM_REASONING_EFFORT };
+  // Drop values this function set for the other mode (a session can flip
+  // hasUI between headless and interactive only across processes, but keep
+  // the operation idempotent either way); user-supplied values are kept.
+  for (const key of [...ownedKeys]) {
+    if (!(key in samplingDefaults)) { delete sampling[key]; ownedKeys.delete(key); changed = true; }
+  }
   for (const [key, value] of Object.entries(samplingDefaults)) {
-    if (!(key in sampling)) { sampling[key] = value; changed = true; }
+    if (!(key in sampling)) { sampling[key] = value; ownedKeys.add(key); changed = true; }
+    else if (ownedKeys.has(key) && sampling[key] !== value) { sampling[key] = value; changed = true; }
   }
   return changed;
 }

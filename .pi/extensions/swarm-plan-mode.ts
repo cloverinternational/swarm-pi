@@ -1,13 +1,22 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   PlanModeController,
   type PlanApproval,
   type PlanFileConfig,
-  readSubmittedPlan,
-  planModeSystemPrompt,
   enterPlanToolResult,
+  exitPlanApprovedResult,
+  exitPlanNoPlanError,
+  exitPlanRejectedResult,
+  planFilePath,
+  readPlanFile,
+  readSubmittedPlan,
   validatePlanApprovalResponse,
-  DEFAULT_PLAN_FILE,
+  validatePlanContent,
+  writePlanFile,
 } from "../lib/swarm-plan-mode.ts";
+import { randomUUID } from "node:crypto";
+import { newErrorID } from "../lib/swarm-bash.ts";
 
 /** Minimal Pi surface used by this adapter; intentionally structural for compatibility. */
 export interface PlanModePi {
@@ -19,6 +28,9 @@ export interface PlanModePi {
 }
 
 const registrations = new WeakMap<object, PlanModeController>();
+/** conversation.ProcessSessionID(): one uuid per process. */
+const SESSION_KEY = Symbol.for("pi-swarm-process-session-id");
+export const processSessionId = (): string => ((globalThis as any)[SESSION_KEY] ??= randomUUID());
 // Extensions receive distinct `pi` facades, so cross-extension readers (e.g.
 // the transport-parity capability manifest) resolve the live controller via a
 // process-wide handle instead of re-registering plan-mode tools.
@@ -40,16 +52,30 @@ function restore(pi: PlanModePi, controller: PlanModeController, ctx: any): void
   else controller.hydrate(controller.snapshotOf());
 }
 
+/**
+ * app_plan.go: the approval modal offers y (approve) / c (approve + clear
+ * context) / n (reject → feedback input; Esc on the input goes back to the
+ * choice). handlePlanRejected substitutes "Please revise the plan and try
+ * again." for blank feedback BEFORE the broker answers, so the tool's own
+ * "User rejected the plan…" default is unreachable from the TUI.
+ */
+export const PLAN_APPROVAL_CHOICES = ["y: Approve", "c: Approve + Clear Context", "n: Reject / Revise"] as const;
+export const PLAN_REJECTED_DEFAULT_FEEDBACK = "Please revise the plan and try again.";
 async function askApproval(ctx: any, plan: string): Promise<PlanApproval> {
   const ui = ctx?.ui;
-  if (!ui?.confirm) return { approved: true, editedPlan: plan, clearContext: false };
-  const approved = await ui.confirm("Approve Plan", "Approve this plan and begin implementation?");
-  if (approved) {
-    const clearContext = ui.confirm ? await ui.confirm("Compact Context", "Compact context before implementation?") : false;
-    return { approved: true, editedPlan: plan, clearContext };
+  if (!ui?.select && !ui?.confirm) return { approved: true, editedPlan: plan, clearContext: false };
+  for (;;) {
+    let choice: string | undefined;
+    if (ui.select) choice = await ui.select("Review the plan above and choose an action:", [...PLAN_APPROVAL_CHOICES]);
+    else choice = (await ui.confirm("Approve Plan", "Approve this plan and begin implementation?")) ? PLAN_APPROVAL_CHOICES[0] : PLAN_APPROVAL_CHOICES[2];
+    if (choice === undefined) throw new Error("plan approval cancelled");
+    if (choice.startsWith("y")) return { approved: true, editedPlan: plan, clearContext: false };
+    if (choice.startsWith("c")) return { approved: true, editedPlan: plan, clearContext: true };
+    const feedback = ui.input ? await ui.input("Rejection feedback (press Enter to send, Esc to go back):") : "";
+    if (feedback === undefined) continue; // Esc: back to the choice modal
+    const trimmed = String(feedback).trim();
+    return { approved: false, feedback: trimmed === "" ? PLAN_REJECTED_DEFAULT_FEEDBACK : trimmed };
   }
-  const feedback = ui.input ? await ui.input("Plan rejected. What should be revised?") : "User rejected the plan. Please revise your approach.";
-  return { approved: false, feedback };
 }
 
 export function registerPlanMode(pi: PlanModePi): PlanModeController {
@@ -66,19 +92,16 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
   (globalThis as any)[SHARED_KEY] = controller;
 
   pi.on?.("session_start", (_event, ctx) => restore(pi, controller, ctx));
-  pi.on?.("before_agent_start", (event) => {
-    if (!controller.isActive()) return undefined;
-    const current = typeof event.systemPrompt === "string" ? event.systemPrompt : "";
-    const addition = planModeSystemPrompt(cwd);
-    return { systemPrompt: current.includes("## Plan Mode - ACTIVE") ? current : `${current}\n\n${addition}`.trim() };
-  });
-  pi.on?.("tool_call", (event) => {
-    const result = controller.beforeTool(event?.toolName ?? event?.tool_name ?? "");
-    if (result.inject) {
-      return { message: { customType: "pi-swarm-plan-breakdown", content: result.inject, display: false } };
-    }
-    return undefined;
-  });
+  // Swarm adds NO plan-mode system prompt (the broker flips only the App's
+  // operating mode, never the SDK's) and the first-tool breakdown + simulation
+  // hooks run inside the builtin hook pipeline (swarm-builtin-hooks.ts), which
+  // reads this controller through the shared handle above.
+
+  // plan.Config as the TUI builds it (sdk_integration.go): WorkDir =
+  // workspace root, SessionID = conversation.ProcessSessionID() (a per-process
+  // uuid), so the canonical copy lives in <SWARM_HOME|~/.swarm>/conversations/<id>/plan.md.
+  const planConfig: PlanFileConfig = { workspace: cwd };
+  const canonicalPlanPath = () => planFilePath(planConfig, processSessionId(), join(process.env.SWARM_HOME || join(homedir(), ".swarm"), "conversations"));
 
   pi.registerTool({
     name: "enter_plan_mode",
@@ -86,7 +109,10 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
     description: "Enter Plan Mode to explore, resolve user-dependent decisions, write a plan, and submit it for approval. Plan Mode does not change normal permissions.",
     parameters: schema({}),
     async execute() {
-      try { controller.enter(); return textResult(enterPlanToolResult(cwd), controller.snapshotOf()); }
+      // PlanModeEntered runs in the pre-tool hook (plan_mode_first_tool.go);
+      // the controller's beforeTool already flipped state before we get here
+      // when the builtin pipeline is installed, so enter() is idempotent.
+      try { if (!controller.isActive()) controller.enter(); return textResult(enterPlanToolResult(cwd), controller.snapshotOf()); }
       catch (error) { return errorResult(error); }
     },
   });
@@ -100,23 +126,49 @@ export function registerPlanMode(pi: PlanModePi): PlanModeController {
       plan_file: { type: "string", description: "Workspace-local Markdown/text path; mutually exclusive with plan." },
     }),
     async execute(_id: string, params: any, _signal: AbortSignal, _onUpdate: unknown, ctx: any) {
+      // registry_impl.go runs ExitPlanModeTool.Validate BEFORE Execute and
+      // reports failures as a Go error (sdkerr envelope, "Error executing …").
+      const invalid = (message: string) => { throw new Error(`Error executing exit_plan_mode: validation failed for exit_plan_mode: ${message} (error_id=${newErrorID()})`); };
+      if ("plan" in (params ?? {}) && typeof params.plan !== "string") invalid("plan must be a string");
+      if ("plan_file" in (params ?? {}) && typeof params.plan_file !== "string") invalid("plan_file must be a string");
+      if (typeof params?.plan === "string" && params.plan.trim() !== "" && typeof params?.plan_file === "string" && params.plan_file.trim() !== "") invalid("provide either plan or plan_file, not both");
+      // tools.go ExitPlanModeTool.Execute, error for error. Every failure is a
+      // tools.NewErrorResult("exit_plan_mode: …") — an IsError result, not a
+      // Go error — so it reaches the model as plain text.
+      const fail = (message: string) => errorResult(new Error(`exit_plan_mode: ${message}`));
+      let planText = typeof params?.plan === "string" ? params.plan.trim() : "";
+      const planFile = typeof params?.plan_file === "string" ? params.plan_file.trim() : "";
+      if (planFile !== "") {
+        try { planText = readSubmittedPlan(planConfig, planFile); }
+        catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+      }
+      // Compatibility fallback: the canonical session copy from an earlier submission.
+      if (planText === "") { try { planText = readPlanFile(canonicalPlanPath()); } catch { /* ReadPlanFile errors are ignored */ } }
+      if (planText === "") return errorResult(new Error(exitPlanNoPlanError(canonicalPlanPath())));
+      try { planText = validatePlanContent(planText, "plan"); }
+      catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+      try { writePlanFile(canonicalPlanPath(), planText); }
+      catch (error) { return fail(`copy plan to conversation storage: ${error instanceof Error ? error.message : String(error)}`); }
+      let response: PlanApproval;
       try {
-        const inline = typeof params?.plan === "string" ? params.plan.trim() : "";
-        const file = typeof params?.plan_file === "string" ? params.plan_file.trim() : "";
-        if (inline && file) throw new Error("provide either plan or plan_file, not both");
-        let plan = inline;
-        if (file) plan = readSubmittedPlan({ workspace: cwd } satisfies PlanFileConfig, file);
-        if (!plan) {
-          const fallback = readSubmittedPlan({ workspace: cwd, planFileName: DEFAULT_PLAN_FILE }, DEFAULT_PLAN_FILE);
-          plan = fallback;
-        }
-        if (!plan) throw new Error("no plan found; provide plan_file or plan");
-        controller.beginApproval();
-        const response = validatePlanApprovalResponse(await askApproval(ctx, plan));
+        // Swarm marks the exit only after actual approval (PlanModeExited);
+        // a rejection keeps plan mode active.
+        if (controller.snapshotOf().state === "active") controller.beginApproval();
+        response = validatePlanApprovalResponse(await askApproval(ctx, planText));
+      } catch (error) { return fail(`approval request failed: ${error instanceof Error ? error.message : String(error)}`); }
+      if (!response.approved) {
         controller.finishApproval(response);
-        if (!response.approved) return textResult(JSON.stringify({ approved: false, feedback: response.feedback, message: "Plan rejected. Revise your plan and call exit_plan_mode again." }), controller.snapshotOf());
-        return textResult(JSON.stringify({ approved: true, edited_plan: response.editedPlan ?? plan, clear_context: response.clearContext ?? false, message: "Plan approved. You may now begin implementing. Follow the approved plan precisely." }), controller.snapshotOf());
-      } catch (error) { return errorResult(error); }
+        return textResult(exitPlanRejectedResult(response.feedback ?? ""), controller.snapshotOf());
+      }
+      let finalPlan = planText;
+      if (response.editedPlan && response.editedPlan !== planText) {
+        try { finalPlan = validatePlanContent(response.editedPlan, "edited plan"); }
+        catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+        try { writePlanFile(canonicalPlanPath(), finalPlan); }
+        catch (error) { return fail(`persist approved plan: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+      controller.finishApproval(response);
+      return textResult(exitPlanApprovedResult(finalPlan, response.clearContext ?? false), controller.snapshotOf());
     },
   });
 

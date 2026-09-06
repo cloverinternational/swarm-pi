@@ -3,11 +3,14 @@ import {
   SWARM_BASH_PARAMETERS,
   buildResultXML,
   commandFailedMessage,
+  formatBashCall,
+  bashCallComponent,
   runSwarmBash,
   timedOutMessage,
   type BashParams,
 } from "../lib/swarm-bash.ts";
 import { PERMISSIVE_PARAMETERS } from "../lib/swarm-tool-surface.ts";
+import { wrapToolForHookRows } from "../hook-render-bridge.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -33,10 +36,13 @@ export function registerSwarmBash(pi: Pi): void {
   // message becomes the result content verbatim (docs/extensions.md,
   // "Signaling errors"). Returning { isError: true } is silently ignored.
   const fail = (value: string): never => { throw new Error(value); };
-  pi.registerTool?.({
+  pi.registerTool?.(wrapToolForHookRows({
     name: "bash",
     label: "bash",
     description: SWARM_BASH_DESCRIPTION,
+    renderCall(args: BashParams, theme: any) {
+      return bashCallComponent(formatBashCall(args, theme));
+    },
     // Swarm decodes BashParams with encoding/json: a missing command runs
     // `bash -c ""`. The canonical schema (SWARM_BASH_PARAMETERS) is put on
     // the wire by the transport-parity overlay; Pi must not pre-validate.
@@ -50,7 +56,7 @@ export function registerSwarmBash(pi: Pi): void {
       if (outcome.exitCode !== 0) return fail(commandFailedMessage(outcome.exitCode, outcome.stdout, outcome.stderr));
       return text(buildResultXML(outcome), details);
     },
-  });
+  }));
 }
 
 export default function swarmBashExtension(pi: Pi): void { registerSwarmBash(pi); }

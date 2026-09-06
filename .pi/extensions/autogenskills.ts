@@ -14,7 +14,7 @@ const settingsFile = (cwd: string) => join(resolve(cwd), ".pi", "swarm-settings.
 // swarm-tui sdk_integration.go SessionIDGetter returns "" ("safe default"),
 // so ${SWARM_SESSION_ID} always expands to the empty string in `swarm -p`.
 const SWARM_TUI_SESSION_ID = "";
-function autogenMode(cwd: string): Config["mode"] {
+export function autogenMode(cwd: string): Config["mode"] {
   const env = process.env.SWARM_AUTOGEN_MODE as Config["mode"] | undefined;
   if (env && ["never", "manual", "auto"].includes(env)) return env;
   try {

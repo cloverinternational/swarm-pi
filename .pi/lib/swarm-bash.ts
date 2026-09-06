@@ -36,6 +36,31 @@ export const SWARM_BASH_PARAMETERS = {
 
 export interface BashParams { command: string; cwd?: string; env?: Record<string, string>; timeout_seconds?: number; description?: string }
 
+/** Pi's native Bash call preview: keep the command visible in the dim tool row. */
+export function formatBashCall(args: { command?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any): string {
+  const command = typeof args?.command === "string" ? args.command : "...";
+  const timeout = args?.timeout_seconds ?? args?.timeout;
+  const timeoutSuffix = timeout ? theme?.fg?.("muted", ` (timeout ${timeout}s)`) ?? ` (timeout ${timeout}s)` : "";
+  const display = command || (theme?.fg?.("toolOutput", "...") ?? "...");
+  const title = theme?.fg?.("toolTitle", theme?.bold?.(`$ ${display}`) ?? `$ ${display}`) ?? `$ ${display}`;
+  return title + timeoutSuffix;
+}
+
+/** Dependency-free equivalent of Pi's Text component for extension tests. */
+export function bashCallComponent(value: string): { render: (width: number) => string[]; invalidate: () => void } {
+  // Pi validates every rendered line against the terminal width. Commands can
+  // be arbitrarily long (especially repository-discovery commands), so the
+  // preview must be width-bounded independently of the model-facing command.
+  const visible = (text: string) => stripANSI(text).length;
+  const fit = (text: string, width: number) => {
+    if (width <= 0) return "";
+    if (visible(text) <= width) return text;
+    if (width <= 1) return text.slice(0, width);
+    return `${text.slice(0, width - 1)}…`;
+  };
+  return { render: (width: number) => [fit(value, width)], invalidate: () => {} };
+}
+
 const ANSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
 export const stripANSI = (s: string) => (s.includes("\x1b") ? s.replace(ANSI, "") : s);
 

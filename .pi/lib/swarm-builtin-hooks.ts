@@ -246,6 +246,70 @@ export class TaskMaintenanceReminderHook {
   }
 }
 
+// post_acting_hook.go: require verification and documentation after acting work.
+export const POST_ACTING_HOOK = "post-acting-hook";
+export const DEFAULT_ACTING_THRESHOLD = 2;
+
+export class PostActingHook {
+  readonly name = POST_ACTING_HOOK;
+  private completedActing = new Set<string>();
+  private prompted = false;
+
+  constructor(private readonly threshold = DEFAULT_ACTING_THRESHOLD) {}
+
+  startSession(tasks: readonly HookTask[]): void {
+    this.completedActing = new Set(tasks.filter(task => task.status === "completed" && task.category === "acting").map(task => task.id));
+    this.prompted = false;
+  }
+
+  onToolAfter(event: ToolResultEvent, tasks: readonly HookTask[]): HookResult {
+    if (event.failed || !isTaskManagementTool(event.toolName)) return CONTINUE;
+    for (const task of tasks) {
+      if (task.status === "completed" && task.category === "acting") this.completedActing.add(task.id);
+    }
+    if (this.completedActing.size < this.threshold) return CONTINUE;
+    if (this.prompted || tasks.some(task => task.status !== "deleted" && (task.category === "verifying" || task.category === "documenting"))) return CONTINUE;
+    this.prompted = true;
+    return { message: `[POST-ACTING WORKFLOW REMINDER]
+
+You have completed ${this.threshold}+ acting (implementation) tasks.
+
+═══════════════════════════════════════════════════════════════════════════════
+              THE WORK IS NOT DONE UNTIL IT IS VERIFIED AND DOCUMENTED
+═══════════════════════════════════════════════════════════════════════════════
+
+The implementation you just completed needs follow-up work:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  REQUIRED NEXT STEPS:                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  1. Create VERIFYING tasks for the code you wrote:                          │
+│     - Run the test suite                                                    │
+│     - Verify edge cases                                                     │
+│     - Check integration points                                              │
+│                                                                             │
+│  2. Create DOCUMENTING tasks for the changes:                              │
+│     - Update relevant README sections                                       │
+│     - Add/update code comments                                              │
+│     - Update changelog if applicable                                        │
+│     - Document any new APIs or configuration                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                                WHY THIS MATTERS:
+═══════════════════════════════════════════════════════════════════════════════
+
+  Creation ≠ Verification. The agent made something — that's 50% of the job.
+  The other 50% is proving it works and documenting it for future developers.
+
+  Unverified code is broken code.
+  Undocumented code is unmaintainable code.
+
+If you have already created verifying/documenting tasks, this reminder can be ignored.
+Otherwise, CREATE THEM NOW before proceeding with more acting tasks.` };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // autogenskills: TUI trigger config + LifecycleHook + BudgetEnforcementHook
 // ---------------------------------------------------------------------------
@@ -402,6 +466,87 @@ export interface PipelineOptions {
   postHooks: PostToolHook[];
   budget?: MetaNudgeBudget;
   isSubAgent?: () => boolean;
+  taskNudge?: TaskNudgeConfig;
+}
+
+/**
+ * plan_mode_first_tool.go / simulation.go as the interactive TUI runs them
+ * (swarm-tui/internal/chat/hooks/manager.go):
+ *  - PlanModeFirstToolHook is registered with the SDK hook manager (priority
+ *    96, name "plan-mode-first-tool-hook"): enter_plan_mode flips the state
+ *    silently; the FIRST later tool gets ProblemBreakdownPrompt as a pre-tool
+ *    ContinueWithMessage (embedded in the result AND queued for the next
+ *    prompt like any other pre-tool output).
+ *  - After every PlanExitDetected tool (enter/exit_plan_mode…) the manager
+ *    appends a "simulation" post-tool result carrying the rehearsal text,
+ *    which agent_tools.go turns into the turn's RoleUser hook message.
+ */
+export interface PlanModeHooks {
+  /** CheckPlanModeFirstTool: returns the breakdown prompt exactly once per plan session. */
+  firstTool(toolName: string): string | undefined;
+  planExitDetected(toolName: string): boolean;
+  simulationMessage(): string;
+}
+export const PLAN_MODE_FIRST_TOOL_HOOK = "plan-mode-first-tool-hook";
+export const SIMULATION_HOOK = "simulation";
+
+// ---------------------------------------------------------------------------
+// task_nudge.go TaskNudgeBudget — the built-in user_prompt_submit nudge the
+// TUI HooksManager runs after user hooks. Never on turn one, only after
+// multi-step tool activity, on the shared MetaNudgeBudget cadence.
+// ---------------------------------------------------------------------------
+export interface TaskNudgeConfig { nudgeInterval?: number; toolCallThreshold?: number }
+export const TASK_NUDGE_TEXT = "[Task Nudge] Multi-step work detected with no active tasks — consider TaskManage.";
+interface TaskNudgeState { turns: number; toolCalls: number; lastNudge: number }
+
+/** task_nudge.go promptSuggestsImmediateExecution. */
+export function promptSuggestsImmediateExecution(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (trimmed === "") return false;
+  const lower = trimmed.toLowerCase();
+  for (const c of ["continue", "keep going", "go ahead", "proceed", "resume", "carry on"]) {
+    if (lower === c || lower.startsWith(`${c} `) || lower.startsWith(`${c},`)) return true;
+  }
+  if (Buffer.byteLength(trimmed) < 100) {
+    const imperatives = [
+      "run ", "just run ", "please run ", "go run ",
+      "show ", "show me ", "print ", "cat ", "ls ", "echo ",
+      "check ", "verify ", "confirm ",
+      "merge ", "pull ", "push ", "commit ", "rebase ", "fetch ",
+      "fix this ", "fix it", "undo ", "revert ",
+      "open ", "build ", "test ", "deploy ", "restart ",
+    ];
+    for (const im of imperatives) if (lower.startsWith(im)) return true;
+  }
+  return false;
+}
+
+export class TaskNudgeBudget {
+  private readonly interval: number;
+  private readonly threshold: number;
+  private states = new Map<string, TaskNudgeState>();
+  constructor(config: TaskNudgeConfig = {}) {
+    this.interval = config.nudgeInterval || 5;
+    this.threshold = config.toolCallThreshold || 2;
+  }
+  private state(session: string): TaskNudgeState { let s = this.states.get(session); if (!s) { s = { turns: 0, toolCalls: 0, lastNudge: 0 }; this.states.set(session, s); } return s; }
+  /** HooksManager.EmitToolAfterExecute: every executed (not hook-blocked, not unknown) tool. */
+  recordToolCall(session: string): void { this.state(session).toolCalls++; }
+  /** CheckTurn: advances the shared cadence clock, then maybe claims a nudge. */
+  checkTurn(session: string, prompt: string, tasks: readonly HookTask[], budget: MetaNudgeBudget): string | undefined {
+    budget.recordUserTurn(session);
+    const s = this.state(session);
+    s.turns++;
+    if (s.turns === 1 || s.toolCalls < this.threshold) return undefined;
+    if (s.lastNudge !== 0 && s.turns - s.lastNudge < this.interval) return undefined;
+    // canTaskNudge: any task at all (ByOwner("")) silences it, as do short imperatives.
+    if (tasks.some(t => !t.owner)) return undefined;
+    if (promptSuggestsImmediateExecution(prompt)) return undefined;
+    const [seq, ok] = budget.tryClaim(session, META_NUDGE_TASK);
+    if (!ok) return undefined;
+    s.lastNudge = s.turns;
+    return wrapReminder("task-nudge", "nudge", seq, TASK_NUDGE_TEXT);
+  }
 }
 
 /**
@@ -414,19 +559,30 @@ export interface PipelineOptions {
  */
 export class SwarmHookPipeline {
   readonly budget: MetaNudgeBudget;
+  readonly taskNudge: TaskNudgeBudget;
   private pendingToolMessages: string[] = [];
   private turnParts: string[] = [];
-  constructor(private readonly options: PipelineOptions) { this.budget = options.budget ?? new MetaNudgeBudget(); }
+  constructor(private readonly options: PipelineOptions) { this.budget = options.budget ?? new MetaNudgeBudget(); this.taskNudge = new TaskNudgeBudget(options.taskNudge); }
   private get session(): string { const s = this.options.session; return typeof s === "function" ? s() : s; }
+  startSession(tasks: readonly HookTask[]): void { (this as any).hooks?.postActing?.startSession(tasks); }
 
-  /** main.go EmitMessageAfterReceive + EmitUserPromptSubmit/CheckTurn: the cadence clock advances twice per user prompt. */
-  onUserPrompt(): { injected: string } {
-    this.budget.recordUserTurn(this.session);
-    this.budget.recordUserTurn(this.session);
+  /**
+   * EmitUserPromptSubmit: user hooks, then the built-in task-nudge
+   * (CheckTurn advances the cadence clock once per prompt), then the pending
+   * tool-time messages (last 3), deduped by leading line and "\n"-joined.
+   * Headless `swarm -p` (cmd/swarmos/main.go) additionally emits
+   * message.after_receive, whose executor advances the clock a second time;
+   * the interactive TUI never emits that event.
+   */
+  onUserPrompt(options: { messageAfterReceive?: boolean; prompt?: string } = {}): { injected: string } {
+    if (options.messageAfterReceive !== false) this.budget.recordUserTurn(this.session);
+    const parts: string[] = [];
+    const nudge = this.taskNudge.checkTurn(this.session, options.prompt ?? "", this.options.tasks(), this.budget);
+    if (nudge) parts.push(nudge);
     // Flush pre-tool messages queued during the previous turn (last 3, deduped).
     let pending = this.pendingToolMessages.splice(0);
     if (pending.length > 3) pending = pending.slice(pending.length - 3);
-    const injected = dedupeByLeadingLine(pending);
+    const injected = dedupeByLeadingLine([...parts, ...pending]);
     return { injected: injected.join("\n") };
   }
 
@@ -447,6 +603,7 @@ export class SwarmHookPipeline {
   /** Returns the post-context for this call and remembers it for the turn message. */
   postTool(event: ToolResultEvent): string {
     const tasks = this.options.tasks();
+    this.taskNudge.recordToolCall(this.session);
     const parts: string[] = [];
     for (const hook of this.options.postHooks) {
       const result = hook.run(event, tasks, this.budget, this.session);
@@ -476,13 +633,17 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
   trigger?: AutogenTriggerConfig;
   extraPre?: PreToolHook[];   // sleep-blocker (85), stdin-conflict (84) — bash-only, supplied by the extension
   extraPost?: PostToolHook[]; // annoyance-nudge (20)
+  planMode?: PlanModeHooks;   // interactive TUI only (PlanBroker present)
 }): SwarmHookPipeline {
   const enforcement = new TaskEnforcementHook(options.enforcementMode ?? "advise");
   const maintenance = new TaskMaintenanceReminderHook();
   const lifecycle = new AutogenLifecycleHook(options.trigger);
+  const postActing = new PostActingHook();
   const budgetHook = new AutogenBudgetEnforcementHook(options.trigger);
   const isSub = options.isSubAgent ?? (() => false);
+  const plan = options.planMode;
   const pre: PreToolHook[] = [
+    ...(plan ? [{ name: PLAN_MODE_FIRST_TOOL_HOOK, run: (e: ToolCallEvent) => { const m = plan.firstTool(e.toolName); return m ? { message: m } : CONTINUE; } }] : []), // 96
     { name: enforcement.name, run: (e, t, b, s) => enforcement.onToolBefore(e, t, b, s, isSub()) },   // 95
     { name: budgetHook.name, run: (e, t, b, s) => budgetHook.onToolBefore(e, t, b, s) },             // 90
     ...(options.extraPre ?? []),                                                                       // 85, 84
@@ -490,10 +651,13 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
   const post: PostToolHook[] = [
     { name: lifecycle.name, run: (e, _t, b, s) => lifecycle.onToolAfter(e, b, s) },                    // 91
     { name: maintenance.name, run: (e, t, b, s) => maintenance.onToolAfter(e, t, b, s) },             // 90
+    { name: postActing.name, run: (e, t) => postActing.onToolAfter(e, t) },                             // 90
     { name: budgetHook.name, run: (e) => { budgetHook.onToolAfter(e); return CONTINUE; } },           // 90 (refill only)
     ...(options.extraPost ?? []),                                                                      // 20
+    // manager.go EmitToolAfterExecute appends the simulation result after every registered hook.
+    ...(plan ? [{ name: SIMULATION_HOOK, run: (e: ToolResultEvent) => plan.planExitDetected(e.toolName) ? { message: plan.simulationMessage() } : CONTINUE }] : []),
   ];
   const pipeline = new SwarmHookPipeline({ ...options, preHooks: pre, postHooks: post });
-  (pipeline as any).hooks = { enforcement, maintenance, lifecycle, budgetHook };
+  (pipeline as any).hooks = { enforcement, maintenance, lifecycle, postActing, budgetHook };
   return pipeline;
 }

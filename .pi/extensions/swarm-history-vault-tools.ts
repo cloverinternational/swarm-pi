@@ -3,6 +3,7 @@ import { vaultAdd, vaultApprove, vaultExec, vaultJSONXML, vaultList, vaultTwoPer
 import { newErrorID } from "../lib/swarm-bash.ts";
 import { applySwarmSurface } from "../lib/swarm-tool-surface.ts";
 import { sortKeysDeep } from "../lib/swarm-transport-parity.ts";
+import { registerVaultTool } from "./vault.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -25,6 +26,9 @@ function failed(name: string, error: unknown) {
 export function registerSwarmHistoryVaultTools(pi: Pi, options: { historyRoot?: string; cwd?: string; vault?: VaultRuntime } = {}): void {
   if (registrations.has(pi as object)) return;
   registrations.add(pi as object);
+  // This extension is the established active vault registration path. Keep
+  // the unified `vault` tool available even when vault.ts is not hot-reloaded.
+  registerVaultTool(pi, options.vault);
   let sessionContext: any;
   pi.on?.("session_start", (_event: any, ctx: any) => { sessionContext = ctx; });
   const register = (name: typeof names[number], run: (p: any, ctx: any) => Promise<any> | any, xml = false) => pi.registerTool?.(applySwarmSurface({

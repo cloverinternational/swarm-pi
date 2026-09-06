@@ -2,9 +2,10 @@
  * Which tools Swarm exposes to the model, and under which conditions, so Pi
  * advertises the same surface. Mirrors swarm-tui/internal/chat/sdk_integration.go:
  *
- *  - the 28 always-on tools captured in tools/parity/fixtures/swarm-tools.json
+ *  - the 29 always-on tools captured in tools/parity/fixtures/swarm-tools.json
  *  - ask_user_question          only when a QuestionBroker exists (interactive TUI)
  *  - enter_plan_mode/exit_plan_mode only when a PlanBroker exists (interactive TUI)
+ *  - Bash + ReadBackgroundCommand instead of bash when a BackgroundProcessManager exists (interactive TUI)
  *  - x_search / xai_web_search  only when xaitools.HasCredentials():
  *        ~/.swarm/config/oauth/xai.json token (unexpired or refreshable)
  *        or XAI_API_KEY set  (internal/tools/xai/responses.go:63)
@@ -16,7 +17,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { swarmToolNames } from "./swarm-tool-surface.ts";
 
-export const INTERACTIVE_ONLY_TOOLS = ["ask_user_question", "enter_plan_mode", "exit_plan_mode"] as const;
+export const INTERACTIVE_ONLY_TOOLS = ["ask_user_question", "enter_plan_mode", "exit_plan_mode", "Bash", "ReadBackgroundCommand"] as const;
+/**
+ * sdk_integration.go: with a BackgroundProcessManager (the interactive TUI)
+ * the bgprocess `Bash` + `ReadBackgroundCommand` pair replaces the plain
+ * `bash` tool; headless `swarm -p` has no manager and registers `bash`.
+ */
+export const HEADLESS_ONLY_TOOLS = ["bash"] as const;
 export const XAI_TOOLS = ["x_search", "xai_web_search"] as const;
 
 export interface GatingEnvironment {
@@ -47,7 +54,10 @@ export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.e
 /** The set of tool names Swarm would register in this environment. */
 export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   const names = new Set<string>(swarmToolNames());
-  if (environment.interactive) for (const name of INTERACTIVE_ONLY_TOOLS) names.add(name);
+  if (environment.interactive) {
+    for (const name of INTERACTIVE_ONLY_TOOLS) names.add(name);
+    for (const name of HEADLESS_ONLY_TOOLS) names.delete(name);
+  }
   if (xaiHasCredentials(environment.home, environment.env, environment.now)) for (const name of XAI_TOOLS) names.add(name);
   return names;
 }

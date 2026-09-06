@@ -84,6 +84,17 @@ export async function vaultList(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMa
   return { credentials: values.map(metadata) };
 }
 
+/** Remove one global credential without returning its value. */
+export async function vaultRemove(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
+  if (!p.id) return { success: false, credentialId: "", error: "id is required" };
+  if (locked(rt)) return { success: false, credentialId: p.id, error: "vault is locked — unlock the vault before removing credentials" };
+  const data = await load(rt);
+  if (!data.credentials[p.id]) return { success: false, credentialId: p.id, error: `credential not found: ${p.id}` };
+  delete data.credentials[p.id];
+  await save(rt, data);
+  return { success: true, credentialId: p.id, removed: true };
+}
+
 function splitCommand(value: string): string[] {
   const out: string[] = []; let cur = "", quote = "";
   for (const c of value) { if ((c === "'" || c === "\"")) { if (!quote) quote = c; else if (quote === c) quote = ""; else cur += c; } else if (/\s/.test(c) && !quote) { if (cur) out.push(cur), cur = ""; } else cur += c; }

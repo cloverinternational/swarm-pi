@@ -32,6 +32,8 @@ export function cleanHistoryText(value: string): string {
   out = out.replace(/^\s*\[(?:SKILL REMINDER|Task Nudge)\].*$/gim, " ").replace(/\\n/g, " ").replace(/\s+/g, " ").trim();
   return out;
 }
+/** historytools.isSubstantiveUserText over CleanText'd input (cleaning is idempotent). */
+export const isSubstantiveUserText = (cleaned: string): boolean => substantive(cleaned);
 function substantive(value: string): boolean {
   const lower = cleanHistoryText(value).toLowerCase().trim();
   return lower !== "" && lower !== "continue" && !(lower.includes("continue") && lower.split(/\s+/).length <= 6) && !runtimePrefixes.some((p) => lower.startsWith(p));
