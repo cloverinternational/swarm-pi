@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -91,7 +91,19 @@ export function generateRankedAvailableSkillsXML(
 }
 
 const MAX_NAME = 64, MAX_DESC = 1024;
-const precedence: Record<SkillSource, number> = { managed: 600, cli: 500, install: 400, project: 300, user: 200, autogen: 100, builtin: 0 };
+/**
+ * Discovery order mirrors Swarm exactly (later roots overwrite earlier ones,
+ * because Registry.DiscoverAll does `r.skills[name] = skill` unconditionally):
+ *   builtins (RegisterDefaultSkills, overwrite=false)
+ *   $SWARM_MANAGED_SKILLS_DIR            loader.go — prepended, so in practice LOWEST
+ *   ~/.swarmos/skills, ~/.swarmos/skills/skills   loader.go installDir (TUI DefaultSkillsDir)
+ *   ~/.claude/skills, ~/.claude/commands loader.go
+ *   $SWARM_HOME|~/.swarm/skills           paths.SkillsDir() (autogen/ is a subtree)
+ *   <cwd>/.claude/skills, <cwd>/.claude/commands, <cwd>/.swarm/skills
+ *                                        skills_manager.go AddProjectSearchPaths (only if they exist)
+ * Precedence is therefore the ordinal position of the root, not a per-source
+ * rank. `source` is only a classification (registry.go classifySource).
+ */
 const sourceFor = (path: string, roots: Array<{ root: string; source: SkillSource }>): SkillSource => roots.find(r => { const p=resolve(path), root=resolve(r.root); return p===root || p.startsWith(root+"/"); })?.source ?? "user";
 const parseFrontmatter = (raw: string): { fields: Record<string,string>; body: string } => {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -112,11 +124,39 @@ const parseFrontmatter = (raw: string): { fields: Record<string,string>; body: s
   return { fields, body: m[2] };
 };
 const validName = (name: string) => name.length>0 && name.length<=MAX_NAME && /^[a-z0-9-]+$/.test(name) && !name.startsWith("-") && !name.endsWith("-") && !name.includes("--");
-const walk = (root: string, out: string[] = []): string[] => {
-  if (!existsSync(root)) return out;
-  let entries; try { entries=readdirSync(root,{withFileTypes:true}); } catch { return out; }
-  if (entries.some(e=>e.name==="SKILL.md" && (e.isFile() || e.isSymbolicLink()))) { out.push(join(root,"SKILL.md")); return out; }
-  for (const e of entries) { if (e.name.startsWith(".") || e.name==="node_modules") continue; const p=join(root,e.name); try { if (e.isDirectory() || (e.isSymbolicLink() && statSync(p).isDirectory())) walk(p,out); } catch {} }
+/** parser.go skipDirs — "archive" holds skills the autogen curator retired. */
+const SKIP_DIRS = new Set(["node_modules", ".git", ".svn", ".hg", "venv", ".venv", "__pycache__", ".mypy_cache", ".ruff_cache", "dist", "build", ".next", ".nuxt", ".output", "vendor", ".cache", ".tmp", "tmp", "archive"]);
+/**
+ * parser.go DiscoverSkills: recursive walk that follows directory symlinks,
+ * skips tooling/hidden directories (except the root itself), keeps descending
+ * below a directory that already holds a SKILL.md, and dedupes SKILL.md files
+ * by canonical path. Unresolvable/unreadable directories are skipped silently.
+ */
+const walk = (rootDir: string, out: string[] = []): string[] => {
+  const seenDirs = new Set<string>(), seenPaths = new Set<string>();
+  const visit = (dir: string) => {
+    let realDir: string; try { realDir = realpathSync(dir); } catch { return; }
+    if (seenDirs.has(realDir)) return; seenDirs.add(realDir);
+    // os.ReadDir returns entries sorted by filename; Node does not.
+    let entries; try { entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); } catch { return; }
+    for (const e of entries) {
+      const name = e.name, fullPath = join(dir, name);
+      if (e.isDirectory() || e.isSymbolicLink()) {
+        let isDir = false; try { isDir = statSync(fullPath).isDirectory(); } catch { continue; }
+        if (!isDir) { if (name === "SKILL.md") addFile(fullPath); continue; }
+        if (SKIP_DIRS.has(name)) continue;
+        if (dir !== rootDir && name.startsWith(".")) continue;
+        visit(fullPath); continue;
+      }
+      if (name === "SKILL.md") addFile(fullPath);
+    }
+  };
+  const addFile = (fullPath: string) => {
+    let canonical = fullPath; try { canonical = realpathSync(fullPath); } catch {}
+    if (seenPaths.has(canonical)) return; seenPaths.add(canonical);
+    out.push(fullPath);
+  };
+  visit(rootDir);
   return out;
 };
 const packageFiles = (dir: string): string[] => { const out:string[]=[]; const roots=["references","templates","scripts","assets"]; for(const root of roots){ const p=join(dir,root); if(existsSync(p)) walkFiles(p,out); } const hooks=join(dir,"hooks.json"); if(existsSync(hooks)) out.push(hooks); return out; };
@@ -140,23 +180,35 @@ export class SkillLoader {
   }
   paths(): Array<{path:string;source:SkillSource;precedence:number}> {
     const cwd=resolve(this.options.cwd ?? process.cwd()), home=this.options.home ?? process.env.HOME ?? cwd;
+    const swarmRoot = process.env.SWARM_HOME || join(home, ".swarm");
     const rows:Array<{path:string;source:SkillSource;precedence:number}> = [];
-    const add=(path:string,source:SkillSource)=>{ if(path) rows.push({path:resolve(path),source,precedence:precedence[source]}); };
+    // Ordinal precedence: the LAST root to define a name wins (DiscoverAll).
+    const add=(path:string,source:SkillSource)=>{ if(path) rows.push({path:resolve(path),source,precedence:rows.length}); };
     if (!this.options.closed) {
-      add(this.options.managedDir ?? process.env.SWARM_MANAGED_SKILLS_DIR ?? "", "managed");
-      for(const p of this.options.cliPaths ?? []) add(p,"cli");
-      add(this.options.installDir ?? join(home,".swarm","skills"),"install");
-      add(join(cwd,".swarm","skills"),"project"); add(join(cwd,".pi","skills"),"project"); add(join(cwd,".agents","skills"),"project");
-      add(join(home,".claude","skills"),"user"); add(join(home,".claude","commands"),"user"); add(join(home,".swarm","skills"),"user"); add(join(home,".agents","skills"),"user");
-      add(this.options.autogenDir ?? join(home,".swarm","skills","autogen"),"autogen");
       if (this.options.builtinDir !== null) add(this.options.builtinDir ?? DEFAULT_BUILTIN_SKILLS_DIR,"builtin");
-    } else for(const p of this.options.cliPaths ?? []) add(p,"cli");
+      // loader.go NewLoader: managed dir only when set, existing, a directory,
+      // and SWARM_DISABLE_POLICY_SKILLS != "1". It is *prepended* to the search
+      // paths, which under last-wins discovery makes it the lowest priority.
+      const managed = this.options.managedDir ?? (process.env.SWARM_DISABLE_POLICY_SKILLS === "1" ? "" : process.env.SWARM_MANAGED_SKILLS_DIR ?? "");
+      if (managed) { let ok = false; try { ok = statSync(managed).isDirectory(); } catch {} if (ok) add(managed, "managed"); }
+      const installDir = this.options.installDir ?? join(home, ".swarmos", "skills");
+      add(installDir, "install"); add(join(installDir, "skills"), "install");
+      add(join(home,".claude","skills"),"user"); add(join(home,".claude","commands"),"user");
+      add(join(swarmRoot,"skills"),"user");
+      // A non-default autogen dir has no Swarm equivalent; the default one is
+      // already covered by the ~/.swarm/skills subtree walk.
+      if (this.options.autogenDir && resolve(this.options.autogenDir) !== resolve(swarmRoot, "skills", "autogen")) add(this.options.autogenDir, "autogen");
+      // skills_manager.go AddProjectSearchPaths: only roots that exist.
+      for (const p of [join(cwd,".claude","skills"), join(cwd,".claude","commands"), join(cwd,".swarm","skills")]) if (existsSync(p)) add(p, "project");
+    }
+    // Pi-only explicit roots (closed/allowlisted policy); no Swarm counterpart.
+    for(const p of this.options.cliPaths ?? []) add(p,"cli");
     return rows.filter((r,i,a)=>a.findIndex(x=>x.path===r.path)===i);
   }
   load(): SkillLoadResult {
-    const paths=this.paths(), diagnostics:SkillDiagnostic[]=[]; const selected=new Map<string,LoadedSkill>();
+    const paths=this.paths(), diagnostics:SkillDiagnostic[]=[]; const selected=new Map<string,LoadedSkill>(); const cwd=resolve(this.options.cwd ?? process.cwd());
     // Swarm ParseSkillMDContent: instructions = strings.TrimSpace(body).
-    for(const spec of paths){ for(const file of walk(spec.path)){ const dir=resolve(file,".."); let raw; try{raw=readFileSync(file,"utf8");}catch(e){diagnostics.push({path:file,message:String(e)});continue;} const {fields,body}=parseFrontmatter(raw); const name=fields.name || (dir.split("/").pop() ?? ""); const description=fields.description ?? ""; if(!validName(name)){diagnostics.push({path:file,message:`invalid skill name ${name}`});continue;} if(description.length>MAX_DESC){diagnostics.push({path:file,message:"description exceeds 1024 characters"});continue;} const skill:LoadedSkill={name,description,instructions:body.trim(),dir,filePath:file,location:spec.source==="builtin"?builtinLocation(name):file,source:spec.source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:fields["disable-model-invocation"] === "true",whenToUse:fields.when_to_use || fields["when-to-use"],category:fields.category,tags:fields.tags?.split(",").map(tag=>tag.trim()).filter(Boolean),priority:Number.isFinite(Number(fields.priority))?Number(fields.priority):undefined}; const prior=selected.get(name); if(!prior || skill.precedence>=prior.precedence) selected.set(name,skill); } }
+    for(const spec of paths){ for(const file of walk(spec.path)){ const dir=resolve(file,".."); let raw; try{raw=readFileSync(file,"utf8");}catch(e){diagnostics.push({path:file,message:String(e)});continue;} const {fields,body}=parseFrontmatter(raw); const name=fields.name || (dir.split("/").pop() ?? ""); const description=fields.description ?? ""; if(!validName(name)){diagnostics.push({path:file,message:`invalid skill name ${name}`});continue;} if(description.length>MAX_DESC){diagnostics.push({path:file,message:"description exceeds 1024 characters"});continue;} const autogenRoot=resolve(process.env.SWARM_HOME || join(this.options.home ?? process.env.HOME ?? cwd,".swarm"),"skills","autogen"); const source:SkillSource=spec.source!=="managed"&&spec.source!=="builtin"&&spec.source!=="cli"&&(dir===autogenRoot||dir.startsWith(autogenRoot+"/"))?"autogen":spec.source; const skill:LoadedSkill={name,description,instructions:body.trim(),dir,filePath:file,location:spec.source==="builtin"?builtinLocation(name):file,source,precedence:spec.precedence,supportFiles:packageFiles(dir),disableModelInvocation:fields["disable-model-invocation"] === "true",whenToUse:fields.when_to_use || fields["when-to-use"],category:fields.category,tags:fields.tags?.split(",").map(tag=>tag.trim()).filter(Boolean),priority:Number.isFinite(Number(fields.priority))?Number(fields.priority):undefined}; const prior=selected.get(name); if(!prior || skill.precedence>=prior.precedence) selected.set(name,skill); } }
     let skills=[...selected.values()].sort((a,b)=>a.name.localeCompare(b.name)); const allowed = this.options.allowedNames ?? this.options.allowedSkills; if (allowed) skills=skills.filter(s=>allowed.includes(s.name)); return {skills,diagnostics,searchPaths:paths};
   }
   find(name:string):LoadedSkill|undefined{return this.load().skills.find(s=>s.name===name)}

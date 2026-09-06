@@ -173,3 +173,54 @@ for (const scenario of Object.keys(TOOL_SCRIPTS).filter(name => name !== "defaul
     }
   }, { timeout: 180_000 });
 }
+
+// A foreign (non-repo) workspace exercises the discovery paths the repository
+// itself never hits: hierarchical AGENTS.md, CLAUDE.md + SWARM.md side by
+// side, a dirty git tree, project-level .claude/skills (Swarm discovers it)
+// next to .pi/skills (Swarm does not), and enough project skills to overflow
+// the <available_skills> budget so ranking/truncation must agree too.
+async function makeStressWorkspace(root) {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { execFileSync } = await import("node:child_process");
+  const write = async (path, text) => { await mkdir(join(root, path, ".."), { recursive: true }); await writeFile(join(root, path), text); };
+  await mkdir(root, { recursive: true });
+  await write("AGENTS.md", "root rules\n");
+  await write("CLAUDE.md", "claude rules\n");
+  await write("SWARM.md", "swarm rules\n");
+  await write("pkg/AGENTS.md", "pkg rules\n");
+  await write("pkg/sub/f.txt", "f\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=p@p", "-c", "user.name=p", "add", "-A"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=p@p", "-c", "user.name=p", "commit", "-qm", "init"], { cwd: root });
+  await write("dirty.txt", "dirty\n");
+  const skill = (name, description, extra = "") => `---\nname: ${name}\ndescription: "${description}"\n${extra}---\nbody of ${name}\n`;
+  await write(".claude/skills/claude-side/SKILL.md", skill("claude-side", "A skill from .claude/skills"));
+  await write(".pi/skills/pi-side/SKILL.md", skill("pi-side", "A skill from .pi/skills"));
+  for (let i = 1; i <= 70; i++) {
+    const n = String(i).padStart(2, "0");
+    const sentence = `Description ${n} with a fairly long sentence that repeats itself to inflate the catalogue size; `;
+    await write(`.swarm/skills/stress-skill-${n}/SKILL.md`, skill(`stress-skill-${n}`, sentence.repeat(5), `when_to_use: Use when the user mentions stress case ${n} or <angle> & ampersand\ntags:\n  - stress\n  - case-${n}\n`));
+  }
+}
+
+test("project profile is wire-identical for a foreign workspace with nested context files, dirty git, and overflowing skills", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-stress-"));
+  const workspace = join(scratch, "ws");
+  const output = join(scratch, "out");
+  try {
+    await makeStressWorkspace(workspace);
+    const result = await captureParity({ profile: "project", workspace, output });
+    assert.equal(result.pi.requests.length, EXPECTED_PRIMARY_REQUESTS);
+    assert.equal(result.swarm.requests.length, EXPECTED_PRIMARY_REQUESTS);
+    assert.equal(result.pi.tools.length, 28);
+    assert.equal(result.swarm.tools.length, 28);
+    assert.equal(result.pi.prompt.sha256, result.swarm.prompt.sha256);
+    assert.match(result.swarm.prompt.text, /<location>[^<]*\/\.claude\/skills\/claude-side\/SKILL\.md<\/location>/);
+    assert.doesNotMatch(result.swarm.prompt.text, /pi-side/);
+    assert.match(result.swarm.prompt.text, /additional skill\(s\) omitted/);
+    assert.deepEqual(result.mismatches, [], `pi -p and swarm -p diverged: ${JSON.stringify(result.mismatchCategories)}`);
+    assert.equal(result.wire.identical, true, `wire bytes diverged: ${JSON.stringify(result.wire.requests.filter(r => !r.identical).slice(0, 2))}`);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}, { timeout: 180_000 });

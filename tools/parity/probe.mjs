@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+/** Pi-Swarm's extension directory (the port itself), for probing foreign workspaces. */
+const PI_SWARM_EXTENSIONS = resolve(fileURLToPath(new URL("../../.pi/extensions", import.meta.url)));
 
 const GENERATED_ID_KEYS = new Set(["tool_call_id"]);
 const PROBE_PROMPT = "PARITY_CAPTURE";
@@ -426,6 +431,19 @@ async function startRecorder(script = TOOL_SCRIPTS.default) {
   };
 }
 
+
+/** Pi's discoverExtensionsInDir: top-level *.ts/*.js files plus subdirectories with an index.ts/js. */
+async function discoverExtensionEntries(dir) {
+  const entries = [];
+  for (const item of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
+    const path = join(dir, item.name);
+    if (item.isFile() && /\.(ts|js)$/.test(item.name) && !/\.(test|spec)\.(ts|js)$/.test(item.name)) entries.push(path);
+    else if (item.isDirectory()) for (const index of ["index.ts", "index.js"]) if (existsSync(join(path, index))) { entries.push(join(path, index)); break; }
+  }
+  return entries;
+}
+
 async function run(command, args, options) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
@@ -492,6 +510,13 @@ async function capturePi(workspace, scratch, profile, script, maxTurns = 0) {
     }
     // Trust the workspace so its .pi/extensions load (both profiles).
     args.push("--approve");
+    // Pi discovers extensions from <workspace>/.pi/extensions and <agentDir>/
+    // extensions only. When probing a workspace that is not this repository,
+    // load the port explicitly (Pi does not realpath symlinked directories, so
+    // a linked .pi/extensions would break the extensions' relative imports).
+    if (resolve(workspace) !== resolve(PI_SWARM_EXTENSIONS, "..", "..")) {
+      for (const entry of await discoverExtensionEntries(PI_SWARM_EXTENSIONS)) args.push("--extension", entry);
+    }
     // --clean-agent also means --no-hooks on the Swarm side; Pi-Swarm's hook
     // groups read PI_SWARM_NO_HOOKS (see .pi/hook-state.ts).
     const hookEnv = { ...(profile === "clean" ? { PI_SWARM_NO_HOOKS: "1" } : {}), ...(maxTurns > 0 ? { PI_SWARM_MAX_TURNS: String(maxTurns) } : {}) };

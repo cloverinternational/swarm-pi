@@ -64,8 +64,8 @@ const discoverySignature = (o: SkillLoaderOptions, cliPaths: string[]) => {
     cwd,
     home,
     managedDir: managedDir ? resolve(managedDir) : "",
-    installDir: resolve(o.installDir ?? join(home, ".swarm", "skills")),
-    autogenDir: resolve(o.autogenDir ?? join(home, ".swarm", "skills", "autogen")),
+    installDir: resolve(o.installDir ?? join(home, ".swarmos", "skills")),
+    autogenDir: resolve(o.autogenDir ?? join(process.env.SWARM_HOME || join(home, ".swarm"), "skills", "autogen")),
     cliPaths: cliPaths.map(path => resolve(path)).sort(),
   });
 };
