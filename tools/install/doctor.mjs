@@ -106,7 +106,7 @@ function checkSettings() {
   } else report("theme", true, theme ? `${theme} (not a swarm-* theme)` : "default");
   const packages = (settings.packages ?? []).map((p) => (typeof p === "string" ? p : p?.source ?? "")).filter(Boolean);
   const listed = packages.some((p) => resolve(dirname(path), p) === REPO || p === REPO || /pi-swarm/i.test(p));
-  report("this checkout is in settings.packages", listed, listed ? packages.find((p) => resolve(dirname(path), p) === REPO || /pi-swarm/i.test(p)) : `packages: ${packages.length ? packages.join(", ") : "(none)"}`, `pi install ${REPO}   # or pi install git:<host>/<org>/Pi-Swarm@<tag>`);
+  report("this checkout is in settings.packages", listed, listed ? packages.find((p) => resolve(dirname(path), p) === REPO || /pi-swarm/i.test(p)) : `packages: ${packages.length ? packages.join(", ") : "(none)"}`, `pi install ${REPO}   # or pi install git:github.com/cloverinternational/swarm-pi@<tag>`);
 }
 
 checkToolchain();

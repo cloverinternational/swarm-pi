@@ -23,7 +23,7 @@ check catches 4 and 5 before tmux is involved.
 
 | Decision | Answer |
 | --- | --- |
-| Install shape | The whole repository is the Pi package. Remote: `pi install git:<host>/<org>/Pi-Swarm@<tag>`; dev box: `pi install /home/swarm/Work/Pi-Swarm` (linked, not copied). |
+| Install shape | The whole repository is the Pi package. Remote: `pi install git:github.com/cloverinternational/swarm-pi@<tag>`; dev box: `pi install /home/swarm/Work/Pi-Swarm` (linked, not copied). |
 | Remote | None yet; verify with a local temp clone; git form stays a placeholder in AGENTS.md until pushed. |
 | `ask_user_question` | **Fork** `edlsh/pi-ask-user` v0.15.0 (MIT) into the tree; remove the submodule. |
 | Build at install | `pi install` runs `npm install --omit=dev`, never `npm run build`. A root `prepare` script builds the two packages consumed from `dist/`. Verified: npm 11.17 runs `prepare` under `--omit=dev`. |
@@ -153,7 +153,7 @@ AGENTS.md gains an "Installing globally" subsection under Validation:
 # dev box — link this checkout, no copy; dedupes against .pi/ by path
 pi install /home/swarm/Work/Pi-Swarm
 # any other machine — once a remote exists
-pi install git:<host>/<org>/Pi-Swarm@<tag>      # pinned; `pi update` reconciles the ref
+pi install git:github.com/cloverinternational/swarm-pi@<tag>      # pinned; `pi update` reconciles the ref
 npm run doctor                                   # from the installed checkout
 ```
 

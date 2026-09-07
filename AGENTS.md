@@ -349,7 +349,7 @@ anywhere — the extensions import `.pi/lib`, `packages/*/src`, and
 # dev box: link this checkout (no copy; dedupes against .pi/ by absolute path)
 pi install /home/swarm/Work/Pi-Swarm
 # any other machine, once a remote exists (pinned; `pi update` reconciles the ref)
-pi install git:<host>/<org>/Pi-Swarm@<tag>
+pi install git:github.com/cloverinternational/swarm-pi@<tag>
 # from the installed checkout: PATH, versions, dist, deps, models.json, theme, packages[]
 npm run doctor
 ```
