@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import { registerSwarmBackgroundBash } from "../../extensions/30-tools/swarm-background-bash.ts";
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
-import { bgOutputPreview, formatBackgroundDone } from "../../lib/tools/swarm-bgprocess.ts";
+import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager } from "../../lib/tools/swarm-bgprocess.ts";
 import { boundToolOutput, elideOversizedToolOutput } from "../../lib/runtime/swarm-toolout.ts";
 import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
 
@@ -25,6 +25,30 @@ const harness = () => {
 const invoke = (tool: any, params: any) => tool.execute("call", params, undefined, undefined, { cwd: root });
 
 describe("Swarm interactive background bash", () => {
+  it("detaches a foreground command when backgrounding is requested", async () => {
+    const manager = new SwarmBackgroundProcessManager();
+    const running = manager.executeBash({ command: "sleep 2; printf ctrl-b-proof", timeout_seconds: 60 }, root);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(manager.requestBackground()).toBe(true);
+    const result = await running;
+    const body = JSON.parse(result.text);
+    expect(body).toMatchObject({ backgrounded: true, status: "running" });
+    expect(body.message).toContain("Ctrl+B");
+    await new Promise(resolve => setTimeout(resolve, 2200));
+  }, 4000);
+
+  it("supports explicit background mode without waiting for completion", async () => {
+    const { bash, read } = harness();
+    const launched = await invoke(bash, { command: "sleep 1; printf explicit-bg", background: true, timeout_seconds: 60 });
+    const body = JSON.parse(launched.content[0].text);
+    expect(body).toMatchObject({ backgrounded: true, status: "running", timeout_seconds: 60 });
+    expect(body.task_id).toMatch(/^bg-/);
+    const status = JSON.parse((await invoke(read, { task_id: body.task_id, action: "status" })).content[0].text);
+    expect(status).toMatchObject({ task_id: body.task_id, command: "sleep 1; printf explicit-bg" });
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    expect(JSON.parse((await invoke(read, { task_id: body.task_id, action: "status" })).content[0].text).status).toBe("completed");
+  }, 4000);
+
   it("registers both canonical interactive tools", () => {
     const { tools } = harness();
     const fixture = new Map(JSON.parse(readFileSync(resolve(root, "tools/parity/fixtures/swarm-interactive-tools.json"), "utf8"))

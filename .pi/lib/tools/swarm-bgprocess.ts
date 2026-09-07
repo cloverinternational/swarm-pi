@@ -44,6 +44,7 @@ interface ProcessRecord {
 }
 
 export interface BackgroundBashParams extends BashParams { background?: boolean }
+export const BACKGROUND_BASH_DETACH = Symbol.for("pi-swarm-background-bash-detach");
 export interface ReadBackgroundParams {
   task_id?: string;
   action?: string;
@@ -140,9 +141,16 @@ function regexpError(pattern: string, error: unknown): string {
 export class SwarmBackgroundProcessManager {
   private readonly processes = new Map<string, ProcessRecord>();
   private doneListeners: Array<(done: BackgroundDone) => void> = [];
+  private foreground?: { rec: ProcessRecord; detach: () => void };
 
   /** manager.go SetCompletionCallback/SetErrorCallback, already shaped like bgProcessDoneMsg. */
   onDone(listener: (done: BackgroundDone) => void): void { this.doneListeners.push(listener); }
+  requestBackground(): boolean {
+    if (!this.foreground || this.foreground.rec.state !== "running") return false;
+    this.foreground.rec.backgrounded = true;
+    this.foreground.detach();
+    return true;
+  }
   private emitDone(done: BackgroundDone): void { for (const listener of this.doneListeners) { try { listener(done); } catch { /* UI side effect */ } } }
   /** manager.go handleStateChange: only backgrounded processes notify. */
   private notifyTerminal(rec: ProcessRecord): void {
@@ -275,6 +283,20 @@ export class SwarmBackgroundProcessManager {
       throw new Error(`failed to spawn process: ${spawnError.message}`);
     }
 
+    // Explicit background mode returns immediately, matching BackgroundTask's
+    // async contract. The process remains tracked by ReadBackgroundCommand and
+    // emits its normal completion notification when it exits.
+    if (params.background === true) {
+      rec.backgrounded = true;
+      return { text: goJSON({
+        backgrounded: true,
+        message: "Command launched in the background. Use ReadBackgroundCommand with task_id to monitor output or cancel it.",
+        status: "running",
+        task_id: rec.id,
+        timeout_seconds: timeoutSec,
+      }), details: { task_id: rec.id, background: true, background_reason: "explicit" } };
+    }
+
     const idle = new Promise<"idle">(resolveIdle => {
       let lastSize = -1;
       let lastChange = Date.now();
@@ -291,21 +313,25 @@ export class SwarmBackgroundProcessManager {
       rec.completion.finally(() => clearInterval(timer));
     });
     const aborted = new Promise<"abort">(r => signal?.addEventListener("abort", () => r("abort"), { once: true }));
-    const winner = await Promise.race([rec.completion.then(() => "done" as const), idle, aborted]);
+    let detach!: () => void;
+    const detached = new Promise<"background">(resolve => { detach = () => resolve("background"); });
+    this.foreground = { rec, detach };
+    const winner = await Promise.race([rec.completion.then(() => "done" as const), idle, aborted, detached]);
+    if (this.foreground?.rec === rec) this.foreground = undefined;
     if (winner === "abort") {
       await this.cancelRecord(rec);
       throw new Error("command execution error: context canceled");
     }
-    if (winner === "idle") {
+    if (winner === "idle" || winner === "background") {
       rec.backgrounded = true;
       const text = goJSON({
         backgrounded: true,
-        message: `Command idle for ${goDuration(timeoutSec)} (no output) and was auto-backgrounded. Use ReadBackgroundCommand to check status — look at metadata.seconds_since_last_output to decide if it is still healthy.`,
+        message: winner === "background" ? "Command backgrounded by Ctrl+B. Use ReadBackgroundCommand with task_id to monitor output or cancel it." : `Command idle for ${goDuration(timeoutSec)} (no output) and was auto-backgrounded. Use ReadBackgroundCommand to check status — look at metadata.seconds_since_last_output to decide if it is still healthy.`,
         status: "running",
         task_id: rec.id,
         timeout_seconds: timeoutSec,
       });
-      return { text, details: { task_id: rec.id, background: true, background_reason: "idle" } };
+      return { text, details: { task_id: rec.id, background: true, background_reason: winner } };
     }
     // bash_tool.go completedProcessResult: plain text, IsError on non-zero.
     const exitCode = rec.exitCode ?? -1;

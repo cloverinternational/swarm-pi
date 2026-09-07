@@ -25,6 +25,18 @@ const harness = (runner: Runner) => {
 };
 
 describe("Swarm agent orchestration tools", () => {
+  it("backgrounds an active wait_for_agent without cancelling the agent", async () => {
+    const d = deferred();
+    const logic = new SwarmAgentTools(new AgentManager({ runner: async () => d.promise }));
+    const launched = JSON.parse((await logic.backgroundTask({ task: "slow wait" })).text);
+    const waiting = logic.waitForAgent({ agent_id: launched.agent_id, timeout_seconds: 60 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(logic.requestWaitBackground()).toBe(true);
+    const result = JSON.parse((await waiting).text);
+    expect(result).toMatchObject({ wait_status: "backgrounded", agent: { agent_id: launched.agent_id, status: "running" } });
+    d.resolve("done");
+  });
+
   it("advertises fixture descriptions and schemas byte-for-byte", () => {
     const { tools } = harness(async () => "done");
     expect(tools.map(t => t.name)).toEqual(names);

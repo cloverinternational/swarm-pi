@@ -3,6 +3,7 @@ import { afterTurnFlushListeners } from "../../lib/runtime/swarm-builtin-hooks-r
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 import {
   SwarmBackgroundProcessManager,
+  BACKGROUND_BASH_DETACH,
   formatBackgroundDone,
   type BackgroundBashParams,
   type ReadBackgroundParams,
@@ -27,6 +28,7 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   registrations.add(identity);
   const pi = withSwarmToolSurface(inputPi);
   const manager = new SwarmBackgroundProcessManager();
+  (globalThis as any)[BACKGROUND_BASH_DETACH] = () => manager.requestBackground();
   managers.set(identity, manager);
   const fixtures = loadSwarmCanonicalTools();
   const text = (value: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text", text: value }], details });
@@ -66,6 +68,8 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
     name: "Bash",
     label: "Bash",
     description: fixtures.get("Bash")!.description,
+    // Keep the canonical permissive schema for parity; `background` is an
+    // accepted execution parameter handled by SwarmBackgroundProcessManager.
     parameters: { ...PERMISSIVE_PARAMETERS },
     renderCall(args: BackgroundBashParams, theme: any) {
       return bashCallComponent(formatBashCall(args, theme));

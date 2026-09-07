@@ -1,6 +1,6 @@
 import { AgentManager, createPiRunner } from "../../../packages/tools/agents/src/index.ts";
 import { applySwarmSurface } from "../../lib/runtime/swarm-tool-surface.ts";
-import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, type ToolResult } from "../../lib/tools/swarm-agent-tools.ts";
+import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, WAIT_FOR_AGENT_BACKGROUND, type ToolResult } from "../../lib/tools/swarm-agent-tools.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 
 type Pi = any;
@@ -23,6 +23,7 @@ export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManage
   const manager = options.manager ?? host[AGENT_MANAGER_SYMBOL] ?? new AgentManager({ cwd: options.cwd ?? pi.getCwd?.() ?? process.cwd(), concurrency: 4, runner: createPiRunner(pi) });
   host[AGENT_MANAGER_SYMBOL] = manager;
   const logic = new SwarmAgentTools(manager, options.cwd ?? pi.getCwd?.() ?? process.cwd());
+  (globalThis as any)[WAIT_FOR_AGENT_BACKGROUND] = () => logic.requestWaitBackground();
   host[AGENT_TOOLS_SYMBOL] = logic;
   if (registrations.has(pi as object)) return logic;
   registrations.add(pi as object);
