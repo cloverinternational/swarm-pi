@@ -1,6 +1,3 @@
-[submodule "pi-ask-user"]
-	path = vendor/pi-ask-user
-	url = https://github.com/edlsh/pi-ask-user.git
 [submodule "opencode"]
 	path = vendor/opencode
 	url = https://github.com/anomalyco/opencode.git

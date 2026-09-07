@@ -54,7 +54,7 @@ export function registerTaskManageExtension(
   // sleep/stdin, annoyance) in HooksManager order; idempotent per Pi instance.
   registerSwarmBuiltinHooks(pi, { enforcementMode: options?.enforcementMode });
   const hooks = registerTaskHooks(pi, manager, { ...options, enforcementMode: "off", silent: true });
-  // ask_user_question is provided by the dedicated pi-ask-user extension.
+  // ask_user_question is provided by the forked ask-user extension (30-tools/ask-user).
   // Keep interaction registration here out of the root extension: Pi rejects
   // duplicate tool names when both extensions are auto-loaded.
   const result = { manager, hooks };

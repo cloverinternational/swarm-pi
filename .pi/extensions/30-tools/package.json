@@ -9,7 +9,7 @@
       "control-task-tools.ts",
       "exa-search.ts",
       "history-search.ts",
-      "pi-ask-user.ts",
+      "ask-user/index.ts",
       "research-tools.ts",
       "schedule.ts",
       "swarm-agent-tools.ts",
