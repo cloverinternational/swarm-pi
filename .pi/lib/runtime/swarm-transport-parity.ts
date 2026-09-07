@@ -144,30 +144,40 @@ const OWNED_SAMPLING = new WeakMap<object, Set<string>>();
 export function applySwarmModelCompat(model: ModelLike | undefined, mode: TransportMode = {}): boolean {
   if (!model || typeof model !== "object") return false;
   let changed = false;
-  const compat = (model.compat ??= {});
+  const compat = { ...(model.compat ?? {}) };
   const compatDefaults: Record<string, unknown> = {
     supportsStrictMode: false,
     supportsStore: false,
     maxTokensField: "max_tokens",
   };
+  let compatChanged = false;
   for (const [key, value] of Object.entries(compatDefaults)) {
-    if (compat[key] !== value) { compat[key] = value; changed = true; }
+    if (compat[key] !== value) { compat[key] = value; compatChanged = true; }
   }
-  const sampling = (model.samplingParams ??= {});
-  let ownedKeys = OWNED_SAMPLING.get(model);
-  if (!ownedKeys) { ownedKeys = new Set<string>(); OWNED_SAMPLING.set(model, ownedKeys); }
+  if (compatChanged) {
+    try { model.compat = compat; } catch { return false; }
+    changed = true;
+  }
+  const sampling = { ...(model.samplingParams ?? {}) };
+  const ownedKeys = new Set(OWNED_SAMPLING.get(model) ?? []);
   const samplingDefaults: Record<string, unknown> = mode.interactive
     ? { reasoning_effort: SWARM_TUI_REASONING_EFFORT }
     : { temperature: SWARM_TEMPERATURE, reasoning_effort: SWARM_REASONING_EFFORT };
+  let samplingChanged = false;
   // Drop values this function set for the other mode (a session can flip
   // hasUI between headless and interactive only across processes, but keep
   // the operation idempotent either way); user-supplied values are kept.
   for (const key of [...ownedKeys]) {
-    if (!(key in samplingDefaults)) { delete sampling[key]; ownedKeys.delete(key); changed = true; }
+    if (!(key in samplingDefaults)) { delete sampling[key]; ownedKeys.delete(key); samplingChanged = true; }
   }
   for (const [key, value] of Object.entries(samplingDefaults)) {
-    if (!(key in sampling)) { sampling[key] = value; ownedKeys.add(key); changed = true; }
-    else if (ownedKeys.has(key) && sampling[key] !== value) { sampling[key] = value; changed = true; }
+    if (!(key in sampling)) { sampling[key] = value; ownedKeys.add(key); samplingChanged = true; }
+    else if (ownedKeys.has(key) && sampling[key] !== value) { sampling[key] = value; samplingChanged = true; }
+  }
+  if (samplingChanged) {
+    try { model.samplingParams = sampling; } catch { return changed; }
+    OWNED_SAMPLING.set(model, ownedKeys);
+    changed = true;
   }
   return changed;
 }

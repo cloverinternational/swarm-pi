@@ -1,6 +1,6 @@
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AgentManager, type Runner } from "../../../packages/tools/agents/src/index.ts";
 import { SwarmAgentTools } from "../../lib/tools/swarm-agent-tools.ts";
@@ -121,7 +121,7 @@ describe("Swarm agent orchestration tools", () => {
     const listed = JSON.parse((await logic.taskOutput({})).text);
     expect(listed.total_agents).toBe(1);
     expect(listed.agents[0].task).toContain("[REPORTING DIRECTIVE]");
-    expect(seen[0]).toContain(`[CONTEXT]\nWorking Directory: ${root}\nProject: Pi-Swarm\nProject Type: Node.js/JavaScript`);
+    expect(seen[0]).toContain(`[CONTEXT]\nWorking Directory: ${root}\nProject: ${basename(root)}\nProject Type: Node.js/JavaScript`);
     expect(seen[0]).toContain("[TASK]\nsay hi\n[/TASK]");
   });
 

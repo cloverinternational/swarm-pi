@@ -11,7 +11,8 @@
  *        or XAI_API_KEY set  (internal/tools/xai/responses.go:63)
  *
  * Anything Pi registers beyond this list is Pi-only and is hidden from the
- * model surface unless PI_SWARM_TOOL_SURFACE=all.
+ * model surface unless it is required by the active global policy below,
+ * explicitly configured, or PI_SWARM_TOOL_SURFACE=all.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,12 +26,24 @@ export const INTERACTIVE_ONLY_TOOLS = ["ask_user_question", "enter_plan_mode", "
  */
 export const HEADLESS_ONLY_TOOLS = ["bash"] as const;
 export const XAI_TOOLS = ["x_search", "xai_web_search"] as const;
+/** Global Pi policy requires this tool before mutations such as apply_patch. */
+export const REQUIRED_PI_EXTENSION_TOOLS = ["change_context"] as const;
 
 export interface GatingEnvironment {
   interactive: boolean;
   home?: string;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
+}
+
+/** Explicit, narrow escape hatch for registered Pi extension tools. */
+export function configuredExtraTools(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  return new Set(
+    (env.PI_SWARM_EXTRA_TOOLS ?? "")
+      .split(",")
+      .map(name => name.trim())
+      .filter(Boolean),
+  );
 }
 
 /** internal/tools/xai/responses.go HasCredentials + oauth_config.go IsExpired. */
@@ -59,6 +72,8 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
     for (const name of HEADLESS_ONLY_TOOLS) names.delete(name);
   }
   if (xaiHasCredentials(environment.home, environment.env, environment.now)) for (const name of XAI_TOOLS) names.add(name);
+  for (const name of REQUIRED_PI_EXTENSION_TOOLS) names.add(name);
+  for (const name of configuredExtraTools(environment.env)) names.add(name);
   return names;
 }
 
@@ -67,9 +82,20 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
  * when nothing would change. Tools Swarm has but Pi lacks are simply absent —
  * they are reported separately by the parity probe.
  */
-export function gateActiveTools(active: readonly string[], environment: GatingEnvironment, env = process.env): string[] | undefined {
-  if ((env.PI_SWARM_TOOL_SURFACE ?? "").toLowerCase() === "all") return undefined;
-  const allowed = swarmSurfaceFor(environment);
-  const next = active.filter((name) => allowed.has(name));
-  return next.length === active.length ? undefined : next;
+export function gateActiveTools(
+  active: readonly string[],
+  environment: GatingEnvironment,
+  env = process.env,
+  available: readonly string[] = active,
+): string[] | undefined {
+  const candidates = [...active];
+  for (const name of REQUIRED_PI_EXTENSION_TOOLS) {
+    if (available.includes(name) && !candidates.includes(name)) candidates.push(name);
+  }
+  const next = (env.PI_SWARM_TOOL_SURFACE ?? "").toLowerCase() === "all"
+    ? candidates
+    : candidates.filter((name) => swarmSurfaceFor(environment).has(name));
+  return next.length === active.length && next.every((name, index) => name === active[index])
+    ? undefined
+    : next;
 }

@@ -11,10 +11,11 @@
 const MAX_OPERATIONS = 50, DEFAULT_LIST_LIMIT = 50, MAX_LIST_LIMIT = 500;
 const MINIMAL_CREATE = `{"key":"<your-key>","op":"create","subject":"<short imperative title>"}`;
 const CATEGORIES = new Set(["researching", "planning", "acting", "verifying", "debugging", "documenting"]);
+const PRIORITIES = new Set(["low", "medium", "high"]);
 const NOTE_TYPES = new Set(["decision", "blocker", "learning", "milestone", "question", "observation", "other"]);
 const ALLOWED: Record<string, string[]> = {
-  create: ["subject", "description", "activeForm", "category", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy"],
-  update: ["taskId", "status", "category", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
+  create: ["subject", "description", "activeForm", "category", "priority", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy"],
+  update: ["taskId", "status", "category", "priority", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
   get: ["taskId", "include_audit"],
   list: ["category", "status", "active", "limit", "offset", "subject"],
 };
@@ -71,17 +72,23 @@ function parseOperation(raw: Record<string, unknown>, index: number): { key: str
     const fields = ALLOWED[kind];
     if (!fields) fail(`unsupported op ${q(kind)}`);
     const common = new Set(["key", "op", ...fields]);
-    for (const field of Object.keys(raw)) if (!common.has(field)) fail(`field ${q(field)} is not valid for ${kind}`);
+    for (const field of Object.keys(raw)) {
+      if (common.has(field)) continue;
+      if (kind === "create" && (field === "addNote" || field === "noteType"))
+        fail(`field ${q(field)} is not valid for create; create the task first, then add the note with an update operation targeting taskId:{"ref":${q(key)}}`);
+      fail(`field ${q(field)} is not valid for ${kind}`);
+    }
   });
   if ("taskId" in raw) target(raw.taskId, "taskId");
   if ("parentTaskId" in raw) target(raw.parentTaskId, "parentTaskId");
   if ("addBlocks" in raw) targets(raw.addBlocks, "addBlocks");
   if ("addBlockedBy" in raw) targets(raw.addBlockedBy, "addBlockedBy");
-  let subject = "", category = "", status = "", noteType = "", limit = DEFAULT_LIST_LIMIT, offset = 0;
+  let subject = "", category = "", priority = "", status = "", noteType = "", limit = DEFAULT_LIST_LIMIT, offset = 0;
   opScoped(() => {
     subject = optionalString(raw, "subject") ?? "";
     optionalString(raw, "description"); optionalString(raw, "activeForm");
     category = optionalString(raw, "category") ?? "";
+    priority = optionalString(raw, "priority") ?? "";
     if ("metadata" in raw && !isObj(raw.metadata)) fail("metadata must be an object");
     optionalString(raw, "owner_id");
     status = optionalString(raw, "status") ?? "";
@@ -95,6 +102,7 @@ function parseOperation(raw: Record<string, unknown>, index: number): { key: str
   // validateTaskOperation
   if (kind === "create" && subject.trim() === "") fail(`operation ${q(key)}: op:"create" requires a non-blank "subject". A minimal valid create is ${MINIMAL_CREATE} — "description" is optional and is never required. Retry this operation with "subject" set to a short imperative title.`);
   if (category !== "" && !CATEGORIES.has(category)) fail(`operation ${q(key)}: invalid category ${q(category)}`);
+  if (priority !== "" && !PRIORITIES.has(priority)) fail(`operation ${q(key)}: invalid priority ${q(priority)}`);
   if (status !== "" && !["pending", "in_progress", "completed", "deleted"].includes(status)) fail(`operation ${q(key)}: invalid status ${q(status)}`);
   if (noteType !== "" && !NOTE_TYPES.has(noteType)) fail(`operation ${q(key)}: invalid noteType ${q(noteType)}`);
   if (kind === "list") {

@@ -68,6 +68,40 @@ function bool(p: AnyMap, name: string, fallback: boolean): boolean {
 function iso(value: string): string { const d = new Date(value); return Number.isNaN(d.valueOf()) ? "" : d.toISOString().replace(".000Z", "Z"); }
 function compactTitle(value: string): string { return deriveTitle(value); }
 
+/**
+ * Providers sometimes materialize optional JSON-Schema defaults and empty
+ * strings. Remove only values that are semantically identical to omission so
+ * they cannot accidentally select segment/stats mode or invalidate a normal
+ * workspace search.
+ */
+export function normalizeHistorySearchParams(input: AnyMap): AnyMap {
+  const params = { ...(input ?? {}) };
+  for (const key of ["workspace_path", "regex", "tool_name", "origin"] as const) {
+    if (typeof params[key] === "string" && params[key].trim() === "") delete params[key];
+  }
+  if (Array.isArray(params.fields) && params.fields.length === 0) delete params.fields;
+  if (params.tool_outcome === "any" || params.tool_outcome === "") delete params.tool_outcome;
+  if (params.stats !== true) {
+    delete params.ngram;
+    delete params.top_terms;
+    if (params.stats === false) delete params.stats;
+  }
+  return params;
+}
+
+/**
+ * Preserve explicit pagination while tolerating neutral values materialized by
+ * schema adapters. offset:0 is only redundant when tail already selects the
+ * window; on its own it still means "start at the first stored message".
+ */
+export function normalizeHistoryGetParams(input: AnyMap): AnyMap {
+  const params = { ...(input ?? {}) };
+  if (typeof params.workspace_path === "string" && params.workspace_path.trim() === "")
+    delete params.workspace_path;
+  if (params.tail !== undefined && params.offset === 0) delete params.offset;
+  return params;
+}
+
 function convertMessage(entry: AnyMap): AnyMap | undefined {
   if (entry?.type !== "message" || !entry.message) return;
   const role = entry.message.role ?? "custom";
@@ -144,6 +178,7 @@ function snippet(text: string, matcher: RegExp | undefined, terms: string[], con
 }
 
 export async function historySearch(params: AnyMap, runtime: HistoryRuntime): Promise<AnyMap> {
+  params = normalizeHistorySearchParams(params);
   const cwd = canonicalWorkspace(runtime.cwd, "workspace path");
   const scope = params.scope ?? "current";
   if (scope !== "current" && scope !== "all") throw new Error("HistorySearch: scope must be one of current or all");
@@ -246,18 +281,29 @@ function fitRow(message: AnyMap, budget: number, humanOnly: boolean): { row?: An
 }
 
 export async function historyGet(params: AnyMap, runtime: HistoryRuntime): Promise<AnyMap> {
+  params = normalizeHistoryGetParams(params);
   const cwd = canonicalWorkspace(runtime.cwd, "workspace path");
   if (typeof params.all_workspaces !== "undefined" && typeof params.all_workspaces !== "boolean") throw new Error("HistoryGet: all_workspaces must be a boolean");
   const all = Boolean(params.all_workspaces), selected = all ? "" : params.workspace_path != null ? canonicalWorkspace(params.workspace_path, "workspace_path") : cwd;
   const id = typeof params.conversation_id === "string" ? params.conversation_id.trim() : ""; if (!id) throw new Error("HistoryGet: conversation_id is required");
   const maxMessages = integer(params, "max_messages", 20, 100), maxChars = integer(params, "max_chars", 12000, 50000), humanOnly = bool(params, "human_only", false);
   if (params.tail !== undefined && params.offset !== undefined) throw new Error("HistoryGet: tail and offset are mutually exclusive");
-  const sessions = await loadSessions(runtime), conv = sessions.find((s) => s.id === id);
-  if (!conv) throw new Error("HistoryGet: conversation not found");
-  if (!all && resolve(conv.cwd) !== selected) throw new Error("HistoryGet: conversation does not match the requested workspace");
+  const sessions = await loadSessions(runtime);
+  const matchingId = sessions.filter((session) => session.id === id);
+  const matches = all
+    ? matchingId
+    : matchingId.filter((session) => resolve(session.cwd) === selected);
+  if (!matches.length) {
+    if (matchingId.length && !all)
+      throw new Error("HistoryGet: conversation does not match the requested workspace");
+    throw new Error("HistoryGet: conversation not found");
+  }
+  if (matches.length > 1)
+    throw new Error("HistoryGet: conversation_id is ambiguous across stored sessions");
+  const conv = matches[0];
   const total = conv.messages.length; let start = 0, end = total;
   if (params.offset !== undefined) { start = Math.min(total, integer(params, "offset", 0, Number.MAX_SAFE_INTEGER, true)); end = Math.min(total, start + maxMessages); }
-  else if (params.tail !== undefined) { const tail = integer(params, "tail", 20, 100); start = Math.max(0, total - tail); }
+  else if (params.tail !== undefined) { const tail = Math.min(integer(params, "tail", 20, 100), maxMessages); start = Math.max(0, total - tail); }
   else start = Math.max(0, total - maxMessages);
   let remaining = maxChars, omitted = start + total - end, filtered = 0, contentTruncated = false; const messages: AnyMap[] = [];
   for (let i = end - 1; i >= start; i--) {
@@ -276,17 +322,17 @@ export function boundedHistoryJSON(input: AnyMap, maxChars: number): { value: An
   const value = structuredClone(input);
   let text = JSON.stringify(value);
   if (Buffer.byteLength(text) <= maxChars) return { value, text };
-  for (const key of ["title", "workspace_path", "conversation_id"]) {
-    if (Buffer.byteLength(text) <= maxChars) break;
-    const original = [...String(value[key] ?? "")]; let lo = 0, hi = original.length;
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2); value[key] = original.slice(0, mid).join(""); value.metadata_truncated = true;
-      if (Buffer.byteLength(JSON.stringify(value)) <= maxChars) lo = mid; else hi = mid - 1;
-    }
-    value[key] = original.slice(0, lo).join(""); value.metadata_truncated = true; text = JSON.stringify(value);
-  }
   while (value.messages?.length && Buffer.byteLength(text) > maxChars) {
     value.messages.shift(); value.rendered_message_count = value.messages.length; value.truncated = true; value.content_truncated = true; value.omitted_message_count = (value.omitted_message_count ?? 0) + 1; text = JSON.stringify(value);
+  }
+  if (Buffer.byteLength(text) <= maxChars) return { value, text };
+  if (typeof value.title === "string" && value.title !== "") {
+    const original = [...value.title]; let lo = 0, hi = original.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2); value.title = original.slice(0, mid).join(""); value.metadata_truncated = true;
+      if (Buffer.byteLength(JSON.stringify(value)) <= maxChars) lo = mid; else hi = mid - 1;
+    }
+    value.title = original.slice(0, lo).join(""); value.metadata_truncated = true; text = JSON.stringify(value);
   }
   if (Buffer.byteLength(text) <= maxChars) return { value, text };
   text = maxChars >= 18 ? `{"truncated":true}` : maxChars >= 2 ? "{}" : "0";

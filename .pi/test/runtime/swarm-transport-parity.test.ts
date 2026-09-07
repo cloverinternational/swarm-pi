@@ -71,6 +71,21 @@ describe("transport parity with swarm -p", () => {
     const user: any = { samplingParams: { temperature: 0.7 } };
     applySwarmModelCompat(user, { interactive: true });
     expect(user.samplingParams).toEqual({ temperature: 0.7, reasoning_effort: "medium" });
+    const frozenNested: any = {
+      compat: Object.freeze({ supportsStrictMode: true }),
+      samplingParams: Object.freeze({ temperature: 0.7 }),
+    };
+    expect(applySwarmModelCompat(frozenNested, { interactive: true })).toBe(true);
+    expect(frozenNested.compat).toMatchObject({ supportsStrictMode: false, supportsStore: false, maxTokensField: "max_tokens" });
+    expect(frozenNested.samplingParams).toEqual({ temperature: 0.7, reasoning_effort: "medium" });
+    const readOnlyProperties: any = {
+      compat: Object.defineProperty({}, "supportsStrictMode", { value: true, enumerable: true }),
+      samplingParams: Object.defineProperty({}, "reasoning_effort", { value: "low", enumerable: true }),
+    };
+    expect(Object.isExtensible(readOnlyProperties.compat)).toBe(true);
+    expect(applySwarmModelCompat(readOnlyProperties, { interactive: true })).toBe(true);
+    expect(readOnlyProperties.compat).toMatchObject({ supportsStrictMode: false, supportsStore: false, maxTokensField: "max_tokens" });
+    expect(readOnlyProperties.samplingParams).toEqual({ reasoning_effort: "low" });
     expect(alignProviderPayload({ model: "m", messages: [], max_tokens: 4096 }, { interactive: true })).toEqual({ model: "m", messages: [], max_tokens: 31999 });
   });
   it("collapses text-only user content to a string and leaves images alone", () => {
