@@ -49,12 +49,9 @@ describe("Swarm agent orchestration tools", () => {
     expect(tools.some(t => t.name === "Agent" || t.name === "AgentControl")).toBe(false);
   });
 
-  it("matches representative Swarm validation strings", async () => {
+  it("matches representative Subagent validation strings", async () => {
     const logic = new SwarmAgentTools(new AgentManager({ runner: async () => "done" }));
     await expect(logic.backgroundTask({})).rejects.toThrow("task parameter is required");
-    await expect(logic.subagent({ task: "x", agent_id: "a", preset: "b" })).rejects.toThrow(
-      "Cannot specify both 'agent_id' and 'preset'. The 'preset' parameter is deprecated - use 'agent_id' instead.",
-    );
     await expect(logic.subagent({ task: "x", run_in_background: true, auto_background_seconds: 1 })).rejects.toThrow(
       "Cannot specify both 'run_in_background' and 'auto_background_seconds'. Choose one background mode.",
     );
@@ -126,6 +123,33 @@ describe("Swarm agent orchestration tools", () => {
     expect(listed.agents[0].task).toContain("[REPORTING DIRECTIVE]");
     expect(seen[0]).toContain(`[CONTEXT]\nWorking Directory: ${root}\nProject: Pi-Swarm\nProject Type: Node.js/JavaScript`);
     expect(seen[0]).toContain("[TASK]\nsay hi\n[/TASK]");
+  });
+
+  it("does not pass deprecated preset alongside the modern agent_id", async () => {
+    let spec: any;
+    const logic = new SwarmAgentTools(new AgentManager({ runner: async ctx => { spec = ctx.spec; return "ok"; } }));
+    await logic.subagent({ task: "modern agent", agent_id: "general-assistant" });
+    expect(spec.profile).toBe("general-assistant");
+    expect(spec).not.toHaveProperty("preset");
+  });
+
+  it("normalizes model-emitted agent_id and preset conflicts instead of failing", async () => {
+    let spec: any;
+    const logic = new SwarmAgentTools(new AgentManager({ runner: async ctx => { spec = ctx.spec; return "ok"; } }));
+    await logic.subagent({ task: "conflicting aliases", agent_id: "general-assistant", preset: "text_summarizer" });
+    expect(spec.profile).toBe("general-assistant");
+    expect(spec).not.toHaveProperty("preset");
+  });
+
+  it("preserves legacy preset-only calls", async () => {
+    let spec: any;
+    const logic = new SwarmAgentTools(new AgentManager({
+      presets: { legacy: { name: "legacy" } },
+      runner: async ctx => { spec = ctx.spec; return "ok"; },
+    }));
+    await logic.subagent({ task: "legacy agent", preset: "legacy" });
+    expect(spec.profile).toBe("legacy");
+    expect(spec.preset).toBe("legacy");
   });
 
   it("supports Delegate question and answer round trip", async () => {

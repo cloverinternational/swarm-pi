@@ -94,8 +94,13 @@ export class SwarmAgentTools {
     const file = outputPath(id);
     mkdirSync(dirname(file), { recursive: true });
     closeSync(openSync(file, "a"));
+    // Normalize the deprecated alias at the execution boundary. Models may
+    // occasionally emit both fields despite the schema; agent_id wins and
+    // the conflicting legacy field must never reach AgentManager.
+    const profile = opts.agent_id || opts.preset;
     const handle = this.manager.spawn({
-      id, task, profile: opts.agent_id || opts.preset, preset: opts.preset,
+      id, task, profile,
+      ...(!opts.agent_id && opts.preset ? { preset: opts.preset } : {}),
       model: opts.model, background: true,
     });
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
@@ -131,7 +136,6 @@ export class SwarmAgentTools {
   async subagent(p: AgentToolParams, callId?: string): Promise<ToolResult> {
     // subagent.go Validate()
     if (typeof p.task !== "string" || p.task === "") this.invalid("task parameter is required");
-    if (p.agent_id && p.preset) this.invalid("Cannot specify both 'agent_id' and 'preset'. The 'preset' parameter is deprecated - use 'agent_id' instead.");
     if (p.run_in_background && Number(p.auto_background_seconds) > 0) this.invalid("Cannot specify both 'run_in_background' and 'auto_background_seconds'. Choose one background mode.");
     if (Number(p.auto_background_seconds) < 0) this.invalid("auto_background_seconds must be positive");
     if (p.agent_id === "agent_constructor" && (p.run_in_background || Number(p.auto_background_seconds) > 0)) {
