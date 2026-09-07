@@ -34,7 +34,7 @@ export const SWARM_BASH_PARAMETERS = {
   type: "object",
 } as const;
 
-export interface BashParams { command: string; cwd?: string; env?: Record<string, string>; timeout_seconds?: number; description?: string }
+export interface BashParams { command: string; cwd?: string; env?: Record<string, string>; timeout_seconds?: number; description?: string; background?: boolean }
 
 /** Pi's native Bash call preview: keep the command visible in the dim tool row. */
 export function formatBashCall(args: { command?: string; timeout_seconds?: number; timeout?: number } | undefined, theme: any): string {

@@ -4,7 +4,7 @@ description: Run a prompt or slash command on a recurring interval (e.g. /loop 5
 when_to_use: When the user wants a recurring task / poll / repeat on an interval. Not for one-off tasks.
 version: 1.0.0
 ---
-Parse the user's input using ParseLoopInput to extract the interval and prompt.
+Use the session-local scheduler tool. Do not search source code or implement scheduling.
 
 If the prompt is empty, show this usage message:
 Usage: /loop [interval] <prompt>
@@ -22,12 +22,9 @@ Examples:
   /loop check the deploy every 20m
 
 Otherwise:
-1. Convert the interval to a cron expression using IntervalToCron
-2. Call the CronCreate tool with:
-   - cron: the cron expression
-   - prompt: the parsed prompt
-   - recurring: true
+1. Extract the interval and prompt (default interval: 10m).
+2. Call scheduler with action="create", interval=the interval, prompt=the task.
 3. Execute the prompt immediately (don't wait for the first cron fire)
 4. Confirm to the user with the job ID and that recurring tasks auto-expire after 7 days
 
-If no interval was given and the model wants to self-pace, use the ScheduleWakeup tool instead, passing the same input verbatim and the sentinel <<autonomous-loop-dynamic>>.
+For a one-shot self-wake, call scheduler with action="create", delay="5m" (or the desired delay), and prompt=the next instruction. Use action="list" to inspect schedules or action="cancel" with id to cancel. Schedules belong to the current TUI session and stop on shutdown.

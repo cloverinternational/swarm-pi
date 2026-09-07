@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
 import { historyGet, historySearch } from "../../lib/tools/swarm-history-tools.ts";
-import { vaultAdd, vaultExec, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
+import { vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true }))); });
@@ -26,7 +26,7 @@ describe("Swarm history and vault surfaces", () => {
     const registered: any[] = [];
     registerSwarmHistoryVaultTools({ registerTool: (tool: any) => registered.push(tool), on() {}, getCwd: () => "/tmp/work" }, { historyRoot: "/tmp", cwd: "/tmp/work" });
     const fixture = JSON.parse(require("node:fs").readFileSync(new URL("../../../tools/parity/fixtures/swarm-tools.json", import.meta.url), "utf8"));
-    for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_approve", "vault_exec", "vault_list", "vault_two_person_status"]) {
+    for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_list"]) {
       const actual = registered.find((x) => x.name === name), wanted = fixture.find((x: any) => x.function.name === name).function;
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
       expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
@@ -63,22 +63,25 @@ describe("Swarm history and vault surfaces", () => {
     const rt = { path: join(root, "pi-vault.json") };
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "super-secret", target: "TEST_PI_SECRET" }, rt)).toMatchObject({ success: true, credentialId: "token" });
     const listed = await vaultList({}, rt);
-    expect(listed.credentials).toEqual([{ id: "token", name: "", kind: "env_var", scope: "global" }]);
+    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global" }]);
+    expect(listed).toMatchObject({ count: 1, has_more: false });
     expect(JSON.stringify(listed)).not.toContain("super-secret");
     expect(await vaultAdd({ id: "token", kind: "env_var", allowedCommands: ["printenv *"] }, rt)).toMatchObject({ success: true, metadataOnly: true });
+    expect((await vaultList({ details: true }, rt)).credentials[0]).toMatchObject({ allowedCommands: ["printenv *"] });
     const stored = await readFile(rt.path, "utf8");
     // vault/transparent.go disk format: version "2" is cleartext by design
     // (the "transparent" store), keyed by credential id with injectTarget.
     expect(JSON.parse(stored)).toMatchObject({ version: "2", credentials: { token: { kind: "env_var", value: "super-secret", injectMethod: "env", injectTarget: "TEST_PI_SECRET", allowedCommands: ["printenv *"] } } });
-    const ran = await vaultExec({ credentialId: "token", command: "printenv", args: ["TEST_PI_SECRET"] }, rt);
-    expect(ran).toMatchObject({ status: "ok", exitCode: 0, stdout: "[REDACTED]\n", redactedCount: 1, safeToParse: false });
   });
 
-  it("returns Swarm locked/not-configured result shapes", async () => {
-    const warning = "vault is locked — no credentials available. Tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI).";
+  it("uses the plain vault without initialization and supports explicit disablement", async () => {
+    const warning = "plain vault is unavailable because it was explicitly disabled; credentials are stored in ~/.swarm/vault/credentials.json";
     expect(await vaultList({}, { locked: true })).toEqual({ credentials: [], warning });
     expect(await vaultList({}, { configured: false })).toEqual({ credentials: [], warning });
-    expect(await vaultAdd({ id: "x", kind: "env_var", secret: "x" }, { locked: true })).toMatchObject({ success: false, error: expect.stringContaining("vault is locked") });
-    expect(await vaultExec({ credentialId: "x", command: "true" }, { configured: false })).toMatchObject({ exitCode: 0, error: expect.stringContaining("vault is locked") });
+    expect(await vaultAdd({ id: "x", kind: "env_var", secret: "x" }, { locked: true })).toMatchObject({ success: false, error: expect.stringContaining("vault is unavailable") });
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-no-init-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    expect(await vaultList({}, rt)).toEqual({ credentials: [], count: 0, has_more: false });
+    expect(await vaultAdd({ id: "token", kind: "env_var", secret: "value" }, rt)).toMatchObject({ success: true });
   });
 });

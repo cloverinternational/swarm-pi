@@ -96,25 +96,7 @@ function snapshot(pi: any, cwd: string, prompt: string): string {
 }
 
 export function registerSystemInspector(pi: any): void {
-  pi.registerEntryRenderer?.("pi-swarm-system-inspector", (entry: any) => {
-    const lines = String(entry.data?.content ?? "").split("\\n");
-    // Keep this renderer dependency-free: Pi accepts the small Component
-    // contract, and this avoids importing Pi's private TUI package in tests.
-    return {
-      render(width: number): string[] {
-        if (width <= 0) return lines;
-        const wrapped: string[] = [];
-        for (const line of lines) {
-          if (!line) { wrapped.push(""); continue; }
-          for (let offset = 0; offset < line.length; offset += width) wrapped.push(line.slice(offset, offset + width));
-        }
-        return wrapped;
-      },
-      invalidate() {},
-    };
-  });
   let currentPrompt = "";
-  let published = false;
   let cwd = resolve(pi.getCwd?.() ?? process.cwd());
   const open = async (ctx?: InspectorContext) => {
     const text = snapshot(pi, resolve(ctx?.cwd ?? cwd), currentPrompt);
@@ -124,24 +106,37 @@ export function registerSystemInspector(pi: any): void {
   pi.on?.("before_agent_start", (event: any, ctx: any) => {
     currentPrompt = typeof event?.systemPrompt === "string" ? event.systemPrompt : currentPrompt;
     cwd = resolve(ctx?.cwd ?? cwd);
-    // This is the first lifecycle point with Pi's fully assembled prompt.
-    // Emit it as a visible, non-turn entry so it is present in the transcript
-    // when the built-in Ctrl+O startup/resources view is expanded.
-    if (published) return;
-    published = true;
-    const text = snapshot(pi, cwd, currentPrompt);
-    pi.appendEntry?.("pi-swarm-system-inspector", { content: text, cwd });
   });
   pi.on?.("session_start", (_event: any, ctx: any) => {
     cwd = resolve(ctx?.cwd ?? pi.getCwd?.() ?? process.cwd());
-    published = false;
     const skills = new SkillLoader({ cwd, home: process.env.HOME, closed: true, cliPaths: [join(cwd, ".pi", "skills")] }).load();
     ctx?.ui?.notify?.(`Pi-Swarm ready · ${toolNames(pi).length} tools · ${skills.skills.length} Pi skills · Ctrl+O: Pi startup resources · /system: full prompt and inventory`, "info");
+    // Keep the large prompt out of the normal transcript. Pi toggles a custom
+    // header's `setExpanded` state together with its built-in Ctrl+O view, so
+    // the full inspector is available only while that view is expanded.
+    ctx?.ui?.setHeader?.((_tui: any, theme: any) => {
+      let content = "";
+      const component: any = {
+        render(width: number): string[] {
+          if (width <= 0) return content.split("\n");
+          return content.split("\n").flatMap((line) => {
+            if (!line) return [""];
+            const rows: string[] = [];
+            for (let offset = 0; offset < line.length; offset += width) rows.push(line.slice(offset, offset + width));
+            return rows;
+          });
+        },
+        invalidate() {},
+      };
+      component.setExpanded = (expanded: boolean) => {
+        content = expanded ? snapshot(pi, cwd, currentPrompt) : "";
+      };
+      component.setExpanded(false);
+      return component;
+    });
   });
-  // Ctrl+O is owned by Pi's built-in `app.tools.expand` shortcut. Do not
-  // register it here: Pi's expanded startup view already shows loaded skills,
-  // extensions, themes, and tools. Use /system for the additional full prompt
-  // and workspace-package inventory without colliding with that view.
+  // `/system` remains available for a dedicated editor view, including in
+  // headless-compatible extension contexts where a header is not rendered.
   pi.registerCommand?.("system", { description: "Inspect the current prompt and all built runtime resources", handler: async (_args: string, ctx: any) => open(ctx) });
 }
 

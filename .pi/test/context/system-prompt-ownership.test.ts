@@ -9,6 +9,7 @@ import systemPromptsExtension, {
   resolveActiveSystemPrompt,
   savePromptStore,
 } from "../../extensions/10-context/system-prompts.ts";
+import { registerSystemInspector } from "../../extensions/10-context/system-inspector.ts";
 
 function fakePi() {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -81,5 +82,30 @@ describe("system-prompt ownership", () => {
     const result: any = await handler({ systemPrompt: "Pi base", systemPromptOptions: { cwd } }, {});
     expect(result.systemPrompt).toContain("custom Forge override");
     expect(result.systemPrompt).toContain("<available_skills>");
+  });
+
+  it("keeps the assembled prompt out of the transcript until the header expands", async () => {
+    let headerFactory: ((tui: any, theme: any) => any) | undefined;
+    const entries: unknown[] = [];
+    const runtime: any = {
+      getCwd: () => process.cwd(),
+      getAllTools: () => [],
+      on: (event: string, handler: (value: any, ctx: any) => any) => {
+        if (event === "before_agent_start") runtime.beforeAgentStart = handler;
+        if (event === "session_start") runtime.sessionStart = handler;
+      },
+      appendEntry: (...value: unknown[]) => entries.push(value),
+      registerCommand: () => {},
+    };
+    registerSystemInspector(runtime);
+    await runtime.beforeAgentStart({ systemPrompt: "assembled system prompt" }, { cwd: process.cwd() });
+    expect(entries).toEqual([]);
+
+    await runtime.sessionStart({}, { cwd: process.cwd(), ui: { setHeader: (factory: any) => { headerFactory = factory; } } });
+    expect(headerFactory).toBeTypeOf("function");
+    const component: any = headerFactory!({}, { fg: (_color: string, text: string) => text });
+    expect(component.render(80).join("\n")).toBe("");
+    component.setExpanded(true);
+    expect(component.render(80).join("\n")).toContain("SYSTEM PROMPT");
   });
 });

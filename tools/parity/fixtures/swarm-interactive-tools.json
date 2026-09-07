@@ -6,6 +6,10 @@
       "description": "Execute shell commands and return the output. Supports pipes, redirections, and shell features.\nBoth stdout and stderr are captured.\n\nIMPORTANT: You MUST specify timeout_seconds for every command to prevent hanging.\n\nCommand runs and blocks until completion or timeout.\n- If completes within timeout: Returns output immediately\n- If exceeds timeout: Auto-backgrounds and returns task_id for later retrieval\n\nParameters:\n- command (required): Shell command to execute\n- cwd: Working directory (default: current directory)\n- env: Environment variables as key-value pairs\n- timeout_seconds (REQUIRED): Maximum seconds to wait before auto-backgrounding\n\nExample:\n{\n  \"command\": \"npm test\",\n  \"timeout_seconds\": 30\n}\nReturns: Output if completes in 30s, or {\"backgrounded\": true, \"task_id\": \"...\"} if exceeds timeout",
       "parameters": {
         "properties": {
+          "background": {
+            "description": "Return immediately and run the command in the background",
+            "type": "boolean"
+          },
           "command": {
             "description": "Shell command to execute",
             "type": "string"

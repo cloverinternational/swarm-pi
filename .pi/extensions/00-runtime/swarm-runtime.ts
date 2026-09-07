@@ -3,8 +3,7 @@ import { Policy } from "../../../packages/policy/policy/src/index.ts";
 import { AgentManager, createPiRunner, registerAgents } from "../../../packages/tools/agents/src/index.ts";
 import { MCPManager } from "../../../packages/tools/mcp/src/index.ts";
 import { registerSwarmPrompt } from "../10-context/swarm-prompt.ts";
-import { DaemonRpcClient, createDaemonControlTask, createDaemonGoalLoop } from "../../../packages/runtime/runtime-contracts/src/daemon-rpc.ts";
-import { registerGoalLoop } from "../../../packages/runtime/runtime-contracts/src/goal-loop.ts";
+import { DaemonRpcClient, createDaemonControlTask } from "../../../packages/runtime/runtime-contracts/src/daemon-rpc.ts";
 import { registerControlTaskTools } from "../30-tools/control-task-tools.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
@@ -26,7 +25,7 @@ export function registerSwarmRuntime(pi: Pi, options: { cwd?: string; closed?: b
   const unavailable = (name: string) => new Proxy({}, { get: () => async () => { throw new Error("Pi-Swarm daemon unavailable: configure PI_SWARM_DAEMON_SOCKET and PI_SWARM_DAEMON_TOKEN (" + name + ")"); } }) as any;
   const daemon = configured ? new DaemonRpcClient({ socketPath: socketPath!, token: token!, timeoutMs: options.daemonTimeoutMs }) : undefined;
   state.daemon = daemon;
-  registerGoalLoop(pi, daemon ? createDaemonGoalLoop(daemon) : unavailable("goal/loop"));
+  // Session-local /goal and /loop belong to swarm-goal, not the daemon UI.
   registerControlTaskTools(pi, daemon ? createDaemonControlTask(daemon) : unavailable("goal/task/run"));
   pi.registerTool?.(withDefaultToolRenderer({ name: "daemon_status", label: "daemon status", description: "Show production daemon configuration status.", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: JSON.stringify({ status: state.daemonStatus, configured }) }], details: { status: state.daemonStatus, configured } }) }));
   runtimeByPi.set(pi as object, state);

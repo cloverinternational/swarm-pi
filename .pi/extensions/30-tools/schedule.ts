@@ -5,7 +5,7 @@ import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool
 export interface ScheduleExtensionAPI {
   getCwd?(): string;
   registerTool(tool: unknown): void;
-  sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void | Promise<void>;
+  sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean }): void | Promise<void>;
   on?(event: string, handler: (...args: any[]) => unknown): void;
 }
 
@@ -22,7 +22,7 @@ export async function registerScheduleExtension(
     ...options,
     workDir,
     sink: async (prompt) => {
-      await pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+      await pi.sendUserMessage(prompt, { deliverAs: "followUp", triggerTurn: true });
     },
   });
   registerScheduleTools({ ...pi, registerTool: (tool: unknown) => pi.registerTool(withDefaultToolRenderer(tool as any)) }, scheduler);

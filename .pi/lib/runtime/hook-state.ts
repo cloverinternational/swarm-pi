@@ -8,14 +8,14 @@ interface State { enabled: Record<string, boolean>; visible: boolean; recent: Ho
 const KEY = Symbol.for("pi-swarm-hook-state");
 type Shared = { state: State; pi?: any; present?: (data: any) => void };
 const root = globalThis as typeof globalThis & { [KEY]?: Shared };
-const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
+const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: false, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
 // Pi /reload can retain Symbol.for state from an older extension module. Normalize
 // it before any handler registration so upgrades never fail on missing fields.
 function normalizeState() {
-  if (!shared.state || typeof shared.state !== "object") shared.state = { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } };
+  if (!shared.state || typeof shared.state !== "object") shared.state = { enabled: {}, visible: false, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } };
   const state = shared.state as Partial<State>;
   state.enabled = state.enabled && typeof state.enabled === "object" ? state.enabled : {};
-  state.visible = typeof state.visible === "boolean" ? state.visible : true;
+  state.visible = typeof state.visible === "boolean" ? state.visible : false;
   state.recent = Array.isArray(state.recent) ? state.recent.slice(-200) : [];
   state.counts = { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0, ...(state.counts ?? {}) };
   shared.state = state as State;
@@ -142,7 +142,7 @@ export function restoreHookState(entries: readonly any[]) {
   // registration count while restoring persisted telemetry.
   const registered = shared.state.counts?.registered ?? 0;
   shared.state.enabled = {};
-  shared.state.visible = true;
+  shared.state.visible = false;
   shared.state.recent = [];
   shared.state.counts = { registered, executed: 0, blocked: 0, failed: 0, skipped: 0 };
   const e = [...entries].reverse().find(x => x?.type === "pi-swarm-hook-state" || x?.type === "custom" && x?.customType === "pi-swarm-hook-state")?.data;

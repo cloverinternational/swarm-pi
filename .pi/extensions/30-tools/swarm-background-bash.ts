@@ -46,7 +46,7 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   const wake = () => {
     if (running || !pending.length) return;
     const combined = pending.splice(0).join("\n\n");
-    (sessionContext?.sendUserMessage ?? pi.sendUserMessage)?.(combined, { deliverAs: "followUp" });
+    (sessionContext?.sendUserMessage ?? pi.sendUserMessage)?.(combined, { deliverAs: "followUp", triggerTurn: true });
   };
   manager.onDone((done) => {
     const body = formatBackgroundDone(done);

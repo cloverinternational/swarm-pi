@@ -10,14 +10,15 @@ export type AgentStatus = "queued" | "running" | "completed" | "failed" | "cance
 export interface Profile { name: string; systemPrompt?: string; capabilities?: string[]; tools?: string[]; }
 export interface Preset extends Profile { provider?: string; model?: string; concurrency?: number; worktree?: boolean; }
 export interface AgentSpec { id?: string; parentId?: string; parentSessionId?: string; sessionId?: string; task: string; provider?: string; model?: string; profile?: string; preset?: string; capabilities?: string[]; worktree?: string | boolean; background?: boolean; }
-export interface AgentResult { id: string; status: AgentStatus; output?: string; error?: string; startedAt?: string; completedAt: string; durationMs: number; turns?: number; }
+export interface AgentResult { id: string; status: AgentStatus; output?: string; error?: string; startedAt?: string; completedAt: string; durationMs: number; turns?: number; transcriptPath?: string; }
 export interface BackgroundHandle { readonly id: string; readonly parentId?: string; readonly sessionId: string; wait(timeoutMs?: number): Promise<AgentResult>; cancel(): boolean; steer(instruction: string): boolean; }
 export type AgentCompletionSink = (result: AgentResult) => void | Promise<void>;
 export interface AgentCompletionEvent { readonly type: "agent.completed"; readonly agentId: string; readonly parentId?: string; readonly parentSessionId?: string; readonly sessionId: string; readonly background: boolean; readonly result: AgentResult; }
 export type AgentEventSink = (event: AgentCompletionEvent) => void | Promise<void>;
-export interface RunnerContext { signal: AbortSignal; spec: Required<Pick<AgentSpec, "id" | "task">> & AgentSpec; task: string; profile?: Profile; provider?: string; model?: string; cwd: string; instructions: readonly string[]; steering: readonly string[]; }
+export type AgentTranscriptSink = (agentId: string, path: string) => void;
+export interface RunnerContext { signal: AbortSignal; spec: Required<Pick<AgentSpec, "id" | "task">> & AgentSpec; task: string; profile?: Profile; provider?: string; model?: string; cwd: string; instructions: readonly string[]; steering: readonly string[]; onTranscriptPath?: (path: string) => void; }
 /** A runner returns the child's final text, optionally with the number of model turns it took (Swarm reports `turns` per sub-agent). */
-export interface RunnerOutcome { output: string; turns?: number }
+export interface RunnerOutcome { output: string; turns?: number; transcriptPath?: string }
 export type Runner = (ctx: RunnerContext) => Promise<string | RunnerOutcome>;
 
 /** Built-in Swarm TUI agent profiles shared by Subagent and Delegate. */
@@ -47,6 +48,7 @@ export function createPiRunner(pi: any): Runner {
     // runs) can launch the same task at once. Give each child its own physical
     // transcript while retaining the logical id in AgentSpec.
     const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}-${process.pid}-${randomUUID()}.jsonl`;
+    ctx.onTranscriptPath?.(sessionPath);
     // A fresh physical path means print mode never resumes a stale transcript.
     // A Swarm sub-agent inherits its parent's tool registry and hooks. Pi's
     // project extensions (this port) only load in a TRUSTED workspace, and a
@@ -65,7 +67,7 @@ export function createPiRunner(pi: any): Runner {
     if (ctx.model) args.unshift("--model", ctx.model);
     const result = await pi.exec(command, commandArgs, { cwd: ctx.cwd, signal: ctx.signal });
     if (result?.killed || result?.code !== 0) throw new Error(`child pi failed (${result?.killed ? "killed" : `exit ${result?.code}`}): ${(result?.stderr ?? "").trim()}`);
-    return { output: String(result?.stdout ?? "").trim(), turns: await countSessionTurns(sessionPath) };
+    return { output: String(result?.stdout ?? "").trim(), turns: await countSessionTurns(sessionPath), transcriptPath: sessionPath };
   };
 }
 
@@ -85,12 +87,13 @@ const unique = (xs: readonly string[]) => [...new Set(xs.filter(Boolean))];
 const stableId = (parentId: string | undefined, sessionId: string, task: string) => `agent-${createHash("sha256").update(`${parentId ?? "root"}\n${sessionId}\n${task}`).digest("hex").slice(0, 20)}`;
 
 export class AgentManager {
-  private readonly agents = new Map<string, { spec: AgentSpec; result?: AgentResult; promise: Promise<AgentResult>; abort: AbortController; steering: string[]; listeners: Set<(r: AgentResult) => void> }>();
+  private readonly agents = new Map<string, { spec: AgentSpec; result?: AgentResult; promise: Promise<AgentResult>; abort: AbortController; steering: string[]; listeners: Set<(r: AgentResult) => void>; transcriptPath?: string }>();
   private active = 0;
   private readonly queue: (() => void)[] = [];
   private readonly profiles = new Map<string, Profile>();
   private readonly presets = new Map<string, Preset>();
   private readonly eventSinks = new Set<AgentEventSink>();
+  private readonly transcriptSinks = new Set<AgentTranscriptSink>();
   constructor(private readonly options: { runner?: Runner; cwd?: string; concurrency?: number; profiles?: Profile[]; presets?: Record<string, Preset>; onComplete?: AgentCompletionSink; eventSink?: AgentEventSink } = {}) {
     if (options.eventSink) this.eventSinks.add(options.eventSink);
     for (const p of [...BUILTIN_AGENT_PROFILES, ...(options.profiles ?? [])]) this.profiles.set(p.name, clone(p));
@@ -98,6 +101,7 @@ export class AgentManager {
   }
   addProfile(profile: Profile): void { this.profiles.set(profile.name, clone(profile)); }
   addEventSink(sink: AgentEventSink): () => void { this.eventSinks.add(sink); return () => this.eventSinks.delete(sink); }
+  addTranscriptSink(sink: AgentTranscriptSink): () => void { this.transcriptSinks.add(sink); return () => this.transcriptSinks.delete(sink); }
   addPreset(name: string, preset: Preset): void { this.presets.set(name, { ...clone(preset), name: preset.name || name }); }
   profile(name: string): Profile | undefined { const p = this.profiles.get(name); return p && clone(p); }
   private resolve(spec: AgentSpec) {
@@ -114,17 +118,17 @@ export class AgentManager {
     const id = spec.id ?? stableId(spec.parentId, sessionId, spec.task); if (this.agents.has(id)) throw new Error(`agent ${id} already exists`);
     const abort = new AbortController(); const steering: string[] = []; const listeners = new Set<(r: AgentResult) => void>();
     let resolve!: (r: AgentResult) => void; const promise = new Promise<AgentResult>(r => resolve = r);
-    const entry = { spec: { ...spec, id }, abort, steering, listeners, promise, result: undefined as AgentResult | undefined }; this.agents.set(id, entry);
+    const entry = { spec: { ...spec, id }, abort, steering, listeners, promise, result: undefined as AgentResult | undefined, transcriptPath: undefined as string | undefined }; this.agents.set(id, entry);
     const run = () => { this.active++; void this.execute(entry.spec, sessionId, entry).then(r => { entry.result = r; resolve(r); for (const l of listeners) l(clone(r)); const result = clone(r); if (this.options.onComplete) void Promise.resolve(this.options.onComplete(result)).catch(() => undefined); if (spec.background) for (const sink of this.eventSinks) void Promise.resolve(sink({ type: "agent.completed", agentId: r.id, parentId: spec.parentId, parentSessionId: spec.parentSessionId, sessionId, background: true, result })).catch(() => undefined); }).finally(() => { this.active--; this.drain(); }); };
     if (this.active < Math.max(1, this.options.concurrency ?? 4)) run(); else this.queue.push(run);
     return { id, parentId: spec.parentId, sessionId, wait: (timeoutMs?: number) => timeout(promise, timeoutMs), cancel: () => { if (entry.result) return false; abort.abort(); return true; }, steer: (instruction: string) => { if (entry.result || !instruction.trim()) return false; steering.push(instruction); return true; } };
   }
   private drain() { const limit = Math.max(1, this.options.concurrency ?? 4); while (this.active < limit && this.queue.length) this.queue.shift()!(); }
-  private async execute(spec: AgentSpec, sessionId: string, entry: { abort: AbortController; steering: string[] }): Promise<AgentResult> {
+  private async execute(spec: AgentSpec, sessionId: string, entry: { abort: AbortController; steering: string[]; transcriptPath?: string }): Promise<AgentResult> {
     const started = Date.now(), startedAt = new Date(started).toISOString(), resolved = this.resolve(spec); let cwd = this.options.cwd ?? process.cwd();
     if (resolved.worktree) cwd = await this.createWorktree(cwd, spec.id!);
     const instructions = [...(resolved.profile?.systemPrompt ? [resolved.profile.systemPrompt] : []), ...(resolved.capabilities ?? []).map(c => `Capability: ${c}`)];
-    try { const outcome = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id!, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering }); const { output, turns } = typeof outcome === "string" ? { output: outcome, turns: 1 } : { output: outcome.output, turns: outcome.turns ?? 1 }; const result: AgentResult = { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started, turns }; return result; }
+    try { const outcome = await (this.options.runner ?? defaultRunner)({ signal: entry.abort.signal, spec: { ...spec, id: spec.id!, sessionId }, profile: resolved.profile, provider: resolved.provider, model: resolved.model, task: spec.task, cwd, instructions, steering: entry.steering, onTranscriptPath: (path) => { if (entry.transcriptPath) return; entry.transcriptPath = path; for (const sink of this.transcriptSinks) sink(spec.id!, path); } }); const { output, turns, transcriptPath } = typeof outcome === "string" ? { output: outcome, turns: 1, transcriptPath: undefined } : { output: outcome.output, turns: outcome.turns ?? 1, transcriptPath: outcome.transcriptPath }; const result: AgentResult = { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "completed", output, startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started, turns, transcriptPath: transcriptPath ?? entry.transcriptPath }; return result; }
     catch (e) { return { id: spec.id!, status: entry.abort.signal.aborted ? "cancelled" : "failed", error: e instanceof Error ? e.message : String(e), startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - started }; }
   }
   private async createWorktree(cwd: string, id: string) { const path = `${cwd}/.pi-worktrees/${id}`; await mkdir(`${cwd}/.pi-worktrees`, { recursive: true }); await execFileAsync("git", ["worktree", "add", "--detach", path, "HEAD"], { cwd, timeout: 15000 }); return path; }
@@ -144,7 +148,7 @@ export function registerAgents(pi: any, manager = new AgentManager(), parentSess
     const { result } = event;
     const output = result.output !== undefined ? `\noutput: ${result.output}` : "";
     const error = result.error !== undefined ? `\nerror: ${result.error}` : "";
-    pi.sendUserMessage(`[agent completed] id=${result.id} status=${result.status}${output}${error}`, { deliverAs: "followUp" });
+    pi.sendUserMessage(`[agent completed] id=${result.id} status=${result.status}${output}${error}`, { deliverAs: "followUp", triggerTurn: true });
   });
   const agentTool = { name: "Agent", label: "Run agent", description: "Start a child agent in the inherited session context.", parameters: { type: "object", required: ["task"], properties: { task: { type: "string" }, profile: { type: "string" }, provider: { type: "string" }, model: { type: "string" }, background: { type: "boolean" }, worktree: { type: "boolean" } } }, async execute(_id: string, input: any, ctx: any) { const currentSessionId = ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? targetSessionId; const parentId = ctx?.agentId ?? currentSessionId; const h = manager.spawn({ ...input, parentId, parentSessionId: currentSessionId, sessionId: currentSessionId, background: Boolean(input.background) }); const result = input.background ? { handle: h.id, sessionId: h.sessionId } : await h.wait(); return { content: [{ type: "text", text: JSON.stringify(result) }], details: result }; } };
   (pi.codemodeTools ??= []).push(agentTool);

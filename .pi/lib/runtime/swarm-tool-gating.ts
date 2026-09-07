@@ -54,6 +54,8 @@ export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.e
 /** The set of tool names Swarm would register in this environment. */
 export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   const names = new Set<string>(swarmToolNames());
+  for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
+  names.add("scheduler");
   if (environment.interactive) {
     for (const name of INTERACTIVE_ONLY_TOOLS) names.add(name);
     for (const name of HEADLESS_ONLY_TOOLS) names.delete(name);

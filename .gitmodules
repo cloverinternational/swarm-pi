@@ -4,3 +4,9 @@
 [submodule "vendor/page-index"]
 	path = vendor/page-index
 	url = https://github.com/VectifyAI/PageIndex.git
+[submodule "vendor/pi-extensions-nklisch"]
+	path = vendor/pi-extensions-nklisch
+	url = https://github.com/nklisch/pi-extensions.git
+[submodule "vendor/pi-extensions-bacnh85"]
+	path = vendor/pi-extensions-bacnh85
+	url = https://github.com/bacnh85/pi-extensions.git

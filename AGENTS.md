@@ -179,7 +179,7 @@ When changing discovery, preserve these invariants:
 | `00-runtime` | `cache-telemetry`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks` |
-| `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `research-tools`, `schedule`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status` |
 
@@ -215,7 +215,9 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `enter_plan_mode`, `exit_plan_mode` | `.pi/extensions/10-context/swarm-plan-mode.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
 | `ask_user_question` | `.pi/extensions/30-tools/ask-user/index.ts` | Fork of `edlsh/pi-ask-user` v0.15.0 (MIT, `LICENSE` beside it); local edits are marked `pi-swarm:`. Upstream `bun:test` suite not carried; `.pi/test/tools/ask-user-layout.test.ts` covers the layout helper. |
 | `control_plane_status` | `.pi/extensions/50-ui/control-panel.ts` | `packages/runtime/runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
-| `daemon_status`, goal/task/run tools | `.pi/extensions/00-runtime/swarm-runtime.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/runtime/runtime-contracts/src/daemon-rpc.ts`, `goal-loop.ts`, `control-task.ts`; unavailable daemon must fail closed. |
+| `daemon_status`, task/run tools | `.pi/extensions/00-runtime/swarm-runtime.ts`, `.pi/extensions/30-tools/control-task-tools.ts` | `packages/runtime/runtime-contracts/src/daemon-rpc.ts`, `control-task.ts`; unavailable daemon must fail closed. Daemon goal/loop APIs remain available to non-TUI consumers, but are not registered in the TUI. |
+| `scheduler`, `/goal`, `/loop` | `.pi/extensions/30-tools/swarm-goal.ts` | `.pi/lib/tools/swarm-goal.ts`; session-local scheduling and evidence-based goal continuation without a turn cap. Replaces the separate CronCreate/List/Delete and ScheduleWakeup TUI tools. |
+| Session wake-up delivery | `.pi/lib/runtime/session-wakeup.ts` | Background-agent completion and swarm-goal share custom-message delivery with triggerTurn, generation guards, and shutdown invalidation. No runtime imports from vendor. |
 | `vault_add`, `vault_approve`, `vault_exec`, `vault_list`, `vault_two_person_status` | `.pi/extensions/30-tools/swarm-history-vault-tools.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; never expose secret values. |
 | `vault` | `.pi/extensions/30-tools/vault.ts` | `.pi/lib/tools/swarm-vault-tools.ts`; transparent global credential storage, with explicit user-risk warning. |
 | `mcp__<server>__<tool>` | `.pi/extensions/00-runtime/swarm-runtime.ts` / `packages/tools/mcp/src/index.ts` | `packages/tools/mcp/src/index.ts`; manifests, allowlists, transport, and auth are the seam. |

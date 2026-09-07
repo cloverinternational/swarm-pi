@@ -6,10 +6,7 @@
  * same roster requirement/locked shapes as Swarm rather than pretending that a
  * second principal approved anything.
  */
-import { randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 type AnyMap = Record<string, any>;
@@ -52,13 +49,17 @@ async function save(rt: VaultRuntime, data: RecordFile) {
 }
 // An explicit `path` is a configured store (NewTransparentStorage accepts a
 // not-yet-existing file); the autoload default only installs when it exists.
-const locked = (rt: VaultRuntime) => rt.locked === true || rt.configured === false || (rt.locked === undefined && rt.configured === undefined && rt.path === undefined && !existsSync(defaultPiVaultPath()));
-const sensitive = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const locked = (rt: VaultRuntime) => rt.locked === true || rt.configured === false;
+const lockedMessage = "plain vault is unavailable because it was explicitly disabled; credentials are stored in ~/.swarm/vault/credentials.json";
 function validSSH(s: string) {
   return ["-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----", "-----BEGIN DSA PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----", "-----BEGIN ENCRYPTED PRIVATE KEY-----"].some((marker) => s.includes(marker));
 }
 function durationMs(value: string): number | undefined { const m = /^(\d+)(h|m|s)$/.exec(value); return m ? Number(m[1]) * ({ h: 3600000, m: 60000, s: 1000 } as AnyMap)[m[2]] : undefined; }
-function metadata(c: AnyMap): AnyMap { return { id: c.id, name: c.name ?? "", kind: c.kind, scope: c.scope, ...(c.allowedTools?.length ? { allowedTools: c.allowedTools } : {}), ...(c.allowedCommands?.length ? { allowedCommands: c.allowedCommands } : {}), ...(c.allowedHosts?.length ? { allowedHosts: c.allowedHosts } : {}), ...(c.tags?.length ? { tags: c.tags } : {}) }; }
+function metadata(c: AnyMap, details = false): AnyMap {
+  const base = { id: c.id, kind: c.kind, scope: c.scope };
+  if (!details) return base;
+  return { ...base, ...(c.name ? { name: c.name } : {}), ...(c.allowedTools?.length ? { allowedTools: c.allowedTools } : {}), ...(c.allowedCommands?.length ? { allowedCommands: c.allowedCommands } : {}), ...(c.allowedHosts?.length ? { allowedHosts: c.allowedHosts } : {}), ...(c.tags?.length ? { tags: c.tags } : {}), ...(c.target ? { target: c.target } : {}), ...(c.expiresAt ? { expiresAt: c.expiresAt } : {}) };
+}
 
 export async function vaultAdd(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
   if (!p.id) return { success: false, credentialId: "", scope: "", kind: "", error: "id is required" };
@@ -66,80 +67,43 @@ export async function vaultAdd(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap
   // vault_add.go never validates Kind against the known set; unknown kinds are stored verbatim.
   if (p.secret && p.kind === "ssh_key" && !validSSH(p.secret)) return { success: false, credentialId: "", scope: "", kind: "", error: "secret does not look like a valid ssh_key (expected PEM or OpenSSH private key material starting with a \"-----BEGIN ... PRIVATE KEY-----\" line); the credential was NOT modified. Omit 'secret' to update allowedTools/allowedCommands/allowedHosts/tags on an existing credential without touching its stored key." };
   if (p.expire) { const ms = durationMs(p.expire); if (!ms) return { success: false, credentialId: "", scope: "", kind: "", error: `invalid expiration duration '${p.expire}': time: invalid duration \"${p.expire}\"` }; }
-  if (locked(rt)) return { success: false, credentialId: "", scope: "", kind: "", error: "vault is locked — tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI) before adding credentials" };
+  if (locked(rt)) return { success: false, credentialId: "", scope: "", kind: "", error: lockedMessage };
   const threshold = p.threshold >= 2 ? p.threshold : p.tags?.includes("sensitive") ? 2 : 0;
-  if (threshold) return { success: false, credentialId: "", scope: "", kind: "", error: "two-person storage requires a team roster (recipients.txt) and a user identity; run 'swarmos vault init --project --team' and add members with 'swarmos vault allow' first" };
+  if (threshold) return { success: false, credentialId: "", scope: "", kind: "", error: "two-person approval is not supported by the plain vault; remove threshold or the sensitive tag" };
   const data = await load(rt), existing = data.credentials[p.id], metadataOnly = !p.secret;
   if (metadataOnly && !existing) return { success: false, credentialId: "", scope: "", kind: "", error: `secret is required when adding a new credential (no existing credential found for id ${p.id})` };
   const scope = p.scope || "global";
   const cred = { id: p.id, name: p.name ?? "", kind: p.kind || existing.kind, scope, secretBase64: p.secret ? Buffer.from(p.secret).toString("base64") : existing.secretBase64, allowedTools: p.allowedTools ?? [], allowedCommands: p.allowedCommands ?? [], allowedHosts: p.allowedHosts ?? [], tags: p.tags ?? [], target: p.target || existing?.target || "", ...(p.expire ? { expiresAt: new Date(Date.now() + durationMs(p.expire)!).toISOString() } : {}) };
   data.credentials[p.id] = cred; await save(rt, data);
-  return { success: true, credentialId: p.id, scope, kind: cred.kind, ...(metadataOnly ? { metadataOnly: true } : {}), warning: metadataOnly ? "Credential metadata updated (allowedTools/allowedCommands/allowedHosts/tags/target); the stored secret was left unchanged." : "Credential stored. It can now be used with vault_exec." };
+  return { success: true, credentialId: p.id, scope, kind: cred.kind, ...(metadataOnly ? { metadataOnly: true } : {}), warning: metadataOnly ? "Credential metadata updated; the stored secret was left unchanged." : "Credential stored in the plain vault." };
 }
 
 export async function vaultList(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
-  if (locked(rt)) return { credentials: [], warning: "vault is locked — no credentials available. Tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI)." };
+  if (locked(rt)) return { credentials: [], warning: lockedMessage };
   const data = await load(rt); let values = Object.values(data.credentials).filter((c) => !c.expiresAt || new Date(c.expiresAt) > new Date());
-  if (p.kind) values = values.filter((c) => c.kind === p.kind); if (p.scope) values = values.filter((c) => c.scope === p.scope); if (p.tags) values = values.filter((c) => p.tags.every((t: string) => c.tags?.includes(t)));
-  return { credentials: values.map(metadata) };
+  const query = typeof p.query === "string" ? p.query.trim().toLowerCase() : "";
+  if (query) values = values.filter((c) => [c.id, c.name, c.kind].some((v) => String(v ?? "").toLowerCase().includes(query)));
+  if (p.kind) values = values.filter((c) => c.kind === p.kind);
+  if (p.scope) values = values.filter((c) => c.scope === p.scope);
+  if (Array.isArray(p.tags) && p.tags.length) values = values.filter((c) => p.tags.every((t: string) => c.tags?.includes(t)));
+  values.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const limit = Math.min(100, Math.max(1, Number.isInteger(p.limit) ? p.limit : 20));
+  const parsedCursor = typeof p.cursor === "string" && /^\d+$/.test(p.cursor) ? Number(p.cursor) : 0;
+  const start = Math.min(parsedCursor, values.length);
+  const page = values.slice(start, start + limit);
+  const next = start + page.length < values.length ? String(start + page.length) : undefined;
+  return { credentials: page.map((c) => metadata(c, p.details === true)), count: values.length, has_more: Boolean(next), ...(next ? { next_cursor: next } : {}) };
 }
 
 /** Remove one global credential without returning its value. */
 export async function vaultRemove(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
   if (!p.id) return { success: false, credentialId: "", error: "id is required" };
-  if (locked(rt)) return { success: false, credentialId: p.id, error: "vault is locked — unlock the vault before removing credentials" };
+  if (locked(rt)) return { success: false, credentialId: p.id, error: lockedMessage };
   const data = await load(rt);
   if (!data.credentials[p.id]) return { success: false, credentialId: p.id, error: `credential not found: ${p.id}` };
   delete data.credentials[p.id];
   await save(rt, data);
   return { success: true, credentialId: p.id, removed: true };
-}
-
-function splitCommand(value: string): string[] {
-  const out: string[] = []; let cur = "", quote = "";
-  for (const c of value) { if ((c === "'" || c === "\"")) { if (!quote) quote = c; else if (quote === c) quote = ""; else cur += c; } else if (/\s/.test(c) && !quote) { if (cur) out.push(cur), cur = ""; } else cur += c; }
-  if (cur) out.push(cur); return out;
-}
-function elapsed(ms: number) { if (ms < 1000) return `${ms}ms`; return `${(ms / 1000).toFixed(ms % 1000 ? 3 : 0)}s`; }
-function execute(command: string, args: string[], options: AnyMap): Promise<{ stdout: string; stderr: string; code: number; duration: number; error?: string }> {
-  return new Promise((done) => { const started = Date.now(), child = spawn(command, args, options), stdout: Buffer[] = [], stderr: Buffer[] = []; let timer: NodeJS.Timeout;
-    child.stdout?.on("data", (x) => stdout.push(x)); child.stderr?.on("data", (x) => stderr.push(x));
-    child.on("error", (e) => done({ stdout: "", stderr: "", code: -1, duration: Date.now() - started, error: e.message }));
-    child.on("spawn", () => { timer = setTimeout(() => child.kill("SIGKILL"), options.timeout); });
-    child.on("close", (code) => { clearTimeout(timer); done({ stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString(), code: code ?? -1, duration: Date.now() - started }); });
-  });
-}
-export async function vaultExec(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
-  if (!p.credentialId) return { stdout: "", stderr: "", exitCode: 0, duration: "", redactedCount: 0, safeToParse: false, error: "credentialId is required" };
-  if (!p.command) return { stdout: "", stderr: "", exitCode: 0, duration: "", redactedCount: 0, safeToParse: false, error: "command is required" };
-  if (locked(rt)) return { stdout: "", stderr: "", exitCode: 0, duration: "", redactedCount: 0, safeToParse: false, error: "vault is locked — no credentials available. Tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI). Use vault_list first to see available credentials." };
-  const data = await load(rt), c = data.credentials[p.credentialId];
-  if (!c) return { stdout: "", stderr: "", exitCode: -1, duration: "", redactedCount: 0, safeToParse: false, status: "failed", error: `credential not found: ${p.credentialId}` };
-  if (p.twoPersonRequestId) return { stdout: "", stderr: "", exitCode: -1, duration: "", redactedCount: 0, safeToParse: false, status: "failed", error: "two-person finalize failed: two-person storage requires a team roster (ensure a distinct second person approved via vault_approve)" };
-  const pieces = p.args?.length ? [p.command, ...p.args] : splitCommand(p.command), command = pieces[0], args = pieces.slice(1);
-  if (c.allowedCommands?.length && !c.allowedCommands.some((pattern: string) => new RegExp("^" + pattern.split("*").map(sensitive).join(".*") + "$").test([command, ...args].join(" ")))) {
-    if (p.approvalId) return { stdout: "", stderr: "", exitCode: 0, duration: "", redactedCount: 0, safeToParse: false, error: "approval failed: interactive host approval is unavailable in Pi" };
-    const approvalId = "approval_" + randomBytes(10).toString("hex");
-    return { stdout: "", stderr: "", exitCode: 0, duration: "", redactedCount: 0, safeToParse: false, status: "needs_approval", approvalId, warning: "This credential requires host approval. After the host records approval, call vault_exec again with the same command and approvalId set to the value above." };
-  }
-  const secret = Buffer.from(c.secretBase64, "base64").toString(), env = { ...process.env }; let cleanup: string | undefined;
-  if (c.kind === "ssh_key" || c.target?.startsWith("/")) { const path = c.target || `/tmp/pi-vault-${process.pid}-${randomBytes(4).toString("hex")}`; await writeFile(path, secret, { mode: 0o600 }); cleanup = path; (env as AnyMap).SSH_KEY_PATH = path; }
-  else (env as AnyMap)[c.target || c.id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")] = secret;
-  const result = await execute(command, args, { cwd: p.workingDir || undefined, env, stdio: ["ignore", "pipe", "pipe"], timeout: (p.timeout > 0 ? p.timeout : 60) * 1000 });
-  if (cleanup) { const { unlink } = await import("node:fs/promises"); await unlink(cleanup).catch(() => {}); }
-  if (result.error) return { stdout: "", stderr: "", exitCode: -1, duration: "", redactedCount: 0, safeToParse: false, status: "failed", error: result.error };
-  let count = 0; const replace = (x: string) => x.replace(new RegExp(sensitive(secret), "g"), () => (count++, "[REDACTED]")); const stdout = replace(result.stdout), stderr = replace(result.stderr);
-  return { stdout, stderr, exitCode: result.code, duration: elapsed(result.duration), redactedCount: count, ...(count ? { redactionHints: ["credential value"] } : {}), safeToParse: count === 0, status: "ok", warning: "Credential value was never exposed. Output was scanned for accidental secret leakage." };
-}
-export function vaultApprove(p: AnyMap, rt: VaultRuntime = {}): AnyMap {
-  if (!p.requestId) return { satisfied: false, error: "requestId is required" };
-  if (locked(rt)) return { satisfied: false, error: "vault is locked — unlock it (type /vault in the TUI) before approving" };
-  return { satisfied: false, requestId: p.requestId, error: "two-person storage requires a team roster (recipients.txt) and a user identity; run 'swarmos vault init --project --team' and add members with 'swarmos vault allow' first" };
-}
-export function vaultTwoPersonStatus(p: AnyMap, rt: VaultRuntime = {}): AnyMap {
-  if (!p.requestId) return { approvals: 0, remaining: 0, satisfied: false, error: "requestId is required" };
-  if (locked(rt)) return { approvals: 0, remaining: 0, satisfied: false, error: "vault is locked — unlock it (type /vault in the TUI) before checking status" };
-  return { requestId: p.requestId, approvals: 0, remaining: 0, satisfied: false, expired: true, error: "unknown, already finalized, or expired request", warning: "This request is no longer pending. If it was finalized, the command already ran; if it expired, start over with vault_exec." };
 }
 
 export function vaultJSONXML(value: unknown): string {

@@ -93,7 +93,7 @@ describe("Swarm interactive background bash", () => {
     const id = JSON.parse(launched.content[0].text).task_id;
     await new Promise(r => setTimeout(r, 2500));
     // onError receives result.Error (the exec error), not the process output.
-    expect(sent).toEqual([{ kind: "user", content: `[BACKGROUND] task_id=${id} command=for i in 1 2; do sleep 1; done; echo bg-done >&2; exit 7 status=failed\n\noutput:\nexit status 7\n\nBackground command failed (exit code 7).`, options: { deliverAs: "followUp" } }]);
+    expect(sent).toEqual([{ kind: "user", content: `[BACKGROUND] task_id=${id} command=for i in 1 2; do sleep 1; done; echo bg-done >&2; exit 7 status=failed\n\noutput:\nexit status 7\n\nBackground command failed (exit code 7).`, options: { deliverAs: "followUp", triggerTurn: true } }]);
   }, 6000);
 
   it("formats notifications and previews like app_update.go", () => {

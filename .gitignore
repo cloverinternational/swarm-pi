@@ -8,6 +8,7 @@
 
 # Probe outputs, baselines, recordings
 artifacts/
+.tape/*-sessions/
 
 # Build output and dependencies
 **/dist/

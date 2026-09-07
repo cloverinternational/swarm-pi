@@ -11,7 +11,7 @@
       "history-search.ts",
       "ask-user/index.ts",
       "research-tools.ts",
-      "schedule.ts",
+      "swarm-goal.ts",
       "swarm-agent-tools.ts",
       "swarm-background-bash.ts",
       "swarm-bash.ts",

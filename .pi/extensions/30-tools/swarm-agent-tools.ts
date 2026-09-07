@@ -2,6 +2,7 @@ import { AgentManager, createPiRunner } from "../../../packages/tools/agents/src
 import { applySwarmSurface } from "../../lib/runtime/swarm-tool-surface.ts";
 import { AGENT_MANAGER_SYMBOL, AGENT_TOOLS_SYMBOL, AgentToolValidationError, SwarmAgentTools, WAIT_FOR_AGENT_BACKGROUND, type ToolResult } from "../../lib/tools/swarm-agent-tools.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
+import { createSessionWakeup } from "../../lib/runtime/session-wakeup.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -22,7 +23,16 @@ export function registerSwarmAgentTools(pi: Pi, options: { manager?: AgentManage
   if (host[AGENT_TOOLS_SYMBOL]) return host[AGENT_TOOLS_SYMBOL];
   const manager = options.manager ?? host[AGENT_MANAGER_SYMBOL] ?? new AgentManager({ cwd: options.cwd ?? pi.getCwd?.() ?? process.cwd(), concurrency: 4, runner: createPiRunner(pi) });
   host[AGENT_MANAGER_SYMBOL] = manager;
-  const logic = new SwarmAgentTools(manager, options.cwd ?? pi.getCwd?.() ?? process.cwd());
+  const logic = new SwarmAgentTools(manager, options.cwd ?? pi.getCwd?.() ?? process.cwd(), pi.getSessionId?.() ?? pi.sessionId ?? "");
+  const wake = createSessionWakeup(pi);
+  pi.on?.("session_start", (_event: unknown, ctx: any) => {
+    logic.setSessionId(ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId ?? pi.getSessionId?.() ?? pi.sessionId ?? "");
+  });
+  logic.setBackgroundCompletionHandler(async result => {
+    const summary = result.status === "completed" ? "completed" : result.status;
+    const message = { customType: "swarm-agent-complete", content: `[agent completed] id=${result.id} status=${summary}`, display: true, details: { agent_id: result.id, status: result.status, background: true } };
+    await wake.send(message);
+  }, () => wake.capture());
   (globalThis as any)[WAIT_FOR_AGENT_BACKGROUND] = () => logic.requestWaitBackground();
   host[AGENT_TOOLS_SYMBOL] = logic;
   if (registrations.has(pi as object)) return logic;

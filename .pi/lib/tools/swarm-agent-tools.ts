@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -11,7 +11,7 @@ export type AgentToolParams = Record<string, any>;
 type Status = "running" | "completed" | "failed" | "cancelled";
 type Question = { id: string; question: string; context: string; askedAt: number; answer?: string; resolve?: (answer: string) => void };
 type Entry = {
-  id: string; task: string; startedAt: number; outputFile: string; handle: BackgroundHandle;
+  id: string; task: string; startedAt: number; outputFile: string; handle: BackgroundHandle; transcriptPath?: string;
   done: Promise<AgentResult>; result?: AgentResult; delegate?: boolean; question?: Question; consumedOffset?: number;
 };
 
@@ -26,6 +26,7 @@ const stable = (v: any): any => Array.isArray(v) ? v.map(stable)
   : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
 const json = (v: unknown) => JSON.stringify(stable(v), null, 2);
 const outputPath = (id: string) => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "swarm", "tasks", `${id}.output`);
+const metadataPath = (id: string) => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "swarm", "tasks", `${id}.meta.json`);
 const terminal = (s: Status) => s !== "running";
 const id8 = () => randomUUID().slice(0, 8);
 const unixNano = () => BigInt(Date.now()) * 1_000_000n + (process.hrtime.bigint() % 1_000_000n);
@@ -76,19 +77,61 @@ export const BUILTIN_AGENT_IDS = ["general-assistant", "code-reviewer", "researc
 export { BUILTIN_AGENT_PROFILES };
 export class AgentToolValidationError extends Error {}
 export class SwarmAgentTools {
+  private onBackgroundComplete?: (result: AgentResult) => void | Promise<void>;
+  private captureCompletionOwner?: () => () => boolean;
   private waiting?: { id: string; detach: () => void };
   availableAgents(): string[] {
     const custom = typeof (this.manager as any).profileNames === "function" ? (this.manager as any).profileNames() as string[] : [];
     return [...new Set([...custom, ...BUILTIN_AGENT_IDS])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
   private entries = new Map<string, Entry>();
-  constructor(readonly manager: AgentManager, readonly cwd = process.cwd()) {}
+  private activeSessionId: string;
+  constructor(readonly manager: AgentManager, readonly cwd = process.cwd(), sessionId = "") { this.activeSessionId = sessionId; this.restoreTerminalEntries(); }
+  setSessionId(sessionId: string): void { if (sessionId) this.activeSessionId = sessionId; }
+  currentSessionId(): string { return this.activeSessionId; }
+  setBackgroundCompletionHandler(handler: (result: AgentResult) => void | Promise<void>, captureOwner?: () => () => boolean): void { this.onBackgroundComplete = handler; this.captureCompletionOwner = captureOwner; }
 
   private fail(message: string): never { throw new Error(message); }
   /** Errors Swarm raises from the tool's Validate() (registry_impl.go wraps them as "validation failed for X: …"). */
   private invalid(message: string): never { throw new AgentToolValidationError(message); }
   private entry(id: string): Entry | undefined { return this.entries.get(id); }
+  owns(id: string): boolean { return this.entries.has(id); }
   private status(e: Entry): Status { return (e.result?.status ?? "running") as Status; }
+
+  /** Rehydrate completed task records after a Pi/TUI restart. */
+  private restoreTerminalEntries(): void {
+    // Direct unit consumers without a conversation identity must remain
+    // process-local; otherwise they would import every other test/session's
+    // durable task records.
+    if (!this.activeSessionId) return;
+    const dir = dirname(outputPath("placeholder"));
+    let files: string[];
+    try { files = readdirSync(dir); } catch { return; }
+    for (const name of files) {
+      if (!name.endsWith(".meta.json")) continue;
+      const id = name.slice(0, -".meta.json".length);
+      const file = join(dir, name);
+      let metadata: { task?: string; startedAt?: number; delegate?: boolean; cwd?: string; sessionId?: string };
+      try { metadata = JSON.parse(readFileSync(file, "utf8")); } catch { continue; }
+      if (metadata.cwd !== this.cwd || metadata.sessionId !== this.activeSessionId) continue;
+      const output = outputPath(id);
+      if (!existsSync(output)) continue;
+      let data: Buffer;
+      try { data = readFileSync(output); } catch { continue; }
+      const records = data.toString("utf8").split("\n").flatMap(line => {
+        try { return line.trim() ? [JSON.parse(line)] : []; } catch { return []; }
+      });
+      const final = [...records].reverse().find(record => record.type === "final");
+      if (!final) continue; // An in-flight task may still be owned by another process.
+      const completedAt = Number(final.ts) || statSync(output).mtimeMs;
+      const result: AgentResult = final.error
+        ? { id, status: "failed", error: String(final.error), completedAt: new Date(completedAt).toISOString(), durationMs: 0 }
+        : { id, status: "completed", output: String(final.content ?? ""), completedAt: new Date(completedAt).toISOString(), durationMs: 0 };
+      const done = Promise.resolve(result);
+      const handle: BackgroundHandle = { id, sessionId: id, wait: () => done, cancel: () => false, steer: () => false };
+      this.entries.set(id, { id, task: metadata.task ?? `(recovered agent ${id})`, startedAt: metadata.startedAt ?? completedAt, outputFile: output, handle, done, result, delegate: metadata.delegate });
+    }
+  }
 
   private spawn(task: string, opts: AgentToolParams, id: string, delegate = false, register = true): Entry {
     const file = outputPath(id);
@@ -99,15 +142,21 @@ export class SwarmAgentTools {
     // the conflicting legacy field must never reach AgentManager.
     const profile = opts.agent_id || opts.preset;
     const handle = this.manager.spawn({
-      id, task, profile,
+      id, task, profile, parentId: this.activeSessionId || undefined, parentSessionId: this.activeSessionId || undefined, sessionId: this.activeSessionId || undefined,
       ...(!opts.agent_id && opts.preset ? { preset: opts.preset } : {}),
       model: opts.model, background: true,
     });
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
+    writeFileSync(metadataPath(id), JSON.stringify({ id, task, startedAt: entry.startedAt, delegate, cwd: this.cwd, sessionId: this.activeSessionId }) + "\n");
     setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task });
+    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path }); } };
+    const removeTranscriptSink = this.manager.addTranscriptSink(transcriptSink);
+    const ownsSession = this.captureCompletionOwner?.() ?? (() => true);
     entry.done = handle.wait().then(async result => {
+      removeTranscriptSink();
       entry.result = result;
-      setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: result.status, startedAt: entry.startedAt, endedAt: Date.now(), tokens: 0, detail: task, output: result.output ?? result.error });
+      entry.transcriptPath = result.transcriptPath;
+      setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: result.status, startedAt: entry.startedAt, endedAt: Date.now(), tokens: 0, detail: task, output: result.output ?? result.error, transcriptPath: result.transcriptPath });
       await mkdir(dirname(file), { recursive: true });
       if (result.status === "completed") {
         const content = result.output ?? "";
@@ -116,6 +165,7 @@ export class SwarmAgentTools {
       } else {
         await appendFile(file, JSON.stringify({ type: "final", ts: Date.now(), error: result.error ?? (result.status === "cancelled" ? "cancelled" : "") }) + "\n");
       }
+      if (this.entries.has(id) && ownsSession()) await this.onBackgroundComplete?.(result);
       return result;
     });
     if (register) this.entries.set(id, entry);
