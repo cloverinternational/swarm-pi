@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -855,13 +855,19 @@ async function seedHome(home, seed) {
   await cp(seed, home, { recursive: true });
 }
 
-async function capturePi(workspace, scratch, profile, script, maxTurns = 0, seed) {
+async function capturePi(workspace, scratch, profile, script, maxTurns = 0, seed, packagePath) {
   const recorder = await startRecorder(script);
   try {
     const home = join(scratch, "pi-home");
     await seedHome(home, seed);
     const agentDir = join(home, ".pi", "agent");
     await mkdir(agentDir, { recursive: true });
+    // --package <checkout>: load Pi-Swarm the way `pi install <checkout>`
+    // does (settings.json packages[] -> root package.json pi manifest) instead
+    // of injecting --extension entries, so the probe proves the global-install
+    // code path itself. The packages entry is written the way `pi install`
+    // writes a local path: relative to the settings file.
+    if (packagePath) await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [relative(agentDir, resolve(packagePath))] }, null, 2));
     await writeFile(join(agentDir, "models.json"), JSON.stringify({
       providers: {
         parity: {
@@ -902,7 +908,7 @@ async function capturePi(workspace, scratch, profile, script, maxTurns = 0, seed
     // extensions only. When probing a workspace that is not this repository,
     // load the port explicitly (Pi does not realpath symlinked directories, so
     // a linked .pi/extensions would break the extensions' relative imports).
-    if (resolve(workspace) !== resolve(PI_SWARM_EXTENSIONS, "..", "..")) {
+    if (!packagePath && resolve(workspace) !== resolve(PI_SWARM_EXTENSIONS, "..", "..")) {
       for (const entry of await discoverExtensionEntries(PI_SWARM_EXTENSIONS)) args.push("--extension", entry);
     }
     // --clean-agent also means --no-hooks on the Swarm side; Pi-Swarm's hook
@@ -984,12 +990,13 @@ export async function captureParity(options = {}) {
   const script = TOOL_SCRIPTS[scenario];
   const maxTurns = Number(options.maxTurns ?? 0) || 0;
   const seed = options.seedHome ? resolve(options.seedHome) : undefined;
+  const packagePath = options.package ? resolve(options.package) : undefined;
   if (profile !== "clean" && profile !== "project") {
     throw new Error(`unknown parity profile: ${profile}`);
   }
   const scratch = await mkdtemp(join(tmpdir(), "pi-swarm-parity-"));
   try {
-    const pi = await capturePi(workspace, scratch, profile, script, maxTurns, seed);
+    const pi = await capturePi(workspace, scratch, profile, script, maxTurns, seed, packagePath);
     const piArtifacts = requestArtifacts(pi.requests, PROBE_PROMPT);
     const swarm = await captureSwarm(workspace, scratch, profile, script, maxTurns, seed);
     const swarmArtifacts = requestArtifacts(swarm.requests, PROBE_PROMPT);
@@ -1064,6 +1071,7 @@ async function main() {
     scenario: valueAfter("--scenario"),
     maxTurns: valueAfter("--max-turns"),
     seedHome: valueAfter("--seed-home"),
+    package: valueAfter("--package"),
   });
   process.stdout.write(`${JSON.stringify({
     profile: result.profile,

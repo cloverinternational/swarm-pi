@@ -35,7 +35,7 @@ Pi ExtensionAPI (.pi/extensions/<NN-layer>/)
         │ registration, gates, persistence, rendering
         ├── 00-runtime   ── integration boundary, hook engine, tool surface, parity
         ├── 10-context   ── swarm-prompt + swarm-context, plan mode, skills
-        ├── 20-policy    ── policy + disk hooks + vendor read-only guard
+        ├── 20-policy    ── policy + disk hooks + policy nudges
         ├── 30-tools     ── agents, tasks, history, fs, bash, MCP, vault, research
         ├── 40-state     ── session entries + .swarm stores
         └── 50-ui        ── renderers, widgets, status, footer, themes
@@ -56,7 +56,7 @@ address in each tree.
 | --- | --- | --- |
 | 00 | `runtime` | integration boundary, hook engine, tool surface/gating, transport parity, telemetry |
 | 10 | `context` | system prompt, prompt/context config, plan mode, thinking, skills, inspector |
-| 20 | `policy` | vendor read-only guard, disk hooks, sleep blocker, nudges |
+| 20 | `policy` | disk hooks, sleep blocker, nudges |
 | 30 | `tools` | every `registerTool` surface: bash, fs, search, agents, tasks, schedule, history, vault, research, MCP, ask-user, annoyed, codemode |
 | 40 | `state` | durable session entries: memory history, conversation metadata |
 | 50 | `ui` | control panel, metrics widgets, themes, tools-status command |
@@ -76,6 +76,7 @@ address in each tree.
 | `tests/parity/` | Cross-runtime parity suite (`node --test`). |
 | `tools/parity/` | Pi ↔ Swarm probes, fixtures, generators; `plexus/` holds the A/B harness. |
 | `tools/integration/` | Postgres integration runner and cache dogfood. |
+| `tools/install/` | `doctor.mjs`: global-install health check (`npm run doctor`). |
 | `tools/repo/` | Repository maintenance: `rewrite-imports.mjs` re-targets relative specifiers after moves and has a `--check` mode. |
 | `docs/architecture/` | Living design descriptions. |
 | `docs/reference/` | Contracts, inventories, and operational references. |
@@ -177,7 +178,7 @@ When changing discovery, preserve these invariants:
 | --- | --- |
 | `00-runtime` | `cache-telemetry`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
-| `20-policy` | `swarm-disk-hooks`, `upstream-readonly` |
+| `20-policy` | `swarm-disk-hooks` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `research-tools`, `schedule`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status` |
@@ -247,7 +248,6 @@ the Pi adapter only for registration/presentation concerns.
 | Central hook state and ordering | `.pi/lib/runtime/hook-state.ts` | Registration, enablement, persistence, and visibility. |
 | Prompt hook `packages/context/prompt` | `.pi/extensions/10-context/swarm-prompt.ts` | `before_agent_start`; prompt/context assembly in `packages/context/prompt/src/index.ts` and `.pi/lib/context/swarm-context.ts`. |
 | Disk hooks `disk-hooks` | `.pi/extensions/20-policy/swarm-disk-hooks.ts` | Loads project/user hook config, executes bounded commands; maps tool/session/prompt/compact events. |
-| Vendor guard | `.pi/extensions/20-policy/upstream-readonly.ts` | `tool_call`; blocks mutation targeting `vendor/`. |
 | Inline hook presentation | `.pi/extensions/00-runtime/hooks.ts`, `.pi/lib/runtime/hook-render-bridge.ts`, `.pi/lib/runtime/hook-presenter.ts` | UI only; never make governance depend on rendering. |
 | Annoyance/nudge | `.pi/extensions/30-tools/annoyed/nudge.ts` | `tool_result`, `turn_end`; persistence in `annoyed/store.ts`. |
 | Task enforcement | `.pi/extensions/30-tools/taskmanage.ts` | `packages/tools/taskmanage/src/task-hooks.ts`, `swarm-hook-runtime.ts`; task state is authoritative in taskmanage. |
@@ -333,9 +333,50 @@ npx vitest run .pi/test/context   # one layer, or any path/file
 npm run build -w @pi-swarm/prompt # one package
 npm run test:parity               # Pi ↔ Swarm wire parity (node --test)
 npm run parity:probe              # capture into artifacts/parity/default
+npm run doctor                    # global-install health: PATH, dist, deps, models.json, theme
 node tools/repo/rewrite-imports.mjs --check   # every relative specifier resolves
 npm run dogfood                   # build + test + parity
 ```
+
+### Installing globally
+
+The repository is itself a Pi package (root `package.json` `pi` manifest:
+the six extension layers and `.pi/themes`). Never copy `.pi/extensions/`
+anywhere — the extensions import `.pi/lib`, `packages/*/src`, and
+`tools/parity/fixtures` by relative path and need the hoisted `node_modules`.
+
+```sh
+# dev box: link this checkout (no copy; dedupes against .pi/ by absolute path)
+pi install /home/swarm/Work/Pi-Swarm
+# any other machine, once a remote exists (pinned; `pi update` reconciles the ref)
+pi install git:<host>/<org>/Pi-Swarm@<tag>
+# from the installed checkout: PATH, versions, dist, deps, models.json, theme, packages[]
+npm run doctor
+```
+
+What `pi install` does (vendor/pi-mono `package-manager.ts`): `git clone`
+(no submodules) into `~/.pi/agent/git/<host>/<path>`, then
+`npm install --omit=dev`, never `npm run build`. Consequences that are
+contracts here:
+
+- the root `prepare` script is the only build a global install gets; every
+  package consumed from `dist/` at runtime (`@pi-swarm/core`,
+  `@pi-swarm/runtime-contracts`) must be in `build:runtime`;
+- anything imported at runtime is in root or package `dependencies`, never
+  `devDependencies` (`typescript` is a runtime dependency of codemode);
+- nothing under `vendor/` is imported at runtime (submodules are empty in a
+  package clone); `ask_user_question` is the in-tree fork for that reason;
+- on a machine that also opens this repo as a project, use the local-path
+  form — a `git:` install has a different absolute path and would register
+  every tool twice.
+
+Prove a change against the package path, not just the project boot:
+`node tools/parity/probe.mjs --profile project --workspace <foreign dir>
+--package <checkout>` boots Pi with `settings.packages` pointing at the
+checkout and no `--extension` injection. Host-level items (node on the
+non-interactive `PATH`, `models.json` `maxTokens`, tmux launch shell,
+provider key scope) are outside the package; `npm run doctor` reports the
+first two.
 
 Run the narrowest relevant check first, then broader checks when the change is
 cross-package. Never claim a check passed unless it was actually run. After
@@ -353,5 +394,3 @@ rather than editing specifiers by hand.
   under `vendor/` (formerly `upstream/`). Read it for reference and implement
   local changes in packages, extensions, tools, or docs. If a vendored change
   appears necessary, stop and ask for explicit approval.
-- The local `.pi/extensions/20-policy/upstream-readonly.ts` guard exists to block unsafe
-  mutation under `vendor/`; do not bypass it.

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SkillLoader } from "../../../packages/context/skills/src/index.ts";
 import { resolveActiveSystemPrompt } from "./system-prompts.ts";
 
@@ -9,29 +10,54 @@ export interface InspectorContext {
   ui?: { editor?: (title: string, content?: string) => Promise<string | undefined>; notify?: (message: string, type?: string) => void };
 }
 
-function packageNames(cwd: string): string[] {
+/**
+ * The Pi-Swarm checkout this process was loaded from. When installed as a
+ * Pi package (`pi install <checkout>` / `git:`) the workspace is some other
+ * project, so extensions and packages must be enumerated from here, not cwd.
+ * This file lives at <checkout>/.pi/extensions/10-context/.
+ */
+const CHECKOUT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+function packageNames(root: string): string[] {
   const result: string[] = [];
   try {
-    for (const name of readdirSync(cwd)) {
-      const path = join(cwd, name, "package.json");
-      if (!existsSync(path)) continue;
-      try {
-        const pkg = JSON.parse(readFileSync(path, "utf8"));
-        if (typeof pkg.name === "string") result.push(`${pkg.name} (${name})`);
-      } catch { /* ignore malformed unrelated package files */ }
+    // npm workspaces: packages/<layer>/<name>/package.json
+    const packages = join(root, "packages");
+    for (const layer of readdirSync(packages)) {
+      let names: string[] = [];
+      try { names = readdirSync(join(packages, layer)); } catch { continue; }
+      for (const name of names) {
+        const path = join(packages, layer, name, "package.json");
+        if (!existsSync(path)) continue;
+        try {
+          const pkg = JSON.parse(readFileSync(path, "utf8"));
+          if (typeof pkg.name === "string") result.push(`${pkg.name} (packages/${layer}/${name})`);
+        } catch { /* ignore malformed package files */ }
+      }
     }
   } catch { /* workspace may be unavailable during early startup */ }
   return result.sort();
 }
 
-function extensionNames(cwd: string): string[] {
+function extensionNames(root: string): string[] {
+  const result: string[] = [];
   try {
-    return readdirSync(join(cwd, ".pi", "extensions"), { withFileTypes: true })
-      .filter(entry => (entry.isFile() && entry.name.endsWith(".ts")) || entry.isDirectory())
-      .map(entry => entry.name.replace(/\.ts$/, ""))
-      .filter(name => name !== "system-inspector")
-      .sort();
+    // Each <NN-layer>/package.json lists its entrypoints in load order.
+    const extensions = join(root, ".pi", "extensions");
+    for (const layer of readdirSync(extensions).sort()) {
+      const manifest = join(extensions, layer, "package.json");
+      if (!existsSync(manifest)) continue;
+      let entries: unknown = [];
+      try { entries = JSON.parse(readFileSync(manifest, "utf8"))?.pi?.extensions; } catch { continue; }
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (typeof entry !== "string") continue;
+        const name = entry.replace(/\/index\.ts$/, "").replace(/\.ts$/, "");
+        if (name !== "system-inspector") result.push(`${layer}/${name}`);
+      }
+    }
   } catch { return []; }
+  return result;
 }
 
 function toolNames(pi: any): string[] {
@@ -43,11 +69,12 @@ function snapshot(pi: any, cwd: string, prompt: string): string {
   const tools = toolNames(pi);
   // Only Pi-local skills belong in this inspector; Swarm skills are explicit.
   const skills = new SkillLoader({ cwd, home: process.env.HOME, closed: true, cliPaths: [join(cwd, ".pi", "skills")] }).load();
-  const extensions = extensionNames(cwd);
-  const packages = packageNames(cwd);
+  const extensions = extensionNames(CHECKOUT);
+  const packages = packageNames(CHECKOUT);
   return [
     "PI-SWARM RUNTIME INSPECTOR",
     `Workspace: ${cwd}`,
+    `Pi-Swarm checkout: ${CHECKOUT}`,
     `Generated: ${new Date().toISOString()}`,
     "",
     `SYSTEM PROMPT (${prompt.length} characters)`,
