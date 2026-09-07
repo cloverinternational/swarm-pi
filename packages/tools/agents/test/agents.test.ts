@@ -29,13 +29,13 @@ describe("AgentManager", () => {
     expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toEqual({ output: "child result", turns: 1 });
     expect(seen[0]).toBe(process.platform === "win32" ? "cmd.exe" : "env");
     // A child that recorded three assistant messages reports three turns.
-    const sessionPath = join(cwd, ".pi", "agent-sessions", "s.jsonl");
-    const counting = createPiRunner({ exec: async () => { const { mkdirSync, writeFileSync } = await import("node:fs"); mkdirSync(join(cwd, ".pi", "agent-sessions"), { recursive: true }); writeFileSync(sessionPath, ["{\"type\":\"session\"}", "{\"type\":\"message\",\"message\":{\"role\":\"user\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"toolResult\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}"].join("\n") + "\n"); return { code: 0, stdout: "done", stderr: "", killed: false }; } });
+    let countingSessionPath = "";
+    const counting = createPiRunner({ exec: async (...args: any[]) => { const { mkdirSync, writeFileSync } = await import("node:fs"); countingSessionPath = args[1].find((arg: string) => arg.endsWith(".jsonl")); mkdirSync(join(cwd, ".pi", "agent-sessions"), { recursive: true }); writeFileSync(countingSessionPath, ["{\"type\":\"session\"}", "{\"type\":\"message\",\"message\":{\"role\":\"user\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"toolResult\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}"].join("\n") + "\n"); return { code: 0, stdout: "done", stderr: "", killed: false }; } });
     expect(await counting({ signal: new AbortController().signal, spec: { id: "x", sessionId: "s", task: "t" }, task: "t", cwd, instructions: [], steering: [] })).toEqual({ output: "done", turns: 3 });
     if (process.platform === "win32") expect(seen[1][3]).toContain("PI_SWARM_SUBAGENT=1");
     // --approve: the child inherits the parent's workspace trust so the port's
     // project extensions load in print mode (Swarm sub-agents share the registry).
-    else expect(seen[1]).toEqual(expect.arrayContaining(["PI_SWARM_SUBAGENT=1", "pi", "--mode", "text", "--print", "--approve", "--session", `${cwd}/.pi/agent-sessions/x.jsonl`, "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
+    else expect(seen[1]).toEqual(expect.arrayContaining(["PI_SWARM_SUBAGENT=1", "pi", "--mode", "text", "--print", "--approve", "--session", expect.stringMatching(new RegExp(`${cwd}/\\.pi/agent-sessions/x-\\d+-[0-9a-f-]+\\.jsonl`)), "--exclude-tools", "Agent,AgentControl", "-p", "inspect"]));
     expect(seen[2]).toMatchObject({ cwd });
   });
 

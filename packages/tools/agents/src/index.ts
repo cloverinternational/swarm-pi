@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 export * from "./general-agent-adapter.js";
 export * from "./worker-daemon.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -42,11 +42,12 @@ export function createPiRunner(pi: any): Runner {
     if (typeof pi?.exec !== "function") return defaultRunner(ctx);
     const sessionDir = `${ctx.cwd}/.pi/agent-sessions`;
     await mkdir(sessionDir, { recursive: true });
-    const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}.jsonl`;
-    // Swarm children always start from an empty transcript (resume is an
-    // explicit option); `--session` would otherwise resume a stale file left
-    // by an earlier child with the same deterministic id.
-    await rm(sessionPath, { force: true });
+    // The manager's logical session id is deterministic, which is useful for
+    // identity but unsafe as a filename: two Pi parents (or two concurrent
+    // runs) can launch the same task at once. Give each child its own physical
+    // transcript while retaining the logical id in AgentSpec.
+    const sessionPath = `${sessionDir}/${ctx.spec.sessionId ?? ctx.spec.id}-${process.pid}-${randomUUID()}.jsonl`;
+    // A fresh physical path means print mode never resumes a stale transcript.
     // A Swarm sub-agent inherits its parent's tool registry and hooks. Pi's
     // project extensions (this port) only load in a TRUSTED workspace, and a
     // print-mode child without a remembered decision is untrusted by default
