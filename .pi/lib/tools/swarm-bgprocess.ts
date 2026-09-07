@@ -8,6 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { stripANSI, type BashParams } from "./swarm-bash.ts";
+import { setRunningWork } from "../ui/running-work.ts";
 
 export type ProcessState = "running" | "completed" | "failed" | "cancelled";
 export interface BackgroundLine {
@@ -220,6 +221,7 @@ export class SwarmBackgroundProcessManager {
       startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], completion, spawned, backgrounded: false,
     };
     this.processes.set(id, rec);
+    setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command });
     child.stdout?.on("data", (d: Buffer) => rec.pendingStdout.push(d));
     child.stderr?.on("data", (d: Buffer) => rec.pendingStderr.push(d));
     const poller = setInterval(() => this.poll(rec), 50);
@@ -244,6 +246,7 @@ export class SwarmBackgroundProcessManager {
       rec.signal = signal;
       rec.exitCode = code ?? (signal ? -1 : 0);
       if (rec.state !== "cancelled") rec.state = rec.exitCode === 0 ? "completed" : "failed";
+      setRunningWork({ id: rec.id, kind: "bash", label: rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
       finish();
       this.notifyTerminal(rec);
     });

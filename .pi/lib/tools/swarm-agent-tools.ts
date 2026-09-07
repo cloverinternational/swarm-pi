@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { BUILTIN_AGENT_PROFILES, type AgentManager, type AgentResult, type BackgroundHandle } from "../../../packages/tools/agents/src/index.ts";
+import { setRunningWork } from "../ui/running-work.ts";
 
 export type ToolResult = { text: string; isError?: boolean; details?: unknown };
 export type AgentToolParams = Record<string, any>;
@@ -16,6 +17,7 @@ type Entry = {
 
 export const AGENT_MANAGER_SYMBOL = Symbol.for("pi-swarm.agent-manager");
 export const AGENT_TOOLS_SYMBOL = Symbol.for("pi-swarm.agent-tools");
+export const WAIT_FOR_AGENT_BACKGROUND = Symbol.for("pi-swarm-wait-for-agent-background");
 const MAX_OUTPUT = 8 * 1024 * 1024;
 const divider = "───────────────────────────────────────────────────────────────\n";
 const goDuration = (ms: number) => ms < 1000 ? `${Math.max(0, Math.trunc(ms))}ms` : `${(ms / 1000).toFixed(ms % 1000 ? 3 : 0).replace(/0+$/, "").replace(/\.$/, "")}s`;
@@ -74,6 +76,7 @@ export const BUILTIN_AGENT_IDS = ["general-assistant", "code-reviewer", "researc
 export { BUILTIN_AGENT_PROFILES };
 export class AgentToolValidationError extends Error {}
 export class SwarmAgentTools {
+  private waiting?: { id: string; detach: () => void };
   availableAgents(): string[] {
     const custom = typeof (this.manager as any).profileNames === "function" ? (this.manager as any).profileNames() as string[] : [];
     return [...new Set([...custom, ...BUILTIN_AGENT_IDS])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -96,8 +99,10 @@ export class SwarmAgentTools {
       model: opts.model, background: true,
     });
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
+    setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task });
     entry.done = handle.wait().then(async result => {
       entry.result = result;
+      setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: result.status, startedAt: entry.startedAt, endedAt: Date.now(), tokens: 0, detail: task, output: result.output ?? result.error });
       await mkdir(dirname(file), { recursive: true });
       if (result.status === "completed") {
         const content = result.output ?? "";
@@ -243,9 +248,20 @@ export class SwarmAgentTools {
     if (timeout < 0) this.fail("timeout_seconds must be zero or greater");
     const e = this.entry(p.agent_id);
     if (!e) this.fail(`agent '${p.agent_id}' not found: agent '${p.agent_id}' not found`);
-    const result = await this.wait(e, timeout);
+    let detach!: () => void;
+    const detached = new Promise<"background">(resolve => { detach = () => resolve("background"); });
+    this.waiting = { id: e.id, detach };
+    const result = await Promise.race([this.wait(e, timeout), detached]);
+    if (this.waiting?.id === e.id) this.waiting = undefined;
+    if (result === "background") return { text: json({ wait_status: "backgrounded", timeout_seconds: timeout, agent: { agent_id: e.id, status: this.status(e) }, message: "Wait backgrounded by Ctrl+B. The agent continues running; use TaskOutput or wait_for_agent again to check it." }) };
     if (!result) return { text: json({ wait_status: "timeout", timeout_seconds: timeout, agent: { agent_id: e.id, status: this.status(e) }, message: "Wait timeout; agent execution was not cancelled." }) };
     return { text: json(this.resultObject(result, e.outputFile)) };
+  }
+
+  requestWaitBackground(): boolean {
+    if (!this.waiting) return false;
+    this.waiting.detach();
+    return true;
   }
 
   async multiWait(p: AgentToolParams): Promise<ToolResult> {

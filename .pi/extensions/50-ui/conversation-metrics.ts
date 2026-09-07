@@ -1,4 +1,5 @@
 /** Small, session-backed status line for the native Pi editor. */
+import { formatRunningWorkDuration, onRunningWorkChange, runningWorkExpanded, runningWorkSelection, runningWorkSnapshot } from "../../lib/ui/running-work.ts";
 export interface ConversationMetrics {
   version: 1;
   walltimeMs: number;
@@ -74,7 +75,20 @@ class MetricsFooter {
     }
     const line = parts.join("  ·  ");
     const clipped = width > 0 && line.length > width ? line.slice(0, Math.max(0, width - 1)) + "…" : line;
-    return [this.theme.fg("dim", clipped)];
+    const work = runningWorkSnapshot();
+    if (!runningWorkExpanded() || !work.length) {
+      const activeBash = work.some(item => item.kind === "bash" && item.status === "running");
+      return [this.theme.fg("dim", activeBash ? `${clipped}  ·  Ctrl+B background Bash/wait` : clipped)];
+    }
+    const rows = [this.theme.fg("accent", `Running work (${work.length})  ↑↓ select  Enter inspect  Esc close  Ctrl+B background Bash/wait`)];
+    for (const [index, item] of work.entries()) {
+      const marker = index === runningWorkSelection() ? this.theme.fg("accent", "❯") : " ";
+      const glyph = item.status === "running" ? this.theme.fg("accent", "●") : item.status === "completed" ? this.theme.fg("success", "✓") : item.status === "failed" ? this.theme.fg("error", "✗") : this.theme.fg("warning", "■");
+      const tokens = item.tokens === undefined ? "tokens —" : `tokens ${item.tokens.toLocaleString()}`;
+      const row = `${marker} ${glyph} ${item.kind} ${item.label}  ${item.status}  ${formatRunningWorkDuration(item)}  ${tokens}`;
+      rows.push(width > 0 && row.length > width ? row.slice(0, Math.max(0, width - 1)) + "…" : row);
+    }
+    return [...rows, this.theme.fg("dim", clipped)];
   }
   dispose() {}
   invalidate() { this.onInvalidate(); }
@@ -106,6 +120,8 @@ export default function conversationMetricsExtension(pi: any) {
   if (registered.has(pi)) return;
   registered.add(pi);
   shared.pi = pi;
+  const refreshWork = () => shared.ctx?.ui?.requestRender?.();
+  const workStop = onRunningWorkChange(refreshWork);
   pi.on?.("session_start", (_event: any, ctx: any) => {
       const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
     shared.metrics = normalize(previous);
@@ -136,6 +152,7 @@ export default function conversationMetricsExtension(pi: any) {
     if (shared.metrics?.active) { shared.metrics.walltimeMs = currentWalltime(); shared.metrics.active = false; shared.metrics.wallStartedAt = undefined; persist(); }
     if (shared.timer) { clearInterval(shared.timer); shared.timer = undefined; }
     shared.footer = undefined;
+    workStop();
   });
   pi.registerCommand?.("metrics", { description: "Show this conversation's walltime and output tokens", handler: async (_args: string, ctx: any) => { const m = shared.metrics ?? blank(); ctx.ui?.notify?.(`Conversation: ${formatWalltime(currentWalltime())} walltime · ${m.outputTokens.toLocaleString()} output tokens`, "info"); } });
 }

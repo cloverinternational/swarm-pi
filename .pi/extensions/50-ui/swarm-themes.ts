@@ -1,4 +1,5 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { handleRunningWorkInput } from "../../lib/ui/running-work.ts";
 
 /**
  * Pi presentation adapter for the Swarm TUI palette and prompt input.
@@ -9,6 +10,7 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
  * moves to the next older match.
  */
 class SwarmPromptEditor extends CustomEditor {
+  constructor(tui: any, theme: any, keybindings: any, private readonly runningWorkContext: any) { super(tui, theme, keybindings); }
   private promptHistory: string[] = [];
   private reverseSearchQuery: string | undefined;
   private reverseSearchIndex = -1;
@@ -63,6 +65,7 @@ class SwarmPromptEditor extends CustomEditor {
   }
 
   handleInput(data: string): void {
+    if (handleRunningWorkInput(data, { ...this.runningWorkContext, editor: this })) return;
     // Ctrl-R is sent as DC2 by ordinary terminal input. Kitty's disambiguated
     // mode uses CSI-u, so accept that representation too.
     const reverseSearch = data === "\x12" || data === "\x1b[114;5u";
@@ -112,7 +115,7 @@ export default function swarmThemes(pi: any) {
       ctx.ui.setTheme?.("swarm-swarmcode");
     }
     ctx.ui?.setEditorComponent?.((tui: any, theme: any, keybindings: any) =>
-      new SwarmPromptEditor(tui, theme, keybindings),
+      new SwarmPromptEditor(tui, theme, keybindings, { ui: ctx.ui }),
     );
   });
 }
