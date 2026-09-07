@@ -12,3 +12,7 @@ artifacts/
 # Build output and dependencies
 **/dist/
 **/node_modules/
+
+# Pi project-scope package installs (pi install -l)
+.pi/git/
+.pi/npm/

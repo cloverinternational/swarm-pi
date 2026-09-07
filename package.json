@@ -2,21 +2,42 @@
   "name": "@pi-swarm/integration",
   "private": true,
   "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      ".pi/extensions/00-runtime",
+      ".pi/extensions/10-context",
+      ".pi/extensions/20-policy",
+      ".pi/extensions/30-tools",
+      ".pi/extensions/40-state",
+      ".pi/extensions/50-ui"
+    ],
+    "themes": [
+      ".pi/themes"
+    ]
+  },
   "scripts": {
+    "prepare": "npm run build:runtime",
+    "build:runtime": "npm run build -w @pi-swarm/runtime-contracts && npm run build -w @pi-swarm/core",
     "build": "npm run build -w @pi-swarm/contract && npm run build -w @pi-swarm/core && npm run build -w @pi-swarm/runtime-contracts && npm run build -w @pi-swarm/prompt && npm run build -w @pi-swarm/skills && npm run build -w @pi-swarm/autogenskills && npm run build -w @pi-swarm/policy && npm run build -w @pi-swarm/schedule && npm run build -w @pi-swarm/agents && npm run build -w @pi-swarm/mcp && npm run build -w @pi-swarm/codemode && npm run build -w @pi-swarm/taskmanage",
     "test": "vitest run",
     "test:parity": "node --test tests/parity/parity-probe.test.mjs",
     "test:integration": "node ./tools/integration/run-postgres-integration.mjs",
     "parity:probe": "node tools/parity/probe.mjs --profile project --workspace . --output artifacts/parity/default",
+    "doctor": "node tools/install/doctor.mjs",
     "dogfood": "npm run build && npm test && npm run test:parity"
   },
   "workspaces": [
     "packages/*/*"
   ],
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/pg": "^8.23.1",
+  "dependencies": {
     "typescript": "^5.9.0",
+    "@types/node": "^22.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
     "vitest": "^3.2.0"
   }
 }
