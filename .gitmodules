@@ -1,3 +1,6 @@
 [submodule "opencode"]
 	path = vendor/opencode
 	url = https://github.com/anomalyco/opencode.git
+[submodule "vendor/page-index"]
+	path = vendor/page-index
+	url = https://github.com/VectifyAI/PageIndex.git

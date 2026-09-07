@@ -83,7 +83,7 @@ address in each tree.
 | `docs/parity/` | Parity plan, acceptance record, and VHS media. |
 | `docs/plans/{active,archive}/` | Plans still driving work; executed plans headed with what superseded them. |
 | `infra/` | `postgres/` compose stack, `bridges-go/` Go bridge. |
-| `vendor/` | Read-only references: `pi-mono`, `swarm-sdk`, and the `opencode` submodule. Never edited and never imported at runtime. |
+| `vendor/` | Read-only references: `pi-mono`, `swarm-sdk`, and the `opencode` and `page-index` submodules. Never edited and never imported at runtime. |
 | `artifacts/` | Ignored. Probe outputs (`artifacts/parity/<run>/`), baselines, recordings. |
 | `.swarm/`, `.pi/agent-sessions/` | Ignored runtime state; never a source of truth for implementation. |
 
