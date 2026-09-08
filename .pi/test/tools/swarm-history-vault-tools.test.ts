@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
 import { historyGet, historySearch } from "../../lib/tools/swarm-history-tools.ts";
-import { vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
+import { parseVaultDuration, vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true }))); });
@@ -22,6 +22,12 @@ async function fixture() {
 }
 
 describe("Swarm history and vault surfaces", () => {
+  it("parses documented agent durations and rejects ambiguous input", () => {
+    const valid: [string, number][] = [["1s", 1_000], ["15m", 900_000], ["24h", 86_400_000], ["90d", 90 * 86_400_000], ["1y", 365 * 86_400_000], ["1y30d", 395 * 86_400_000]];
+    for (const [input, expected] of valid) expect(parseVaultDuration(input)).toBe(expected);
+    for (const input of ["", "0s", "-1d", "+1d", "1.5d", " 1d", "1 d", "1w", "1d!", "9".repeat(65) + "d"]) expect(parseVaultDuration(input)).toBeUndefined();
+  });
+
   it("advertises fixture-byte-equivalent descriptions and schemas for all seven tools", () => {
     const registered: any[] = [];
     registerSwarmHistoryVaultTools({ registerTool: (tool: any) => registered.push(tool), on() {}, getCwd: () => "/tmp/work" }, { historyRoot: "/tmp", cwd: "/tmp/work" });
@@ -83,5 +89,32 @@ describe("Swarm history and vault surfaces", () => {
     const rt = { path: join(root, "credentials.json") };
     expect(await vaultList({}, rt)).toEqual({ credentials: [], count: 0, has_more: false });
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "value" }, rt)).toMatchObject({ success: true });
+  });
+
+  it("accepts day/year expiry and serializes a future timestamp", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-expiry-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const before = Date.now();
+    expect(await vaultAdd({ id: "long-lived", kind: "api_key", secret: "value", expire: "1y" }, rt)).toMatchObject({ success: true });
+    const stored = JSON.parse(await readFile(rt.path, "utf8"));
+    const expiry = Date.parse(stored.credentials["long-lived"].expiresAt);
+    expect(expiry).toBeGreaterThan(before + 364 * 86_400_000);
+    expect(expiry).toBeLessThanOrEqual(Date.now() + 366 * 86_400_000);
+  });
+
+  it("serializes concurrent additions without losing credentials", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-concurrent-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const results = await Promise.all(Array.from({ length: 24 }, (_, i) => vaultAdd({ id: `credential-${i}`, kind: "api_key", secret: `value-${i}`, expire: i % 2 ? "90d" : "1y" }, rt)));
+    expect(results.every((result) => result.success)).toBe(true);
+    expect((await vaultList({ limit: 100 }, rt)).credentials).toHaveLength(24);
+  });
+
+  it("keeps malformed expiration input side-effect free", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-expiry-fuzz-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const malformed = ["NaN", "Infinity", "1e3d", "1\n day", "1\u0000d", "999999999999999999999999999999999999999999999999d", "d1", "1dd", "1y-1d", "1/1d"];
+    for (const expire of malformed) expect((await vaultAdd({ id: "x", kind: "api_key", secret: "secret", expire }, rt)).success).toBe(false);
+    expect(await vaultList({}, rt)).toMatchObject({ count: 0, credentials: [] });
   });
 });

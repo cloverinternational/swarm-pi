@@ -54,7 +54,41 @@ const lockedMessage = "plain vault is unavailable because it was explicitly disa
 function validSSH(s: string) {
   return ["-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----", "-----BEGIN DSA PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----", "-----BEGIN ENCRYPTED PRIVATE KEY-----"].some((marker) => s.includes(marker));
 }
-function durationMs(value: string): number | undefined { const m = /^(\d+)(h|m|s)$/.exec(value); return m ? Number(m[1]) * ({ h: 3600000, m: 60000, s: 1000 } as AnyMap)[m[2]] : undefined; }
+const durationUnits: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, y: 365 * 86_400_000 };
+
+/**
+ * Parse the agent-facing duration language. Go's time.ParseDuration deliberately
+ * has no days or years, but those are the documented vault_add examples. Keep
+ * the extension here rather than making every agent learn a second spelling.
+ * Components may be combined (for example 1y30d); whitespace, signs, zero,
+ * fractions, and unknown units are rejected so expiration cannot be surprising.
+ */
+export function parseVaultDuration(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64 || value.trim() !== value) return undefined;
+  let total = 0;
+  let matched = 0;
+  const re = /(\d+)([smhdy])/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value)) !== null) {
+    if (match.index !== matched) return undefined;
+    const amount = Number(match[1]);
+    const addition = amount * durationUnits[match[2]];
+    if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(addition) || !Number.isSafeInteger(total + addition)) return undefined;
+    total += addition;
+    matched = re.lastIndex;
+  }
+  return matched === value.length && total > 0 ? total : undefined;
+}
+
+const vaultLocks = new Map<string, Promise<void>>();
+async function withVaultLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const previous = vaultLocks.get(path) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  vaultLocks.set(path, current);
+  await previous;
+  try { return await operation(); } finally { release(); if (vaultLocks.get(path) === current) vaultLocks.delete(path); }
+}
 function metadata(c: AnyMap, details = false): AnyMap {
   const base = { id: c.id, kind: c.kind, scope: c.scope };
   if (!details) return base;
@@ -66,16 +100,20 @@ export async function vaultAdd(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap
   if (!p.kind) return { success: false, credentialId: "", scope: "", kind: "", error: "kind is required" };
   // vault_add.go never validates Kind against the known set; unknown kinds are stored verbatim.
   if (p.secret && p.kind === "ssh_key" && !validSSH(p.secret)) return { success: false, credentialId: "", scope: "", kind: "", error: "secret does not look like a valid ssh_key (expected PEM or OpenSSH private key material starting with a \"-----BEGIN ... PRIVATE KEY-----\" line); the credential was NOT modified. Omit 'secret' to update allowedTools/allowedCommands/allowedHosts/tags on an existing credential without touching its stored key." };
-  if (p.expire) { const ms = durationMs(p.expire); if (!ms) return { success: false, credentialId: "", scope: "", kind: "", error: `invalid expiration duration '${p.expire}': time: invalid duration \"${p.expire}\"` }; }
+  const expirationMs = p.expire ? parseVaultDuration(p.expire) : undefined;
+  if (p.expire && expirationMs === undefined) return { success: false, credentialId: "", scope: "", kind: "", error: `invalid expiration duration '${p.expire}': expected positive values such as 24h, 90d, or 1y` };
   if (locked(rt)) return { success: false, credentialId: "", scope: "", kind: "", error: lockedMessage };
   const threshold = p.threshold >= 2 ? p.threshold : p.tags?.includes("sensitive") ? 2 : 0;
   if (threshold) return { success: false, credentialId: "", scope: "", kind: "", error: "two-person approval is not supported by the plain vault; remove threshold or the sensitive tag" };
-  const data = await load(rt), existing = data.credentials[p.id], metadataOnly = !p.secret;
-  if (metadataOnly && !existing) return { success: false, credentialId: "", scope: "", kind: "", error: `secret is required when adding a new credential (no existing credential found for id ${p.id})` };
-  const scope = p.scope || "global";
-  const cred = { id: p.id, name: p.name ?? "", kind: p.kind || existing.kind, scope, secretBase64: p.secret ? Buffer.from(p.secret).toString("base64") : existing.secretBase64, allowedTools: p.allowedTools ?? [], allowedCommands: p.allowedCommands ?? [], allowedHosts: p.allowedHosts ?? [], tags: p.tags ?? [], target: p.target || existing?.target || "", ...(p.expire ? { expiresAt: new Date(Date.now() + durationMs(p.expire)!).toISOString() } : {}) };
-  data.credentials[p.id] = cred; await save(rt, data);
-  return { success: true, credentialId: p.id, scope, kind: cred.kind, ...(metadataOnly ? { metadataOnly: true } : {}), warning: metadataOnly ? "Credential metadata updated; the stored secret was left unchanged." : "Credential stored in the plain vault." };
+  const path = rt.path ?? defaultPiVaultPath();
+  return withVaultLock(path, async () => {
+    const data = await load(rt), existing = data.credentials[p.id], metadataOnly = !p.secret;
+    if (metadataOnly && !existing) return { success: false, credentialId: "", scope: "", kind: "", error: `secret is required when adding a new credential (no existing credential found for id ${p.id})` };
+    const scope = p.scope || "global";
+    const cred = { id: p.id, name: p.name ?? "", kind: p.kind || existing.kind, scope, secretBase64: p.secret ? Buffer.from(p.secret).toString("base64") : existing.secretBase64, allowedTools: p.allowedTools ?? [], allowedCommands: p.allowedCommands ?? [], allowedHosts: p.allowedHosts ?? [], tags: p.tags ?? [], target: p.target || existing?.target || "", ...(p.expire ? { expiresAt: new Date(Date.now() + expirationMs!).toISOString() } : {}) };
+    data.credentials[p.id] = cred; await save(rt, data);
+    return { success: true, credentialId: p.id, scope, kind: cred.kind, ...(metadataOnly ? { metadataOnly: true } : {}), warning: metadataOnly ? "Credential metadata updated; the stored secret was left unchanged." : "Credential stored in the plain vault." };
+  });
 }
 
 export async function vaultList(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
