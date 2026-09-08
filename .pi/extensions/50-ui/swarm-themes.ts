@@ -65,7 +65,7 @@ class SwarmPromptEditor extends CustomEditor {
   }
 
   handleInput(data: string): void {
-    if (handleRunningWorkInput(data, { ...this.runningWorkContext, editor: this })) return;
+    if (handleRunningWorkInput(data, { ...this.runningWorkContext, editor: this, ui: this.runningWorkContext.ui })) return;
     // Ctrl-R is sent as DC2 by ordinary terminal input. Kitty's disambiguated
     // mode uses CSI-u, so accept that representation too.
     const reverseSearch = data === "\x12" || data === "\x1b[114;5u";

@@ -79,6 +79,12 @@ export const Diagnostic = Schema.Struct({
   message: Schema.String,
   location: Schema.optionalKey(Schema.Struct({ line: Schema.Number, column: Schema.Number })),
   suggestions: Schema.optionalKey(Schema.Array(Schema.String)),
+  repair: Schema.optionalKey(Schema.Struct({
+    action: Schema.Literals(["rewrite", "retry", "inspect"]),
+    message: Schema.String,
+    example: Schema.optionalKey(Schema.String),
+    retryable: Schema.optionalKey(Schema.Boolean),
+  })),
 })
 /** A normalized program diagnostic safe to return across an agent tool boundary. */
 export type Diagnostic = typeof Diagnostic.Type

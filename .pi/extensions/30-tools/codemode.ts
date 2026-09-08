@@ -1,25 +1,79 @@
-import { CodeMode, Tool } from "../../../packages/tools/codemode/src/index.ts";
+import { CodeMode, Tool, toolError } from "../../../packages/tools/codemode/src/index.ts";
 import { Effect, Schema } from "effect";
 import { Type } from "typebox";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { JsonSchema } from "../../../packages/tools/codemode/src/tool.ts";
 import { wrapToolForHookRows } from "../00-runtime/hooks.ts";
+import { dispatchRegisteredHook } from "../../lib/runtime/hook-state.ts";
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
+export const CODEMODE_FOOTER_STATE = Symbol.for("pi-swarm-codemode-footer-state");
+type CodeModeFooterState = { enabled: boolean; requestRender?: () => void };
+const codeModeFooterState = (): CodeModeFooterState => {
+  const g = globalThis as typeof globalThis & { [CODEMODE_FOOTER_STATE]?: CodeModeFooterState };
+  return g[CODEMODE_FOOTER_STATE] ?? (g[CODEMODE_FOOTER_STATE] = { enabled: false });
+};
 // Deliberately mirrors the host-authority model requested here: CodeMode is not a
 // filesystem sandbox. Relative paths resolve from cwd; absolute and parent paths work.
 const resolve = (p: string) => path.resolve(root, p);
-const host = (description: string, input: any, run: (value: any) => Promise<unknown>) => Tool.make({ description, input, run: (v: any) => Effect.promise(() => run(v)) });
+const boundedFailureText = (value: unknown): string => {
+  const error = value as any;
+  const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+  const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+  const detail = (stderr || stdout).slice(-4000);
+  const status = error?.code !== undefined ? ` exit=${String(error.code)}` : error?.signal ? ` signal=${String(error.signal)}` : "";
+  return `${detail || (error instanceof Error ? error.message : String(error))}${status}`.trim();
+};
+const host = (description: string, input: any, run: (value: any) => Promise<unknown>) => Tool.make({ description: `${description} Prefer one CodeMode program that chains related calls with sequential await, then returns one compact structured report. Use Promise.all only for independent calls.`, input, run: (v: any) => Effect.promise(async () => { try { return await run(v); } catch (error) { throw toolError(`Host tool failed: ${boundedFailureText(error)}`); } }) });
+const CODEMODE_OUTPUT_LIMIT = 96 * 1024;
+const CODEMODE_SPILL_DIR = path.join(root, ".swarm", "codemode-spills");
 const result = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }], details: value });
+const spillIfNeeded = async (value: any) => {
+  const serialized = JSON.stringify(value, null, 2);
+  if (Buffer.byteLength(serialized, "utf8") <= CODEMODE_OUTPUT_LIMIT) return result(value);
+  await mkdir(CODEMODE_SPILL_DIR, { recursive: true });
+  const file = path.join(CODEMODE_SPILL_DIR, `${Date.now()}-${randomUUID()}.json`);
+  await writeFile(file, serialized, "utf8");
+  const relative = path.relative(root, file);
+  const notice = {
+    ok: value?.ok,
+    value: `[codemode output spilled to ${relative}; read the file for the complete JSON result]`,
+    ...(value?.ok === false ? { error: value.error } : {}),
+    ...(value?.logs ? { logs: value.logs } : {}),
+    toolCalls: value?.toolCalls ?? [],
+    spilled: true,
+    spill_path: relative,
+    spill_bytes: Buffer.byteLength(serialized, "utf8"),
+    spill_message: `Output exceeded the ${CODEMODE_OUTPUT_LIMIT} byte context threshold and was written to ${relative}. Read that file with tools.workspace.read if you need the complete result.`,
+  };
+  return result(notice);
+};
 const summarize = (value: unknown, limit = 180) => { const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : JSON.stringify(value); return text.length > limit ? text.slice(0, limit - 1) + "…" : text; };
 const renderSummary = (value: any, expanded: boolean) => { const calls = Array.isArray(value?.toolCalls) ? value.toolCalls : []; const failed = value?.ok === false; const lines = ["┌─ CODEMODE ───────────────────────────────────────────────", `│ ${failed ? "✗ FAILED" : "✓ COMPLETE"}   calls=${calls.length}${value?.truncated ? "   output=TRUNCATED" : ""}`, "│"]; calls.forEach((call: any, i: number) => lines.push(`│  ${String(i + 1).padStart(2, "0")}  ${call.name}`)); if (failed) lines.push(`│  error  ${summarize(value.error?.message ?? value.error)}`); else if (expanded) lines.push(`│  value  ${summarize(value.value, 900)}`); lines.push("└────────────────────────────────────────────────────────────"); return lines.join("\n"); };
 type CodeModeSelection = { mode: "all" | "allowlist"; tools: string[] };
 const normalizeToolName = (name: string) => name.trim().replace(/^tools\./, "");
 const isSelected = (selection: CodeModeSelection, name: string) => selection.mode === "all" || selection.tools.includes(normalizeToolName(name));
-const buildPiTools = (pi: any, selection: CodeModeSelection) => { const tree: Record<string, unknown> = {}; for (const direct of pi.codemodeTools ?? []) { if (direct?.name && direct.execute && isSelected(selection, direct.name)) tree[direct.name] = Tool.make({ description: direct.description ?? direct.name, input: direct.parameters ?? { type: "object", properties: {} }, run: (input: unknown) => Effect.promise(() => direct.execute("codemode-" + Date.now(), input, undefined, undefined, undefined)) }); } for (const info of pi.getAllTools?.() ?? []) { const name = info?.name; if (typeof name !== "string" || !name || name === "codemode" || !isSelected(selection, name)) continue; const definition = pi.getToolDefinition?.(name); if (!definition?.execute) continue; tree[name] = Tool.make({ description: info.description ?? definition.description ?? name, input: info.parameters ?? definition.parameters ?? { type: "object", properties: {} }, run: (input: unknown) => Effect.promise(() => definition.execute("codemode-" + Date.now(), input, undefined, undefined, undefined)) }); } return tree; };
+const invokeNestedTool = async (definition: any, name: string, input: unknown) => {
+  const toolCallId = `codemode-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const event = { toolName: name, toolCallId, input };
+  const before = await dispatchRegisteredHook("tool_call", event, {});
+  if (before?.block === true) throw new Error(before.reason ?? `Tool '${name}' blocked by hook`);
+  let output: any;
+  let failed = false;
+  try { output = await definition.execute(toolCallId, input, undefined, undefined, undefined); }
+  catch (error) { failed = true; output = { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: {} }; }
+  const after = await dispatchRegisteredHook("tool_result", { ...event, content: output?.content, details: output?.details, isError: failed || output?.isError === true }, {});
+  if (after?.content !== undefined) output = { ...output, content: after.content };
+  if (after?.details !== undefined) output = { ...output, details: after.details };
+  if (after?.isError !== undefined) output = { ...output, isError: after.isError };
+  if (failed) throw new Error(output?.content?.[0]?.text ?? `Tool '${name}' failed`);
+  return output;
+};
+const buildPiTools = (pi: any, selection: CodeModeSelection) => { const tree: Record<string, unknown> = {}; for (const direct of pi.codemodeTools ?? []) { if (direct?.name && direct.execute && isSelected(selection, direct.name)) tree[direct.name] = Tool.make({ description: direct.description ?? direct.name, input: direct.parameters ?? { type: "object", properties: {} }, run: (input: unknown) => Effect.promise(() => invokeNestedTool(direct, direct.name, input)) }); } for (const info of pi.getAllTools?.() ?? []) { const name = info?.name; if (typeof name !== "string" || !name || name === "codemode" || !isSelected(selection, name)) continue; const definition = pi.getToolDefinition?.(name); if (!definition?.execute) continue; tree[name] = Tool.make({ description: info.description ?? definition.description ?? name, input: info.parameters ?? definition.parameters ?? { type: "object", properties: {} }, run: (input: unknown) => Effect.promise(() => invokeNestedTool(definition, name, input)) }); } return tree; };
 
 class CodeModeToolPicker {
   private index = 0;
@@ -65,13 +119,13 @@ class CodeModeToolPicker {
 
 export default function codemodeExtension(pi: any) {
   const tools = { workspace: {
-    read: host("Read a UTF-8 text file in the workspace.", Schema.Struct({ path: Schema.String }), async ({ path: p }: any) => readFile(resolve(p), "utf8")),
-    list: host("List workspace files.", Schema.Struct({ path: Schema.String }), async ({ path: p }: any) => { const { stdout } = await execFileAsync("find", [resolve(p), "-maxdepth", "2", "-type", "f"]); return stdout.trim().split(/\r?\n/).filter(Boolean).map((x: string) => path.relative(root, x)); }),
-    grep: host("Search text in files; paths may be absolute or outside the cwd.", Schema.Struct({ query: Schema.String, path: Schema.optional(Schema.String) }), async ({ query, path: p }: any) => { const { stdout } = await execFileAsync("grep", ["-R", "-n", "-F", "--", query, resolve(p ?? ".")], { maxBuffer: 1024 * 1024 }); return stdout; }),
+    read: host("Read a UTF-8 text file in the workspace. For unfamiliar or potentially large sources, first read a small bounded sample or targeted slice, inspect its literal shape and encoding, then expand deliberately.", Schema.Struct({ path: Schema.String }), async ({ path: p }: any) => readFile(resolve(p), "utf8")),
+    list: host("List workspace files. Treat the listing as reconnaissance: inspect a bounded sample before assuming file types, layout, or parsability.", Schema.Struct({ path: Schema.String }), async ({ path: p }: any) => { const { stdout } = await execFileAsync("find", [resolve(p), "-maxdepth", "2", "-type", "f"]); return stdout.trim().split(/\r?\n/).filter(Boolean).map((x: string) => path.relative(root, x)); }),
+    grep: host("Search text in files; paths may be absolute or outside the cwd. Use a narrow taste query first to establish whether the source contains the expected markers, format, and scope before broad extraction.", Schema.Struct({ query: Schema.String, path: Schema.optional(Schema.String) }), async ({ query, path: p }: any) => { const { stdout } = await execFileAsync("grep", ["-R", "-n", "-F", "--", query, resolve(p ?? ".")], { maxBuffer: 1024 * 1024 }); return stdout; }),
     edit: host("Perform an exact text replacement in any accessible file.", Schema.Struct({ path: Schema.String, oldText: Schema.String, newText: Schema.String }), async ({ path: p, oldText, newText }: any) => { const f = resolve(p); const before = await readFile(f, "utf8"); const count = before.split(oldText).length - 1; if (count !== 1) throw new Error(`Expected exactly one match, found ${count}`); await writeFile(f, before.replace(oldText, newText)); return { path: f, replacements: 1 }; }),
     write: host("Write a UTF-8 text file at any accessible path.", Schema.Struct({ path: Schema.String, content: Schema.String }), async ({ path: p, content }: any) => { const f = resolve(p); await mkdir(path.dirname(f), { recursive: true }); await writeFile(f, content); return { path: f, written: true }; }),
     delete: host("Delete any accessible file.", Schema.Struct({ path: Schema.String }), async ({ path: p }: any) => { const { unlink } = await import("node:fs/promises"); await unlink(resolve(p)); return { path: resolve(p), deleted: true }; }),
-    bash: host("Run an unrestricted shell command with the host user's permissions.", Schema.Struct({ command: Schema.String }), async ({ command }: any) => { const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", command], { cwd: root, maxBuffer: 4 * 1024 * 1024 }); return { stdout, stderr }; }),
+    bash: host("Run an unrestricted shell command with the host user's permissions. For unfamiliar APIs, JSON, logs, or command output, sample first with a cheap bounded probe, inspect the actual response and exit status, then run the bulk command only after the shape is confirmed.", Schema.Struct({ command: Schema.String }), async ({ command }: any) => { const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", command], { cwd: root, maxBuffer: 4 * 1024 * 1024 }); return { stdout, stderr }; }),
   }};
   // Pi action methods are unavailable while extensions are loading. Do not
   // touch the action API until session_start has fired; this also makes reload
@@ -97,9 +151,9 @@ export default function codemodeExtension(pi: any) {
   let savedTools: string[] | undefined;
   const activate = () => { if (!runtimeReady) return; if (!enabled) { savedTools ??= originalTools(); pi.setActiveTools?.(["codemode"]); enabled = true; updateCodeStatus(pi); } };
   const deactivate = () => { if (runtimeReady && enabled) pi.setActiveTools?.(savedTools ?? []); enabled = false; updateCodeStatus(pi); };
-  const updateCodeStatus = (ctx: any) => { const ui = ctx?.ui ?? pi; ui?.setStatus?.("codemode", enabled ? " CODE " : " code "); };
+  const updateCodeStatus = (ctx: any) => { const state = codeModeFooterState(); state.enabled = enabled; state.requestRender?.(); const ui = ctx?.ui ?? pi; ui?.setStatus?.("codemode", enabled ? " CODE " : " code "); };
 
-  pi.registerTool(wrapToolForHookRows({ name: "codemode", label: "Code Mode", description: "Run CodeMode programs over workspace tools and registered Pi-Swarm tools such as Agent and AgentControl. Calls are composed underneath CodeMode and must be awaited.", parameters: Type.Object({ code: Type.String({ description: "JavaScript program using tools.workspace.* and registered Pi tools such as Agent and AgentControl; return a JSON-safe value." }) }), executionMode: "sequential", async execute(_id: string, params: { code: string }, signal: AbortSignal) { if (signal?.aborted) return result({ ok: false, error: "Execution cancelled" }); const output = await Effect.runPromise(refreshRuntime().execute(params.code) as any); return result(output); } }));
+  pi.registerTool(wrapToolForHookRows({ name: "codemode", label: "Code Mode", description: "Run one bounded CodeMode program over workspace tools and registered Pi-Swarm tools such as Agent and AgentControl. Every tool is rooted at `tools`: use `tools.workspace.read(...)` or `tools.Agent(...)` only when listed; bare `workspace(...)`, `workspace.read(...)`, `Agent(...)`, and `AgentControl(...)` are invalid. Prefer one chained workflow: taste/read context, edit, prove the diff, verify, and return one compact report. Calls must be awaited; use Promise.all only for independent work. Spill oversized output instead of flooding context.", parameters: Type.Object({ code: Type.String({ description: `Use the tools root only. Exact examples: tools.workspace.read({ path: "AGENTS.md" }), tools.workspace.bash({ command: "git diff --check" }), and tools.Agent(...) only if listed. Bare workspace, Agent, and AgentControl identifiers are invalid. Compose one workflow: taste, harvest, edit, prove the diff, verify, and return concise evidence.` }) }), executionMode: "sequential", async execute(_id: string, params: { code: string }, signal: AbortSignal) { if (signal?.aborted) return result({ ok: false, error: "Execution cancelled" }); const output = await Effect.runPromise(refreshRuntime().execute(params.code) as any); return await spillIfNeeded(output); } }));
   pi.registerCommand?.("codemode", {
     description: "Open CodeMode tool picker",
     handler: async (args: string, ctx: any) => {

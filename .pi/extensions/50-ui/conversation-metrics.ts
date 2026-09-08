@@ -10,6 +10,20 @@ export interface ConversationMetrics {
 }
 
 const ENTRY = "pi-conversation-metrics";
+const CODEMODE_FOOTER_STATE = Symbol.for("pi-swarm-codemode-footer-state");
+
+function codeModeEnabled(): boolean {
+  const state = (globalThis as any)[CODEMODE_FOOTER_STATE];
+  return state?.enabled === true;
+}
+
+export function codeModeBadge(theme: any): string {
+  // Compact inline marker for the active mode; avoid a large background block.
+  const label = "CodeMode";
+  const colored = theme.fg?.("success", label) ?? label;
+  return theme.bold?.(colored) ?? colored;
+}
+
 const ROOT_KEY = Symbol.for("pi-swarm-conversation-metrics");
 /**
  * Pi exposes exactly one native footer slot (`ctx.ui.setFooter`). This extension
@@ -77,10 +91,11 @@ export function footerMetricsLine(walltime: string, outputTokens: number, segmen
 
 function styleIdentityLine(line: string, state: "running" | "idle", theme: any): string {
   const marker = state === "running" ? theme.fg("success", "●") : theme.fg("muted", "○");
-  const model = line.replace(/^[●○]  /, "");
-  return `${marker}  ${model.startsWith("model ") ? `${theme.fg("muted", "model")} ${theme.fg("accent", model.slice(6))}` : theme.fg("muted", model)}`;
+  const hasCodeMode = line.endsWith("  CODE");
+  const model = (hasCodeMode ? line.slice(0, -6) : line).replace(/^[●○]  /, "");
+  const styledModel = model.startsWith("model ") ? theme.fg("muted", "model") + " " + theme.fg("accent", model.slice(6)) : theme.fg("muted", model);
+  return marker + "  " + styledModel + (hasCodeMode ? theme.fg("dim", "  ·  ") + codeModeBadge(theme) : "");
 }
-
 function styleMetricsLine(line: string, theme: any): string {
   return line.replace(/(\d+h \d+m|\d+m \d+s)/, (time) => theme.fg("dim", time)).replace(/(↓ [\d,]+ tok)/, (tokens) => theme.fg("dim", tokens));
 }
@@ -119,7 +134,7 @@ class MetricsFooter {
     const work = visibleRunningWork();
     if (!runningWorkExpanded() || !work.length) {
       const activeBash = work.some(item => item.kind === "bash" && item.status === "running");
-      const identity = footerIdentityLine(state, model);
+      const identity = footerIdentityLine(state, model) + (codeModeEnabled() ? "  CODE" : "");
       const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments, activeBash ? "Ctrl+B background Bash" : undefined);
       return [
         ...wrapFooterText(identity, width).map((row) => styleIdentityLine(row, state, this.theme)),
@@ -147,6 +162,8 @@ class MetricsFooter {
 }
 
 function render(ctx?: any) {
+  const codeModeState = (globalThis as any)[CODEMODE_FOOTER_STATE];
+  if (codeModeState) codeModeState.requestRender = () => ctx?.ui?.requestRender?.();
   // Keep this a single native footer line; unlike a widget it cannot push or
   // scroll the user's input box and never becomes transcript content.
   if (!shared.footer) ctx?.ui?.setFooter?.((tui: any, theme: any) => (shared.footer = new MetricsFooter(theme, () => tui?.requestRender?.())));

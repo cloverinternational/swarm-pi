@@ -63,6 +63,7 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
     const item = selectedRunningWork();
     if (item) {
       if (item.transcriptPath && typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · conversation`, readTranscript(item.transcriptPath));
+      else if (item.transcriptPath) ctx?.ui?.notify?.(readTranscript(item.transcriptPath), "info");
       else ctx?.ui?.notify?.(`${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntokens: ${item.tokens ?? "not reported"}\n\n${item.output || item.detail}`, "info");
     }
     return true;

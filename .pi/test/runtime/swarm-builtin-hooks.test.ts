@@ -127,6 +127,12 @@ describe("headless builtin hook pipeline", () => {
     expect(p.preTool(bash("touch h && rm h"))).toEqual({ context: "" });
     expect(p.postTool(ok(bash("touch h && rm h")))).toBe("");
   });
+
+  it("allows the CodeMode wrapper while still gating nested mutating tools", () => {
+    const p = createSwarmBuiltinPipeline({ session: "codemode", tasks: () => [], enforcementMode: "block" });
+    expect(p.preTool({ toolName: "codemode", params: {}, toolCallId: "outer" }).block).toBeUndefined();
+    expect(p.preTool({ toolName: "write", params: {}, toolCallId: "nested" }).block).toContain("task-enforcement-hook");
+  });
   it("interactive cadence ticks once per prompt (no message.after_receive), so the 5th prompt is still inside the window", () => {
     resetReminderSequences();
     const tick = (p: SwarmHookPipeline) => p.onUserPrompt({ messageAfterReceive: false });

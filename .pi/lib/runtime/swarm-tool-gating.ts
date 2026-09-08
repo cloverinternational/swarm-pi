@@ -54,6 +54,10 @@ export function xaiHasCredentials(home = process.env.HOME ?? "", env = process.e
 /** The set of tool names Swarm would register in this environment. */
 export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   const names = new Set<string>(swarmToolNames());
+  // CodeMode is the Pi orchestration entrypoint. It is intentionally kept on
+  // the model surface even though it is a Pi-specific composition tool; its
+  // nested calls are dispatched through the normal hook/policy bridge.
+  names.add("codemode");
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");
   if (environment.interactive) {
