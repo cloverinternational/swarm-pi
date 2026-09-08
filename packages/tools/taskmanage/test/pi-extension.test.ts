@@ -56,7 +56,7 @@ describe("root Pi TaskManage extension", () => {
       renderResult: expect.any(Function),
     });
     expect(overlaySwarmToolSchemas({ tools: [{ type: "function", function: { name: "TaskManage", description: "", parameters: runtime.tools[0].parameters } }] })!.tools[0].function.parameters).toEqual(canonical.parameters);
-    expect(runtime.handlers.get("session_start")).toHaveLength(2);
+    expect(runtime.handlers.get("session_start")).toHaveLength(3); // state, cleanup budget, audit
     // Swarm builtin pipeline (first) + task-audit coordinator (second).
     expect(runtime.handlers.get("tool_call")).toHaveLength(2);
     expect(runtime.handlers.get("tool_result")).toHaveLength(2);

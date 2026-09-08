@@ -182,6 +182,7 @@ const sessionTaskStatuses = (tasks: readonly HookTask[]) => {
     if (t.status === "pending") pending.push(t);
     else if (t.status === "in_progress") inProgress.push(t);
   }
+  inProgress.sort((a, b) => Number(b.active === true) - Number(a.active === true));
   return { pending, inProgress };
 };
 

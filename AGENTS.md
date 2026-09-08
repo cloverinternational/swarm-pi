@@ -256,6 +256,14 @@ the Pi adapter only for registration/presentation concerns.
 | Metrics/cache telemetry | `.pi/extensions/50-ui/conversation-metrics.ts`, `cache-telemetry.ts` | Agent/message/provider lifecycle; persisted telemetry is non-secret. |
 | Theme/thinking/UI lifecycle | `.pi/extensions/50-ui/swarm-themes.ts`, `swarm-thinking.ts` | Presentation/config only. |
 
+Task stop-time reconciliation lives in `.pi/lib/runtime/swarm-builtin-hooks-runtime.ts`.
+After observed work and a normal stop, it may request one follow-up per external
+input for an unowned, focused, dependency-ready task. Errors, questions, interaction
+tools, observed background dispatch, queued messages, plan mode, subagents, and
+shutdown suppress the wake. It never completes or deletes tasks automatically;
+pending/backlog work is not a reason to restart. The allowance resets on session
+start or interactive/RPC input, not on automatic continuations.
+
 For a hook bug, first identify the Pi event (`before_agent_start`, `tool_call`,
 `tool_result`, `turn_start/end`, `session_start/shutdown`, or compaction), then
 the hook group, then the domain owner. Hook execution, policy, and rendering

@@ -135,3 +135,58 @@ Before writing an orchestrator or full extension:
 ## Verification report requirements
 
 Every implementation phase must report exact files changed, commands run, fixture results, latency/cost observations, and unverified gaps. Do not claim memory quality from a successful index build alone; require citation-level evidence and isolated critique.
+
+---
+
+## Implementation record — agentic tree retrieval (supersedes the embedding/vector direction)
+
+**Decision:** retrieval is a dedicated agent navigating a summarized heading tree. No embeddings, no vector store. This is Page-Index's actual mechanism; `vendor/agent-mcp` was evaluated and rejected as a model (it synthesizes prose and discards provenance).
+
+### Shipped
+
+| Concern | Where |
+| --- | --- |
+| Tree, provenance, hashes, tombstones, append/update | `.pi/lib/context/page-index-memory.ts` |
+| Outline/read gate, budget, bottom-up summary plan, model choice | `.pi/lib/context/context-retrieval.ts` |
+| Tools, retriever + summary prompts, footer, `/swarm-context` | `.pi/extensions/10-context/swarm-context.ts` |
+
+**Tool surface:** `context_remember`, `context_index`, `context_search`, `context_outline`, `context_reindex`, `context_inspect`, `context_delete`.
+
+### Ported from Page-Index
+
+- **Bottom-up node summaries** — leaves describe their own prose, parents describe their whole subtree (`vendor/page-index/pageindex/utils.py:843-850`).
+- **Free short summaries** — prose under `SUMMARY_RAW_TEXT_CHARS` reuses itself, no model call (their `SUMMARY_RAW_TEXT_TOKENS`, `utils.py:761`).
+- **Doc description** — one line per source, phrased to distinguish it from others (`utils.py:989`).
+- **Structure-first navigation** — outline before read (`agent_tools.py:184-190`).
+- **`next_steps` on every envelope**, success and failure (`agent_tools.py:311-324`).
+- **Anti-hallucination steering in tool output**, not the system prompt (`agent_tools.py:810-817`).
+
+### Deliberate divergences
+
+- **Evidence, never synthesis.** The retriever selects and cites; the calling agent reasons. Provenance survives.
+- **Outline-gated reads.** `context_read` rejects any `nodeId` no outline offered, so an invented id yields `no-result`, never a fabricated excerpt.
+- **Lazy summarization.** Capture is instant and offline; summaries build on first search and cache via `summarizedAt`.
+- **Batched summarization** (`SUMMARY_BATCH = 25`) so one large source cannot overrun the summary model; a failed batch loses only itself and the outline declares the gap.
+
+### Model policy
+
+Cheapest capable from `RETRIEVAL_MODEL_CANDIDATES`; otherwise inherit the session model, warn once at session start, and show `ctx:session-model` in the footer.
+
+### Failure taxonomy
+
+`ok` · `no-result` (carries the retriever's note) · `not-indexed` (retriever never spawned) · `no-retriever` (degrades to a self-service outline). Summarization failure degrades to titles and is stated, never hidden.
+
+### Bugs found by tests, not by inspection
+
+- Appending notes rebuilt markdown from `node.text`; a parent's text stops at its first child, so every append silently dropped prior notes. Fixed by persisting `ContextSource.raw`.
+- `update()` preserved `summarizedAt`, letting stale summaries describe changed content. Now cleared.
+
+### Verification
+
+`npm test -- --run .pi/test` → 31 files, 194 tests. `tsc --noEmit` clean for these files. `git diff --check` clean.
+
+### Open
+
+- Automatic capture remains a non-goal; `context_remember` is explicit.
+- No cross-source ranking when many sources match; the retriever chooses from descriptions.
+- `vendor/agent-mcp` is untracked and can be removed.

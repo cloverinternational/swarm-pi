@@ -11,7 +11,8 @@
       "swarm-skills.ts",
       "swarm-thinking.ts",
       "system-inspector.ts",
-      "system-prompts.ts"
+      "system-prompts.ts",
+      "swarm-context.ts"
     ]
   }
 }

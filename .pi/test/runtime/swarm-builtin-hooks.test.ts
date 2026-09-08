@@ -1,4 +1,55 @@
 import { describe, expect, it } from "vitest";
+import { registerSwarmBuiltinHooks, TASK_MANAGER_SYMBOL } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
+
+describe("registered stop-time reconciliation", () => {
+  function harness() {
+    const handlers = new Map<string, Function[]>();
+    const sent: any[] = [];
+    const tasks: any[] = [{ id: "focus", subject: "Verify changes", status: "in_progress", active: true }];
+    (globalThis as any)[TASK_MANAGER_SYMBOL] = { snapshot: () => ({ tasks }) };
+    const pi = { on: (name: string, fn: Function) => handlers.set(name, [...(handlers.get(name) ?? []), fn]), appendEntry() {}, sendMessage: (...args: any[]) => sent.push(args) };
+    registerSwarmBuiltinHooks(pi);
+    const emit = async (name: string, event: any = {}) => { for (const fn of handlers.get(name) ?? []) await fn(event, { sessionId: "cleanup-test", hasUI: true }); };
+    const stop = (stopReason = "stop", text = "Finished the checks.") => emit("turn_end", { message: { role: "assistant", stopReason, content: [{ type: "text", text }] } });
+    const work = (toolName = "Read", extra: any = {}) => emit("tool_result", { toolName, content: [{ type: "text", text: "ok" }], ...extra });
+    return { emit, stop, work, sent, tasks };
+  }
+  it("reproduces open focused work and requests exactly one real continuation", async () => {
+    const h = harness(); await h.work(); await h.stop(); await h.stop();
+    expect(h.sent.filter(x => x[1].triggerTurn)).toHaveLength(1);
+    expect(h.sent[0][1]).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    expect(h.sent[0][0].details.parts[0].text).toContain("#focus");
+    expect(h.tasks[0].status).toBe("in_progress");
+    await h.emit("before_agent_start", { prompt: "automatic cleanup" }); await h.stop();
+    expect(h.sent.filter(x => x[1].triggerTurn)).toHaveLength(1);
+    await h.emit("input", { source: "interactive" }); await h.work(); await h.stop();
+    expect(h.sent.filter(x => x[1].triggerTurn)).toHaveLength(2);
+  });
+  it.each(["error", "aborted", "length"])("does not continue a %s stop", async reason => {
+    const h = harness(); await h.work(); await h.stop(reason); await h.stop();
+    expect(h.sent.filter(x => x[1].triggerTurn)).toEqual([]);
+    await h.emit("input", { source: "rpc" }); await h.work(); await h.stop();
+    expect(h.sent.filter(x => x[1].triggerTurn)).toHaveLength(1);
+  });
+  it("defers questions, tool errors, interaction and background dispatch", async () => {
+    for (const kind of ["question", "error", "ask", "background"]) {
+      const h = harness();
+      await h.work(kind === "ask" ? "ask_user_question" : kind === "background" ? "Bash" : "Read",
+        kind === "error" ? { isError: true } : kind === "background" ? { content: [{ type: "text", text: JSON.stringify({ backgrounded: true }) }] } : {});
+      await h.stop("stop", kind === "question" ? "Which option?" : "Done"); expect(h.sent.filter(x => x[1].triggerTurn)).toEqual([]);
+    }
+  });
+  it("does not wake pending, complete, owned, blocked or unfocused work", async () => {
+    for (const patch of [{ status: "pending" }, { status: "completed" }, { owner_id: "child" }, { dependsOn: ["missing"] }, { active: false }]) {
+      const h = harness(); Object.assign(h.tasks[0], patch); await h.work(); await h.stop(); expect(h.sent).toEqual([]);
+    }
+  });
+  it("invalidates work on shutdown and session replacement", async () => {
+    const h = harness(); await h.work(); await h.emit("session_shutdown"); await h.stop(); expect(h.sent).toEqual([]);
+    await h.emit("session_start"); await h.stop(); expect(h.sent).toEqual([]);
+    await h.work(); await h.stop(); expect(h.sent).toHaveLength(1);
+  });
+});
 import { extractShellCommandWords, isBashReadOnly, parseShellCommands } from "../../lib/runtime/swarm-toolclass.ts";
 import {
   MetaNudgeBudget, META_NUDGE_BLOCK, SwarmHookPipeline, createSwarmBuiltinPipeline, type HookTask,
@@ -43,6 +94,18 @@ const taskManage = (operations: any[]) => ({ toolName: "TaskManage", params: { o
 const ok = (call: any) => ({ ...call, failed: false, output: "<result exit_code=\"0\" duration_ms=\"1\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>" });
 
 describe("headless builtin hook pipeline", () => {
+  it("attributes maintenance to the focused task rather than the oldest in-progress task", () => {
+    const tasks = [{ id: "old", subject: "OLD", status: "in_progress", active: false }, { id: "new", subject: "FOCUSED", status: "in_progress", active: true }];
+    const pipeline = createSwarmBuiltinPipeline({ session: "focus-attribution", tasks: () => tasks });
+    pipeline.budget.recordUserTurn("focus-attribution");
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 6; j++) pipeline.budget.recordUserTurn("focus-attribution");
+      pipeline.postTool(ok(bash("echo hi")));
+    }
+    const message = pipeline.flushTurn();
+    expect(message).toContain("FOCUSED");
+    expect(message).not.toContain("working on: OLD");
+  });
   it("resolves live TaskManage operation keys from returned task IDs", () => {
     const tasks: HookTask[] = [
       { id: "1", subject: "first implementation", status: "in_progress", category: "acting" },
