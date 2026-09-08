@@ -147,8 +147,9 @@ export async function historySearch(params: AnyMap, runtime: HistoryRuntime): Pr
   const cwd = canonicalWorkspace(runtime.cwd, "workspace path");
   const scope = params.scope ?? "current";
   if (scope !== "current" && scope !== "all") throw new Error("HistorySearch: scope must be one of current or all");
-  if (params.workspace_path != null && scope === "all") throw new Error("HistorySearch: workspace_path and scope=all are mutually exclusive");
-  const workspace = scope === "all" ? "" : params.workspace_path != null ? canonicalWorkspace(params.workspace_path, "workspace_path") : cwd;
+  const requestedWorkspace = typeof params.workspace_path === "string" && params.workspace_path.trim() !== "" ? params.workspace_path : undefined;
+  if (requestedWorkspace !== undefined && scope === "all") throw new Error("HistorySearch: workspace_path and scope=all are mutually exclusive");
+  const workspace = scope === "all" ? "" : requestedWorkspace !== undefined ? canonicalWorkspace(requestedWorkspace, "workspace_path") : cwd;
   const limit = integer(params, "limit", 10, 50);
   const caseSensitive = bool(params, "case_sensitive", false);
   const searchBody = bool(params, "search_body", String(params.query ?? "").trim() !== "" || Boolean(params.regex));
@@ -164,8 +165,7 @@ export async function historySearch(params: AnyMap, runtime: HistoryRuntime): Pr
   const minMessages = integer(params, "min_messages", 0, Number.MAX_SAFE_INTEGER, true);
   if (params.origin != null && !["interactive", "subagent", "headless"].includes(params.origin)) throw new Error("HistorySearch: origin must be one of interactive, subagent, headless");
   const sessions = (await loadSessions(runtime)).filter((s) => !workspace || resolve(s.cwd) === workspace).filter((s) => s.messages.length >= minMessages);
-  const segmentRequested = ["tool_name", "tool_outcome", "segment_kind", "stats", "ngram", "top_terms"].some((k) => params[k] !== undefined);
-  if (params.ngram !== undefined && !params.stats || params.top_terms !== undefined && !params.stats) throw new Error("HistorySearch: ngram and top_terms are only meaningful with stats=true");
+  const segmentRequested = ["tool_name", "tool_outcome", "segment_kind"].some((k) => params[k] !== undefined) || params.stats === true;
   if (segmentRequested) return segmentSearch(params, sessions, scope, workspace);
   const ranked: { session: Session; score: number; snippets: AnyMap[] }[] = [];
   for (const s of sessions) {
