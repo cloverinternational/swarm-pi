@@ -4,7 +4,7 @@
  * ReadBackgroundCommand's output is a wire contract, not merely diagnostics.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { stripANSI, type BashParams } from "./swarm-bash.ts";
@@ -88,17 +88,14 @@ export function formatBackgroundDone(done: BackgroundDone): string {
 /** Go os/exec ExitError.Error() for a non-zero exit, as stored in ProcessResult.Error. */
 const goExitStatus = (code: number, signal: NodeJS.Signals | null) => signal ? `signal: ${signal.toLowerCase().replace(/^sig/, "")}` : `exit status ${code}`;
 
-let stdbufPath: string | undefined;
 /** bash_cmd_builder.go detectBufferingMethod: stdbuf -oL -eL when on PATH. */
 function detectStdbuf(): string {
-  if (stdbufPath !== undefined) return stdbufPath;
-  stdbufPath = "";
   for (const dir of (process.env.PATH ?? "").split(":")) {
     if (!dir) continue;
     const candidate = join(dir, "stdbuf");
-    if (existsSync(candidate)) { stdbufPath = candidate; break; }
+    try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* optional */ }
   }
-  return stdbufPath;
+  return "";
 }
 /** executor.go detectShell (unix). */
 const detectShell = () => process.env.SHELL || (existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");

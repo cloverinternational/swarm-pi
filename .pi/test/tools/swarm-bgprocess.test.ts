@@ -77,14 +77,26 @@ describe("Swarm interactive background bash", () => {
     const { bash, sent, emit } = harness();
     emit("agent_start");
     await expect(invoke(bash, { command: "pwd", cwd: "/nonexistent-dir", timeout_seconds: 5 }))
-      .rejects.toThrow(/^failed to spawn process: execute \[bg-\d+-\d+\]: failed to start command: fork\/exec \/usr\/bin\/stdbuf: no such file or directory$/);
+      .rejects.toThrow(/^failed to spawn process: execute \[bg-\d+-\d+\]: failed to start command: fork\/exec .+: no such file or directory$/);
     // Queued while the agent runs; contributed to the post-tool hook slot at turn_end.
     expect(sent).toHaveLength(0);
     const parts = afterTurnFlushListeners().flatMap((listener) => listener({ runContinues: true }) ?? []);
     expect(parts).toHaveLength(1);
     expect(parts[0].role).toBe("system");
-    expect(parts[0].text).toMatch(/^\[BACKGROUND\] task_id=bg-\d+-\d+ command=pwd status=failed\n\noutput:\nexecute \[bg-\d+-\d+\]: failed to start command: fork\/exec \/usr\/bin\/stdbuf: no such file or directory\n\nBackground command failed \(exit code -1\)\.$/);
+    expect(parts[0].text).toMatch(/^\[BACKGROUND\] task_id=bg-\d+-\d+ command=pwd status=failed\n\noutput:\nexecute \[bg-\d+-\d+\]: failed to start command: fork\/exec .+: no such file or directory\n\nBackground command failed \(exit code -1\)\.$/);
     expect(((globalThis as any)[Symbol.for("pi-swarm-background-system-texts")] as Set<string>).has(parts[0].text)).toBe(true);
+  });
+
+  it("runs directly when stdbuf is absent from PATH", async () => {
+    const { bash } = harness();
+    const previousPath = process.env.PATH;
+    process.env.PATH = "/path/that/does/not/exist";
+    try {
+      expect((await invoke(bash, { command: "printf direct-fallback", timeout_seconds: 2 })).content[0].text).toBe("direct-fallback\n");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it("wakes an idle agent with the joined completion notifications", async () => {
