@@ -12,7 +12,7 @@ import { dispatchRegisteredHook } from "../../lib/runtime/hook-state.ts";
 const execFileAsync = promisify(execFile);
 const root = process.cwd();
 export const CODEMODE_FOOTER_STATE = Symbol.for("pi-swarm-codemode-footer-state");
-type CodeModeFooterState = { enabled: boolean; requestRender?: () => void };
+type CodeModeFooterState = { enabled: boolean };
 const codeModeFooterState = (): CodeModeFooterState => {
   const g = globalThis as typeof globalThis & { [CODEMODE_FOOTER_STATE]?: CodeModeFooterState };
   return g[CODEMODE_FOOTER_STATE] ?? (g[CODEMODE_FOOTER_STATE] = { enabled: false });
@@ -151,7 +151,11 @@ export default function codemodeExtension(pi: any) {
   let savedTools: string[] | undefined;
   const activate = () => { if (!runtimeReady) return; if (!enabled) { savedTools ??= originalTools(); pi.setActiveTools?.(["codemode"]); enabled = true; updateCodeStatus(pi); } };
   const deactivate = () => { if (runtimeReady && enabled) pi.setActiveTools?.(savedTools ?? []); enabled = false; updateCodeStatus(pi); };
-  const updateCodeStatus = (ctx: any) => { const state = codeModeFooterState(); state.enabled = enabled; state.requestRender?.(); const ui = ctx?.ui ?? pi; ui?.setStatus?.("codemode", enabled ? " CODE " : " code "); };
+  // Do not ask a shared footer callback to render here. That callback can belong
+  // to the previous ExtensionAPI/UI instance during /reload, and invoking it
+  // would use a stale ctx. setStatus is sufficient to schedule the native UI
+  // refresh; the footer reads the updated state on that render.
+  const updateCodeStatus = (ctx: any) => { const state = codeModeFooterState(); state.enabled = enabled; const ui = ctx?.ui ?? pi; ui?.setStatus?.("codemode", enabled ? " CODE " : " code "); };
 
   pi.registerTool(wrapToolForHookRows({ name: "codemode", label: "Code Mode", description: "Run one bounded CodeMode program over workspace tools and registered Pi-Swarm tools such as Agent and AgentControl. Every tool is rooted at `tools`: use `tools.workspace.read(...)` or `tools.Agent(...)` only when listed; bare `workspace(...)`, `workspace.read(...)`, `Agent(...)`, and `AgentControl(...)` are invalid. Prefer one chained workflow: taste/read context, edit, prove the diff, verify, and return one compact report. Calls must be awaited; use Promise.all only for independent work. Spill oversized output instead of flooding context.", parameters: Type.Object({ code: Type.String({ description: `Use the tools root only. Exact examples: tools.workspace.read({ path: "AGENTS.md" }), tools.workspace.bash({ command: "git diff --check" }), and tools.Agent(...) only if listed. Bare workspace, Agent, and AgentControl identifiers are invalid. Compose one workflow: taste, harvest, edit, prove the diff, verify, and return concise evidence.` }) }), executionMode: "sequential", async execute(_id: string, params: { code: string }, signal: AbortSignal) { if (signal?.aborted) return result({ ok: false, error: "Execution cancelled" }); const output = await Effect.runPromise(refreshRuntime().execute(params.code) as any); return await spillIfNeeded(output); } }));
   pi.registerCommand?.("codemode", {

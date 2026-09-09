@@ -6,6 +6,8 @@
     "extensions": [
       "pi-tmux-resurrection.ts",
       "cache-telemetry.ts",
+      "swarm-update.ts",
+      "bootstrap.ts",
       "hooks.ts",
       "swarm-runtime.ts",
       "swarm-transport-parity.ts"

@@ -4,8 +4,9 @@ import {
   type HookConfig,
 } from "../../../packages/tools/taskmanage/src/index.ts";
 import "../../lib/runtime/hook-state.ts";
-import { withSwarmToolSurface } from "../../lib/runtime/swarm-tool-surface.ts";
+import { withSwarmToolSurface, rawPi } from "../../lib/runtime/swarm-tool-surface.ts";
 import { registerSwarmBuiltinHooks } from "../../lib/runtime/swarm-builtin-hooks-runtime.ts";
+import { registerBootstrapHandoff } from "../../lib/runtime/bootstrap-dispatch.ts";
 
 /**
  * Minimal structural subset of Pi's ExtensionAPI used by TaskManage.
@@ -39,11 +40,11 @@ export function registerTaskManageExtension(
   pi: TaskManageExtensionAPI,
   options?: TaskManageExtensionOptions,
 ) {
-  const owner = pi as object;
+  const owner = rawPi(pi as object);
   const existing = taskRuntimeByPi.get(owner);
   if (existing) return existing;
   const bridged: any[] = [];
-  const registrationPi = { ...pi, registerTool: (tool: unknown) => { bridged.push(tool); pi.registerTool(tool); } };
+  const registrationPi = { ...pi, registerTool: (tool: unknown) => { registerBootstrapHandoff(tool); bridged.push(tool); pi.registerTool(tool); } };
   const manager = registerTaskManage(registrationPi);
   // Swarm's builtin task hooks (.pi/lib/runtime/swarm-builtin-hooks.ts) read
   // task state through this handle; the coordinator below keeps only the

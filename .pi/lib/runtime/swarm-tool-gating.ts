@@ -58,6 +58,7 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // the model surface even though it is a Pi-specific composition tool; its
   // nested calls are dispatched through the normal hook/policy bridge.
   names.add("codemode");
+  names.add("bootstrap");
   // Durable memory is a Pi-Swarm state extension, not part of the upstream
   // Swarm wire fixture, but it is an intentional model-facing capability.
   names.add("memory_history");
