@@ -68,11 +68,16 @@ describe("TaskManage.Validate port (task_manage.go parseTaskOperations)", () => 
     expect(v({ operations: [{ key: "a" }] })).toBe('operation "a": op is required');
     expect(v({ operations: [{ key: "a", op: "nope" }] })).toBe('operation "a": unsupported op "nope"');
     expect(v({ operations: [{ key: "a", op: "get", subject: "x" }] })).toBe('operation "a": field "subject" is not valid for get');
+    expect(v({ operations: [{ key: "a", op: "create", subject: "x", addNote: "note" }] }))
+      .toBe('operation "a": field "addNote" is not valid for create; create the task first, then add the note with an update operation targeting taskId:{"ref":"a"}');
     expect(v({ operations: [{ key: "a", op: "update", taskId: "" }] })).toBe("taskId must not be empty");
     expect(v({ operations: [{ key: "a", op: "update", taskId: { ref: "b", field: "x" } }] })).toBe("taskId reference field must be taskId");
     expect(v({ operations: [{ key: "a", op: "update", addBlocks: [1] }] })).toBe("addBlocks[0] must be a task ID or reference");
     expect(v({ operations: [{ key: "a", op: "list", limit: 0 }] })).toBe('operation "a": limit must be between 1 and 500');
     expect(v({ operations: [{ key: "a", op: "create", subject: "x", category: "bogus" }] })).toBe('operation "a": invalid category "bogus"');
+    expect(v({ operations: [{ key: "a", op: "create", subject: "x", priority: "high" }] })).toBeUndefined();
+    expect(v({ operations: [{ key: "a", op: "update", taskId: "1", priority: "low" }] })).toBeUndefined();
+    expect(v({ operations: [{ key: "a", op: "update", taskId: "1", priority: "critical" }] })).toBe('operation "a": invalid priority "critical"');
     expect(v({ operations: [{ key: "a", op: "create", subject: "x" }, { key: "a", op: "create", subject: "y" }] })).toMatch(/^duplicate operation key "a": keys must be unique per operation/);
     expect(v({ operations: [{ key: "a", op: "create", subject: "x" }, { key: "a", op: "update", status: "completed" }] })).toBeUndefined();
     expect(v({ operations: [{ key: "a", op: "list" }], mode: "bulk" })).toBe('unsupported mode "bulk"');

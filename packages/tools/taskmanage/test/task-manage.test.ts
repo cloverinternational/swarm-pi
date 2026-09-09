@@ -48,6 +48,22 @@ describe("TaskManage", () => {
     expect(m.execute({operations:[{key:"link",op:"update",taskId:{ref:"b"},addBlockedBy:[{ref:"a"}]}]}).status).toBe("succeeded");
     expect(m.execute({operations:[{key:"cycle",op:"update",taskId:{ref:"a"},addBlockedBy:[{ref:"b"}]}]}).results[0].error?.code).toBe("cycle");
   });
+  it("resolves earlier same-batch keys written as strings without shadowing real IDs", () => {
+    const m = new TaskManager();
+    const local = m.execute({operations:[
+      create("dependency"),
+      {key:"blocked",op:"create",subject:"Blocked",addBlockedBy:["dependency"]},
+    ]});
+    expect(local.status).toBe("succeeded");
+    expect(m.snapshot().tasks[1].dependsOn).toEqual(["1"]);
+
+    const collision = m.execute({operations:[
+      {key:"1",op:"create",subject:"Key named like an ID"},
+      {key:"uses-id",op:"create",subject:"Uses ID",addBlockedBy:["1"]},
+    ]});
+    expect(collision.status).toBe("succeeded");
+    expect(m.snapshot().tasks.at(-1)?.dependsOn).toEqual(["1"]);
+  });
   it("bounds list pages and rehydrates from Pi entries", () => {
     const entries:JournalEntry[]=[]; const m=new TaskManager(e=>entries.push(e)); m.execute({operations:[create("a"),create("b")]});
     const restored=new TaskManager(); restored.rehydrate(entries); const page=restored.execute({operations:[{key:"l",op:"list",limit:1}]});
@@ -85,6 +101,17 @@ describe("TaskManage", () => {
     expect(m.execute({operations:[{key:"child",op:"create",subject:"child",parentTaskId:"1"}]}).status).toBe("succeeded");
     expect(m.execute({operations:[{key:"bad-parent",op:"update",taskId:"1",parentTaskId:"2"}]}).results[0].error?.code).toBe("cycle");
   });
+  it("treats an empty parentTaskId as no parent on create and update", () => {
+    const m = new TaskManager();
+    expect(m.execute({operations:[{key:"root",op:"create",subject:"Root",parentTaskId:""}]}).status).toBe("succeeded");
+    expect(m.snapshot().tasks[0].parentTaskId).toBeUndefined();
+    expect(m.execute({operations:[{key:"child",op:"create",subject:"Child",parentTaskId:"1"}]}).status).toBe("succeeded");
+    expect(m.snapshot().tasks[1].parentTaskId).toBe("1");
+    const detached = m.execute({operations:[{key:"detach",op:"update",taskId:"2",parentTaskId:""}]});
+    expect(detached.status).toBe("succeeded");
+    expect(detached.results[0].data).toMatchObject({task:{parent_id:""}});
+    expect(m.snapshot().tasks[1].parentTaskId).toBeUndefined();
+  });
   it("rejects incomplete dependencies before creating an in-progress task", () => {
     const m = new TaskManager();
     m.execute({operations:[create("dependency")]});
@@ -112,7 +139,7 @@ describe("TaskManage", () => {
     expect(explicitStatus.results[0].error?.code).toBe("validation_failed");
     expect(m.snapshot().tasks.find(task => task.id === "1")?.status).toBe("pending");
   });
-  it("rehydrates the latest state across multiple persisted entries and registers Pi shape", () => {
+  it("rehydrates the latest state across multiple persisted entries and registers Pi shape", async () => {
     const entries: JournalEntry[] = [];
     const m = new TaskManager(e => entries.push(e));
     m.execute({operations:[create("a")]});
@@ -126,6 +153,18 @@ describe("TaskManage", () => {
       on: () => {},
     });
     expect(registered[0]).toMatchObject({name:"TaskManage", parameters:taskManageSchema});
+    const success = await registered[0].execute("success", {
+      operations: [create("registered")],
+    });
+    expect(success).toMatchObject({isError:false,details:{batch:{status:"succeeded"}}});
+    const partial = await registered[0].execute("partial", {
+      operations: [create("prefix"),{key:"missing",op:"get",taskId:"404"}],
+    });
+    expect(partial).toMatchObject({isError:true,details:{batch:{status:"partial"}}});
+    expect(JSON.parse(partial.content[0].text)).toMatchObject({
+      status:"partial",
+      results:[{status:"succeeded"},{status:"failed"}],
+    });
   });
   it("implements get include_audit without leaking audit by default", () => {
     const m = new TaskManager();
@@ -266,6 +305,30 @@ describe("TaskManage", () => {
     expect(m.execute({operations:[{key:"get",op:"get",taskId:"1"}]}).results[0].data).toMatchObject({task:{priority:"high"}});
     expect(m.execute({operations:[{key:"lower",op:"update",taskId:"1",priority:"low"}]}).results[0].data).toMatchObject({task:{priority:"low"}});
     expect(m.execute({operations:[{key:"invalid",op:"update",taskId:"1",priority:"critical" as any}]}).results[0].error?.code).toBe("validation_failed");
+  });
+
+  it("treats empty optional enum strings as omitted", () => {
+    const m = new TaskManager();
+    const created = m.execute({operations:[{
+      key:"neutral",op:"create",subject:"Neutral",
+      category:"" as any,priority:"" as any,status:"" as any,
+    }]});
+    expect(created.status).toBe("succeeded");
+    expect(m.snapshot().tasks[0]).toMatchObject({
+      category:"acting",
+      priority:"medium",
+      status:"pending",
+    });
+    const updated = m.execute({operations:[{
+      key:"neutral",op:"update",
+      category:"" as any,priority:"" as any,status:"" as any,noteType:"" as any,
+    }]});
+    expect(updated.status).toBe("succeeded");
+    expect(m.snapshot().tasks[0]).toMatchObject({
+      category:"acting",
+      priority:"medium",
+      status:"pending",
+    });
   });
 
   it("normalizes restored task invariants and removes invalid graph edges", () => {

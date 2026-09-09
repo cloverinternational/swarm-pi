@@ -374,7 +374,11 @@ export class TaskManager {
   }
   private find(id: string): Task | undefined { return this.state.tasks.find(t => t.id === id); }
   private resolve(ref: Ref | undefined, local: Record<string, string>): string | Failure {
-    if (typeof ref === "string") return ref;
+    if (typeof ref === "string") {
+      // A real task ID wins. Otherwise accept an earlier key from this batch
+      // as a safe convenience for model-generated dependency arrays.
+      return this.find(ref) ? ref : local[ref] ?? ref;
+    }
     if (!ref) return fail("validation_failed", "taskId is required");
     if (ref.field && ref.field !== "taskId") return fail("validation_failed", "reference field must be taskId");
     const id = local[ref.ref] ?? this.state.keys[ref.ref];
@@ -450,7 +454,9 @@ export class TaskManager {
   private validateRef(value: unknown, field: string): Failure | undefined {
     if (value === undefined) return undefined;
     if (typeof value === "string") {
-      return value.trim() ? undefined : fail("validation_failed", `${field} must be a task ID or reference`);
+      return value.trim() || field === "parentTaskId"
+        ? undefined
+        : fail("validation_failed", `${field} must be a task ID or reference`);
     }
     if (!isObj(value) || typeof value.ref !== "string" || !value.ref.trim() ||
       (value.field !== undefined && value.field !== "taskId") ||
@@ -461,7 +467,17 @@ export class TaskManager {
   execute(params: Params, signal?: AbortSignal): Batch {
     if (!isObj(params) || Object.keys(params).some(key => key !== "operations" && key !== "mode"))
       return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unknown batch field") }] };
-    const ops = params.operations;
+    const ops = Array.isArray(params.operations)
+      ? params.operations.map(operation => {
+          if (!isObj(operation)) return operation;
+          const normalized = { ...operation } as Operation;
+          const untrusted = normalized as unknown as Record<string, unknown>;
+          for (const field of ["category", "priority", "status", "noteType"] as const) {
+            if (untrusted[field] === "") delete normalized[field];
+          }
+          return normalized;
+        })
+      : params.operations;
     if (Array.isArray(ops)) this.stats.reads += ops.filter(op => op?.op === "get" || op?.op === "list").length;
     if (!Array.isArray(ops) || !ops.length || ops.length > 50) return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "operations must contain 1..50 operations") }] };
     if (params.mode && params.mode !== "sequential" && params.mode !== "atomic") return { status: "failed", results: [{ key: "batch", op: "list", status: "failed", error: fail("validation_failed", "unsupported mode") }] };
@@ -523,7 +539,7 @@ export class TaskManager {
       if (op.active === true && op.status !== "in_progress")
         return {key:op.key,op:op.op,status:"failed",error:fail("validation_failed",`cannot create task ${op.subject}: active task must be in_progress`)};
       const parent = op.parentTaskId === undefined ? undefined : target(op.parentTaskId); if (typeof parent !== "string" && op.parentTaskId) return { key:op.key,op:op.op,status:"failed",error:parent };
-      const parentId = typeof parent === "string" ? parent : undefined;
+      const parentId = typeof parent === "string" && parent !== "" ? parent : undefined;
       if (parentId && !this.find(parentId)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${parentId} not found`)};
       const deps = [...(op.addBlockedBy ?? [])].map(target);
       if (deps.some(x=>typeof x!=="string")) return {key:op.key,op:op.op,status:"failed",error:deps.find(x=>typeof x!=="string") as Failure};
@@ -587,8 +603,10 @@ export class TaskManager {
     if (op.parentTaskId !== undefined) {
       const p = target(op.parentTaskId);
       if (typeof p !== "string") return {key:op.key,op:op.op,status:"failed",error:p};
-      if (!this.find(p)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`parent task ${p} not found`)};
-      if (p === id || this.parentReaches(p, id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","parent would create a cycle")};
+      if (p !== "") {
+        if (!this.find(p)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`parent task ${p} not found`)};
+        if (p === id || this.parentReaches(p, id)) return {key:op.key,op:op.op,status:"failed",error:fail("cycle","parent would create a cycle")};
+      }
     }
     if (op.status === "completed") {
       const child = this.state.tasks.find(t => t.parentTaskId === id && t.status !== "completed");
@@ -596,7 +614,10 @@ export class TaskManager {
     }
     const mergedMetadata: Record<string, unknown> | undefined = op.metadata === undefined ? task.metadata : { ...(task.metadata ?? {}), ...clone(op.metadata) };
     if (op.metadata) for (const [key, value] of Object.entries(op.metadata)) if (value === null) delete (mergedMetadata as Record<string, unknown>)[key];
-    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId:op.parentTaskId === undefined ? task.parentTaskId : (target(op.parentTaskId) as string), dependsOn:deps, updatedAt:goNow() });
+    const parentTaskId = op.parentTaskId === undefined
+      ? task.parentTaskId
+      : target(op.parentTaskId) || undefined;
+    Object.assign(task, { subject:op.subject?.trim()||task.subject, description:op.description??task.description, activeForm:op.activeForm??task.activeForm, category:op.category??task.category, priority:op.priority??task.priority, metadata:mergedMetadata, status:op.status??task.status, active:op.active??task.active, parentTaskId, dependsOn:deps, updatedAt:goNow() });
     if (op.status === "in_progress") {
       for (const other of this.state.tasks) other.active = other.id === id;
       // Explicit false is applied after the focus transition.
@@ -716,7 +737,12 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
       if (invalid !== undefined) throw new Error(`Error executing TaskManage: validation failed for TaskManage: ${invalid} (error_id=err_${randomBytes(10).toString("hex")})`);
       const batch = manager.execute(params,signal);
       refreshWidget(ctx);
-      return { content:[{type:"text",text:JSON.stringify(goMapOrdered(batch))}] };
+      const ordered = goMapOrdered(batch);
+      return {
+        content:[{type:"text",text:JSON.stringify(ordered)}],
+        details:{batch:ordered},
+        isError:batch.status !== "succeeded",
+      };
     } });
   return manager;
 }
