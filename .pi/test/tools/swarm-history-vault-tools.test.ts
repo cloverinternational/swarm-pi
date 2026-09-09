@@ -52,6 +52,16 @@ describe("Swarm history and vault surfaces", () => {
     expect(stats.terms.find((x: any) => x.term === "banana")).toMatchObject({ occurrences: 3, conversations: 2 });
   });
 
+  it("honors normalized fields and segment search case, runtime, and ordering filters", async () => {
+    const runtime = await fixture();
+    const mixed = await historySearch({ query: "BANANA", fields: [" BODY "], case_sensitive: true, scope: "current" }, runtime);
+    expect(mixed.results).toEqual([]);
+    const insensitive = await historySearch({ query: "BANANA", segment_kind: "message", case_sensitive: false, sort: "recency", order: "asc" }, runtime);
+    expect(insensitive.results.map((x: any) => x.id)).toEqual(["session-one", "session-two"]);
+    const sensitive = await historySearch({ query: "BANANA", segment_kind: "message", case_sensitive: true }, runtime);
+    expect(sensitive.results).toEqual([]);
+  });
+
   it("gets tail and offset windows and reports max_chars truncation", async () => {
     const runtime = await fixture();
     const tail = await historyGet({ conversation_id: "session-one", tail: 1 }, runtime);

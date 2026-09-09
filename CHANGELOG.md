@@ -4,6 +4,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Align HistorySearch field normalization and segment filtering with case, runtime, sorting, and ordering options.
+
 - Add the paseo tool extension and register it in the 30-tools layer.
 - Add a bootstrap-settings adapter that augments the native /settings panel.
 - Mark the paseo vendor submodule as shallow.
