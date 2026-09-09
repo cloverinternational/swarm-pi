@@ -127,6 +127,7 @@ describe("tool surface gating", () => {
     const fixture = new Set(loadSwarmToolSurface().keys());
     expect(fixture.size).toBe(29);
     const headless = swarmSurfaceFor({ interactive: false, home: "/nonexistent", env: {} });
+    expect(headless.has("memory_history")).toBe(true);
     expect(headless.has("ask_user_question")).toBe(false);
     expect(headless.has("x_search")).toBe(false);
     const interactive = swarmSurfaceFor({ interactive: true, home: "/nonexistent", env: { XAI_API_KEY: "k" } });

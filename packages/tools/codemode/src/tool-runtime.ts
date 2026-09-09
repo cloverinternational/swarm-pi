@@ -571,8 +571,10 @@ export const prepare = <R>(tools: HostTools<R>, catalogBudget = defaultCatalogBu
         ...(complete
           ? [
               "1. Pick a tool from the list under `## Available tools` - each line is the exact call signature; use it as-is rather than guessing segments.",
-              "2. Call it using the exact signature shown: `const result = await tools.<namespace>.<tool>(input)`; bracket notation and quotes are part of the path.",
-              "3. Return only the fields you need from structured results; narrow unknown results before reading fields, and avoid returning large raw payloads.",
+              "2. Before bulk-processing any unfamiliar source (API response, JSON, log dump, file tree, command output, or external tool), taste it: make one small bounded call, inspect the actual shape, types, encoding, delimiters, pagination, error envelope, and representative records, then choose the parser and fields from observed evidence.",
+              "3. If the taste is surprising, malformed, truncated, HTML, an error payload, or otherwise not the expected format, stop and diagnose it; do not force a parser or launch a large fan-out.",
+              "4. Once the shape is established, go fast: batch independent reads with `Promise.all`, process bounded pages/chunks, preserve source identifiers, and return only the fields needed for the decision.",
+              "5. Return only the fields you need from structured results; narrow unknown results before reading fields, and avoid returning large raw payloads.",
             ]
           : [
               '1. If needed, discover tools: `return await tools.$codemode.search({ query: "<intent + key nouns>" })`.',
@@ -590,6 +592,8 @@ export const prepare = <R>(tools: HostTools<R>, catalogBudget = defaultCatalogBu
           ? "- Only Code Mode tools listed here and internal runtime tools are available; surrounding agent tools are not implicitly exposed."
           : "- Only Code Mode tools listed here or returned by `tools.$codemode.search` and internal runtime tools are available; surrounding agent tools are not implicitly exposed.",
         "- Filter, aggregate, and transform collections in code - never return them raw or call a tool per item across messages.",
+        "- Never assume a new source is parseable just because its name suggests JSON, CSV, logs, or an API. First sample a small bounded slice and inspect the literal result; only then parse, paginate, normalize, or fan out.",
+        "- Treat source discovery as a two-phase protocol: TASTE (one or a few cheap calls, shape/schema/content checks, explicit assumptions) then HARVEST (parallel/batched extraction based only on confirmed shape). Keep the taste result and assumptions in the final evidence.",
         "- A result typed `Promise<unknown>` may be structured data or text. Before reading fields, check that it is a non-null object and not an array; otherwise handle the returned text or primitive directly.",
         '- Run independent calls in parallel: `await Promise.all(items.map((item) => tools.<namespace>.<tool>(item)))`, or use `tools.<namespace>["tool-name"](item)` when the listed signature uses bracket notation.',
         "- `Object.keys(tools)` lists namespaces; `Object.keys(tools.<namespace>)` lists its tools; `for...in` works on both.",

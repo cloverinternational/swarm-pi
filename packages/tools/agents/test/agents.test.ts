@@ -26,12 +26,12 @@ describe("AgentManager", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-agent-runner-"));
     const runner = createPiRunner({ exec: async (...args: any[]) => { seen = args; return { code: 0, stdout: "child result", stderr: "", killed: false }; } });
     // No child session file was written by the fake exec → turns floors at 1.
-    expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toEqual({ output: "child result", turns: 1 });
+    expect(await runner({ signal: new AbortController().signal, spec: { id: "x", task: "inspect" }, task: "inspect", cwd, instructions: [], steering: [] })).toMatchObject({ output: "child result", turns: 1, transcriptPath: expect.stringMatching(/agent-sessions\/.*\.jsonl$/) });
     expect(seen[0]).toBe(process.platform === "win32" ? "cmd.exe" : "env");
     // A child that recorded three assistant messages reports three turns.
     let countingSessionPath = "";
     const counting = createPiRunner({ exec: async (...args: any[]) => { const { mkdirSync, writeFileSync } = await import("node:fs"); countingSessionPath = args[1].find((arg: string) => arg.endsWith(".jsonl")); mkdirSync(join(cwd, ".pi", "agent-sessions"), { recursive: true }); writeFileSync(countingSessionPath, ["{\"type\":\"session\"}", "{\"type\":\"message\",\"message\":{\"role\":\"user\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"toolResult\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}", "{\"type\":\"message\",\"message\":{\"role\":\"assistant\"}}"].join("\n") + "\n"); return { code: 0, stdout: "done", stderr: "", killed: false }; } });
-    expect(await counting({ signal: new AbortController().signal, spec: { id: "x", sessionId: "s", task: "t" }, task: "t", cwd, instructions: [], steering: [] })).toEqual({ output: "done", turns: 3 });
+    expect(await counting({ signal: new AbortController().signal, spec: { id: "x", sessionId: "s", task: "t" }, task: "t", cwd, instructions: [], steering: [] })).toMatchObject({ output: "done", turns: 3, transcriptPath: expect.stringMatching(/agent-sessions\/.*\.jsonl$/) });
     if (process.platform === "win32") expect(seen[1][3]).toContain("PI_SWARM_SUBAGENT=1");
     // --approve: the child inherits the parent's workspace trust so the port's
     // project extensions load in print mode (Swarm sub-agents share the registry).
@@ -79,7 +79,7 @@ describe("AgentManager", () => {
     const result = await agent.execute("call", { task: "work", background: true }, { sessionId: "parent-session" });
     await manager.control(result.details.handle, "wait");
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toEqual({ content: expect.stringContaining("id=agent"), options: { deliverAs: "followUp" } });
+    expect(messages[0]).toEqual({ content: expect.stringContaining("id=agent"), options: { deliverAs: "followUp", triggerTurn: true } });
     expect(messages[0].content).toContain("status=completed");
     expect(messages[0].content).toContain("output: finished");
     await manager.control(result.details.handle, "wait");

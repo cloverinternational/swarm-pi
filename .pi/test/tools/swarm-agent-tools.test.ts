@@ -1,6 +1,7 @@
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
-import { readFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AgentManager, type Runner } from "../../../packages/tools/agents/src/index.ts";
 import { SwarmAgentTools } from "../../lib/tools/swarm-agent-tools.ts";
@@ -71,6 +72,25 @@ describe("Swarm agent orchestration tools", () => {
     d.resolve("done");
   });
 
+  it("wakes the owning Pi session through sendMessage when BackgroundTask completes", async () => {
+    const messages: any[] = [];
+    const deferredRun = deferred();
+    const pi = {
+      getCwd: () => root,
+      sessionId: "dogfood-session",
+      registerTool: () => undefined,
+      sendMessage: (message: any, options: any) => messages.push({ message, options }),
+    };
+    const logic = registerSwarmAgentTools(pi, { manager: new AgentManager({ cwd: root, runner: async () => deferredRun.promise }) });
+    const launched = JSON.parse((await logic.backgroundTask({ task: "wake owning session" })).text);
+    deferredRun.resolve("finished");
+    await logic.waitForAgent({ agent_id: launched.agent_id, timeout_seconds: 1 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(messages).toHaveLength(1);
+    expect(messages[0].message).toMatchObject({ customType: "swarm-agent-complete", display: true, details: { agent_id: launched.agent_id, status: "completed", background: true } });
+    expect(messages[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
+  });
+
   it("TaskOutput and SubagentOutput support byte-offset incremental reads", async () => {
     const logic = new SwarmAgentTools(new AgentManager({ runner: async () => "alpha\nbeta" }));
     const launched = JSON.parse((await logic.backgroundTask({ task: "read" })).text);
@@ -92,6 +112,25 @@ describe("Swarm agent orchestration tools", () => {
     expect(result).toMatchObject({ wait_status: "timeout", timeout_seconds: 0.001 });
     expect(result.agent.status).toBe("running");
     d.resolve("done");
+  });
+
+  it("rehydrates completed agents after the TUI/tool instance is recreated", async () => {
+    const cache = join(tmpdir(), `pi-agent-reload-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const previous = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = cache;
+    try {
+      const tasks = join(cache, "swarm", "tasks");
+      mkdirSync(tasks, { recursive: true });
+      writeFileSync(join(tasks, "clovertrack-php-baseline8.output"), JSON.stringify({ type: "final", ts: Date.now(), content: "baseline complete" }) + "\n");
+      writeFileSync(join(tasks, "clovertrack-php-baseline8.meta.json"), JSON.stringify({ id: "clovertrack-php-baseline8", task: "baseline", startedAt: Date.now(), cwd: process.cwd(), sessionId: "reload-session" }) + "\n");
+      const logic = new SwarmAgentTools(new AgentManager({ runner: async () => "unused" }), process.cwd(), "reload-session");
+      const waited = JSON.parse((await logic.waitForAgent({ agent_id: "clovertrack-php-baseline8", timeout_seconds: 1 })).text);
+      expect(waited).toMatchObject({ agent_id: "clovertrack-php-baseline8", status: "completed", result: "baseline complete" });
+      await expect(logic.waitForAgent({ agent_id: "clovertrack-php-baseline9", timeout_seconds: 0 })).rejects.toThrow("not found");
+    } finally {
+      if (previous === undefined) delete process.env.XDG_CACHE_HOME;
+      else process.env.XDG_CACHE_HOME = previous;
+    }
   });
 
   it("multi_agent_wait collects all terminal states", async () => {

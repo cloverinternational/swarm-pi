@@ -8,14 +8,16 @@ interface State { enabled: Record<string, boolean>; visible: boolean; recent: Ho
 const KEY = Symbol.for("pi-swarm-hook-state");
 type Shared = { state: State; pi?: any; present?: (data: any) => void };
 const root = globalThis as typeof globalThis & { [KEY]?: Shared };
-const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
+const shared: Shared = root[KEY] ?? (root[KEY] = { state: { enabled: {}, visible: false, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } } });
+type RegisteredHandler = { key: string; event: string; handler: (payload: any, ctx: any) => Promise<any> };
+const registeredHandlers: RegisteredHandler[] = ((globalThis as any)[Symbol.for("pi-swarm-registered-hook-handlers")] ??= []);
 // Pi /reload can retain Symbol.for state from an older extension module. Normalize
 // it before any handler registration so upgrades never fail on missing fields.
 function normalizeState() {
-  if (!shared.state || typeof shared.state !== "object") shared.state = { enabled: {}, visible: true, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } };
+  if (!shared.state || typeof shared.state !== "object") shared.state = { enabled: {}, visible: false, recent: [], counts: { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0 } };
   const state = shared.state as Partial<State>;
   state.enabled = state.enabled && typeof state.enabled === "object" ? state.enabled : {};
-  state.visible = typeof state.visible === "boolean" ? state.visible : true;
+  state.visible = typeof state.visible === "boolean" ? state.visible : false;
   state.recent = Array.isArray(state.recent) ? state.recent.slice(-200) : [];
   state.counts = { registered: 0, executed: 0, blocked: 0, failed: 0, skipped: 0, ...(state.counts ?? {}) };
   shared.state = state as State;
@@ -78,7 +80,7 @@ export function recordHook(group: HookGroup, event: string, payload?: any, outco
 export function registerHook(pi: any, group: HookGroup, event: string, handler: any) {
   normalizeState();
   shared.state.counts.registered++;
-  pi.on(event, async (payload: any, ctx: any) => {
+  const callback = async (payload: any, ctx: any) => {
     if (!isHookEnabled(group)) { recordHook(group, event, payload, "skipped", "hook group disabled"); persistHookState(pi); return; }
     try {
       const result = await handler(payload, ctx);
@@ -124,7 +126,30 @@ export function registerHook(pi: any, group: HookGroup, event: string, handler: 
     } catch (error) {
       recordHook(group, event, payload, "failed", error instanceof Error ? error.message : String(error)); persistHookState(pi); throw error;
     }
-  });
+  };
+  const key = `${group}:${event}`;
+  const previous = registeredHandlers.findIndex((entry) => entry.key === key);
+  if (previous >= 0) registeredHandlers.splice(previous, 1);
+  registeredHandlers.push({ key, event, handler: callback });
+  pi.on(event, callback);
+}
+
+/**
+ * Run the same registered tool hooks for a host-composed/nested tool call.
+ * Pi only emits tool_call/tool_result around tools executed by its agent loop;
+ * CodeMode invokes registered tools inside its interpreter, so without this
+ * bridge nested calls would silently bypass task, disk, skill-budget, and
+ * other policy hooks.
+ */
+export async function dispatchRegisteredHook(event: string, payload: any, ctx: any = {}): Promise<any> {
+  let merged: any;
+  for (const entry of registeredHandlers) {
+    if (entry.event !== event) continue;
+    const result = await entry.handler(payload, ctx);
+    if (result?.block === true) return result;
+    if (result && typeof result === "object") merged = { ...(merged ?? {}), ...result };
+  }
+  return merged;
 }
 export function hookGroups() {
   return ["taskmanage", "autogenskills", "swarm-prompt", "disk-hooks", "annoyance"] as const;
@@ -142,7 +167,7 @@ export function restoreHookState(entries: readonly any[]) {
   // registration count while restoring persisted telemetry.
   const registered = shared.state.counts?.registered ?? 0;
   shared.state.enabled = {};
-  shared.state.visible = true;
+  shared.state.visible = false;
   shared.state.recent = [];
   shared.state.counts = { registered, executed: 0, blocked: 0, failed: 0, skipped: 0 };
   const e = [...entries].reverse().find(x => x?.type === "pi-swarm-hook-state" || x?.type === "custom" && x?.customType === "pi-swarm-hook-state")?.data;

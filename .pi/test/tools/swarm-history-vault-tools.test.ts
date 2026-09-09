@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
-import { historyGet, historySearch, normalizeHistoryGetParams, normalizeHistorySearchParams } from "../../lib/tools/swarm-history-tools.ts";
-import { vaultAdd, vaultExec, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
+import { historyGet, historySearch } from "../../lib/tools/swarm-history-tools.ts";
+import { parseVaultDuration, vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true }))); });
@@ -22,11 +22,17 @@ async function fixture() {
 }
 
 describe("Swarm history and vault surfaces", () => {
+  it("parses documented agent durations and rejects ambiguous input", () => {
+    const valid: [string, number][] = [["1s", 1_000], ["15m", 900_000], ["24h", 86_400_000], ["90d", 90 * 86_400_000], ["1y", 365 * 86_400_000], ["1y30d", 395 * 86_400_000]];
+    for (const [input, expected] of valid) expect(parseVaultDuration(input)).toBe(expected);
+    for (const input of ["", "0s", "-1d", "+1d", "1.5d", " 1d", "1 d", "1w", "1d!", "9".repeat(65) + "d"]) expect(parseVaultDuration(input)).toBeUndefined();
+  });
+
   it("advertises fixture-byte-equivalent descriptions and schemas for all seven tools", () => {
     const registered: any[] = [];
     registerSwarmHistoryVaultTools({ registerTool: (tool: any) => registered.push(tool), on() {}, getCwd: () => "/tmp/work" }, { historyRoot: "/tmp", cwd: "/tmp/work" });
     const fixture = JSON.parse(require("node:fs").readFileSync(new URL("../../../tools/parity/fixtures/swarm-tools.json", import.meta.url), "utf8"));
-    for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_approve", "vault_exec", "vault_list", "vault_two_person_status"]) {
+    for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_list"]) {
       const actual = registered.find((x) => x.name === name), wanted = fixture.find((x: any) => x.function.name === name).function;
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
       expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
@@ -46,68 +52,14 @@ describe("Swarm history and vault surfaces", () => {
     expect(stats.terms.find((x: any) => x.term === "banana")).toMatchObject({ occurrences: 3, conversations: 2 });
   });
 
-  it("treats materialized neutral HistorySearch arguments as omitted", async () => {
+  it("honors normalized fields and segment search case, runtime, and ordering filters", async () => {
     const runtime = await fixture();
-    const observed = {
-      case_sensitive: false,
-      exclude_runtime: true,
-      fields: ["title", "preview", "body"],
-      limit: 20,
-      max_snippets: 5,
-      min_messages: 2,
-      ngram: 2,
-      order: "desc",
-      origin: "interactive",
-      query: "banana",
-      regex: "",
-      scope: "current",
-      search_body: true,
-      segment_kind: "message",
-      snippet: true,
-      snippet_context: 160,
-      sort: "relevance",
-      stats: false,
-      tool_name: "",
-      tool_outcome: "any",
-      top_terms: 50,
-      workspace_path: "",
-    };
-    const normalized = normalizeHistorySearchParams(observed);
-    expect(normalized).not.toHaveProperty("workspace_path");
-    expect(normalized).not.toHaveProperty("ngram");
-    expect(normalized).not.toHaveProperty("top_terms");
-    expect(normalized).not.toHaveProperty("stats");
-    expect(normalized).not.toHaveProperty("tool_name");
-    expect(normalized).not.toHaveProperty("tool_outcome");
-    const result = await historySearch(observed, runtime);
-    expect(new Set(result.results.map((x: any) => x.id))).toEqual(
-      new Set(["session-two", "session-one"]),
-    );
-
-    const recent = await historySearch({
-      query: "",
-      fields: [],
-      stats: false,
-      ngram: 1,
-      top_terms: 50,
-      tool_outcome: "any",
-      workspace_path: "",
-    }, runtime);
-    expect(recent.results.map((x: any) => x.id)).toEqual(["session-two", "session-one"]);
-  });
-
-  it("preserves meaningful HistorySearch validation and stats arguments", async () => {
-    const runtime = await fixture();
-    await expect(historySearch({
-      scope: "all",
-      workspace_path: runtime.cwd,
-    }, runtime)).rejects.toThrow(/mutually exclusive/);
-    const stats = await historySearch({
-      stats: true,
-      ngram: 2,
-      top_terms: 7,
-    }, runtime);
-    expect(stats).toMatchObject({ stats: true, ngram: 2, top_terms: 7 });
+    const mixed = await historySearch({ query: "BANANA", fields: [" BODY "], case_sensitive: true, scope: "current" }, runtime);
+    expect(mixed.results).toEqual([]);
+    const insensitive = await historySearch({ query: "BANANA", segment_kind: "message", case_sensitive: false, sort: "recency", order: "asc" }, runtime);
+    expect(insensitive.results.map((x: any) => x.id)).toEqual(["session-one", "session-two"]);
+    const sensitive = await historySearch({ query: "BANANA", segment_kind: "message", case_sensitive: true }, runtime);
+    expect(sensitive.results).toEqual([]);
   });
 
   it("gets tail and offset windows and reports max_chars truncation", async () => {
@@ -231,22 +183,52 @@ describe("Swarm history and vault surfaces", () => {
     const rt = { path: join(root, "pi-vault.json") };
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "super-secret", target: "TEST_PI_SECRET" }, rt)).toMatchObject({ success: true, credentialId: "token" });
     const listed = await vaultList({}, rt);
-    expect(listed.credentials).toEqual([{ id: "token", name: "", kind: "env_var", scope: "global" }]);
+    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global" }]);
+    expect(listed).toMatchObject({ count: 1, has_more: false });
     expect(JSON.stringify(listed)).not.toContain("super-secret");
     expect(await vaultAdd({ id: "token", kind: "env_var", allowedCommands: ["printenv *"] }, rt)).toMatchObject({ success: true, metadataOnly: true });
+    expect((await vaultList({ details: true }, rt)).credentials[0]).toMatchObject({ allowedCommands: ["printenv *"] });
     const stored = await readFile(rt.path, "utf8");
     // vault/transparent.go disk format: version "2" is cleartext by design
     // (the "transparent" store), keyed by credential id with injectTarget.
     expect(JSON.parse(stored)).toMatchObject({ version: "2", credentials: { token: { kind: "env_var", value: "super-secret", injectMethod: "env", injectTarget: "TEST_PI_SECRET", allowedCommands: ["printenv *"] } } });
-    const ran = await vaultExec({ credentialId: "token", command: "printenv", args: ["TEST_PI_SECRET"] }, rt);
-    expect(ran).toMatchObject({ status: "ok", exitCode: 0, stdout: "[REDACTED]\n", redactedCount: 1, safeToParse: false });
   });
 
-  it("returns Swarm locked/not-configured result shapes", async () => {
-    const warning = "vault is locked — no credentials available. Tell the user to unlock the vault by typing /vault in the TUI (or Settings → Vault, or 'swarmos vault unlock' in CLI).";
+  it("uses the plain vault without initialization and supports explicit disablement", async () => {
+    const warning = "plain vault is unavailable because it was explicitly disabled; credentials are stored in ~/.swarm/vault/credentials.json";
     expect(await vaultList({}, { locked: true })).toEqual({ credentials: [], warning });
     expect(await vaultList({}, { configured: false })).toEqual({ credentials: [], warning });
-    expect(await vaultAdd({ id: "x", kind: "env_var", secret: "x" }, { locked: true })).toMatchObject({ success: false, error: expect.stringContaining("vault is locked") });
-    expect(await vaultExec({ credentialId: "x", command: "true" }, { configured: false })).toMatchObject({ exitCode: 0, error: expect.stringContaining("vault is locked") });
+    expect(await vaultAdd({ id: "x", kind: "env_var", secret: "x" }, { locked: true })).toMatchObject({ success: false, error: expect.stringContaining("vault is unavailable") });
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-no-init-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    expect(await vaultList({}, rt)).toEqual({ credentials: [], count: 0, has_more: false });
+    expect(await vaultAdd({ id: "token", kind: "env_var", secret: "value" }, rt)).toMatchObject({ success: true });
+  });
+
+  it("accepts day/year expiry and serializes a future timestamp", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-expiry-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const before = Date.now();
+    expect(await vaultAdd({ id: "long-lived", kind: "api_key", secret: "value", expire: "1y" }, rt)).toMatchObject({ success: true });
+    const stored = JSON.parse(await readFile(rt.path, "utf8"));
+    const expiry = Date.parse(stored.credentials["long-lived"].expiresAt);
+    expect(expiry).toBeGreaterThan(before + 364 * 86_400_000);
+    expect(expiry).toBeLessThanOrEqual(Date.now() + 366 * 86_400_000);
+  });
+
+  it("serializes concurrent additions without losing credentials", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-concurrent-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const results = await Promise.all(Array.from({ length: 24 }, (_, i) => vaultAdd({ id: `credential-${i}`, kind: "api_key", secret: `value-${i}`, expire: i % 2 ? "90d" : "1y" }, rt)));
+    expect(results.every((result) => result.success)).toBe(true);
+    expect((await vaultList({ limit: 100 }, rt)).credentials).toHaveLength(24);
+  });
+
+  it("keeps malformed expiration input side-effect free", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-vault-expiry-fuzz-")); roots.push(root);
+    const rt = { path: join(root, "credentials.json") };
+    const malformed = ["NaN", "Infinity", "1e3d", "1\n day", "1\u0000d", "999999999999999999999999999999999999999999999999d", "d1", "1dd", "1y-1d", "1/1d"];
+    for (const expire of malformed) expect((await vaultAdd({ id: "x", kind: "api_key", secret: "secret", expire }, rt)).success).toBe(false);
+    expect(await vaultList({}, rt)).toMatchObject({ count: 0, credentials: [] });
   });
 });

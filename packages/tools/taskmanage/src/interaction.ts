@@ -71,7 +71,7 @@ export interface InteractionHost {
 export class InteractionBroker {
   constructor(private readonly host: InteractionHost, private readonly options: { headless?: boolean; timeoutMs?: number } = {}) {}
   private timeout(value?: number) { return value ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT; }
-  private headless() { return this.options.headless || process.env.PI_HEADLESS === "1" || process.env.CI === "true"; }
+  private headless() { return this.options.headless ?? (process.env.PI_HEADLESS === "1" || process.env.CI === "true"); }
   async ask(input: StructuredQuestion, signal?: AbortSignal): Promise<QuestionResponse> {
     validateQuestion(input);
     const q = { ...input, kind: input.kind ?? (input.options || input.choices ? (input.multiSelect ? "multi" : "single") : "text") };

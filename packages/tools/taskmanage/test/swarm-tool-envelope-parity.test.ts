@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { goNow, swarmValidateTaskManageParams } from "../src/swarm-validate.js";
-import { bashTruncateOutput, checkAllowedPath, defaultAllowedPaths, resolveWorkdir } from "../../../../.pi/lib/tools/swarm-bash.ts";
+import { bashTruncateOutput, checkAllowedPath, commandFailedMessage, defaultAllowedPaths, resolveWorkdir, runSwarmBash, sharesGitCommonDir, signalNote } from "../../../../.pi/lib/tools/swarm-bash.ts";
 import { PERMISSIVE_PARAMETERS, applySwarmSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
 import { alignProviderPayload } from "../../../../.pi/lib/runtime/swarm-transport-parity.ts";
 import { SwarmSkillRegistry } from "../../../../.pi/lib/context/swarm-skill-registry.ts";
@@ -101,6 +102,74 @@ describe("bash path guard + spill file (path_guard.go, bash.go)", () => {
     expect(resolveWorkdir("/nonexistent-cwd", "/w", ["/w"])).toEqual({ error: "Path not allowed (not_allowed): /nonexistent-cwd" });
     expect(resolveWorkdir(join(root, "nope"), "/w", [root])).toEqual({ error: `cwd does not exist: ${join(root, "nope")}` });
   });
+
+  // Issues #540/#538/#404: a linked worktree is the same authorized checkout
+  // reached by another path, so read-only inspection there must not be denied.
+  it("allows a linked git worktree of the workspace repository as cwd", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-wt-")));
+    const ws = join(root, "main");
+    const linked = join(root, "linked");
+    const unrelated = join(root, "unrelated");
+    mkdirSync(unrelated);
+    execFileSync("git", ["init", "-q", "-b", "main", ws]);
+    execFileSync("git", ["-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: ws });
+    execFileSync("git", ["worktree", "add", "-q", "--detach", linked], { cwd: ws });
+    // The worktree lives outside the workspace root, so the guard denies it...
+    expect(checkAllowedPath(linked, [ws])).toBe(`Path not allowed (not_allowed): ${linked}`);
+    // ...but resolveWorkdir accepts it because it shares the git common dir.
+    expect(sharesGitCommonDir(ws, linked)).toBe(true);
+    expect(resolveWorkdir(linked, ws, [ws])).toEqual({ dir: linked });
+    // Near-misses: a non-repo sibling and a missing path stay denied.
+    expect(sharesGitCommonDir(ws, unrelated)).toBe(false);
+    expect(resolveWorkdir(unrelated, ws, [ws])).toEqual({ error: `Path not allowed (not_allowed): ${unrelated}` });
+    expect(resolveWorkdir(join(root, "absent"), ws, [ws])).toEqual({ error: `Path not allowed (not_allowed): ${join(root, "absent")}` });
+  });
+
+  // Issues #342/#340/#324/#322: `pkill -f <pattern>` can match this tool's own
+  // `bash -c <command>` argv and kill the shell, so exit -1 must name the
+  // signal instead of reading like an unexplained harness crash.
+  it("names the terminating signal instead of a bare exit -1", () => {
+    expect(signalNote(-1, "SIGTERM")).toContain("Command terminated by SIGTERM");
+    expect(commandFailedMessage(-1, "before\n", "", "err_x", "SIGTERM")).toContain("Command exited with code -1: signal: term");
+    expect(commandFailedMessage(-1, "before\n", "", "err_x", "SIGTERM")).toContain("statements after the kill did not run");
+    // Near-miss: an ordinary non-zero exit keeps Swarm's exact wording.
+    expect(signalNote(3, null)).toBe("");
+    expect(commandFailedMessage(3, "", "boom", "err_x")).toBe("Error executing bash: Command exited with code 3: exit status 3\n\nstderr:\nboom\n\nstdout:\n(no output) (error_id=err_x)");
+  });
+
+  // bash.go sets cmd.WaitDelay = 2s (Go issue #21922): an inherited pipe must
+  // not make a bounded command wait for its full timeout.
+  it("settles a command whose background child inherited the shell's pipes", async () => {
+    const started = Date.now();
+    const outcome = await runSwarmBash({ command: "sleep 30 & echo started; exit 0" }, { defaultCwd: tmpdir() });
+    expect(outcome).toMatchObject({ exitCode: 0, timedOut: false });
+    expect((outcome as { stdout: string }).stdout).toBe("started\n");
+    expect(Date.now() - started).toBeLessThan(15000);
+    // Near-miss: an ordinary command still settles promptly, not after the grace.
+    const quick = Date.now();
+    expect(await runSwarmBash({ command: "echo fast" }, { defaultCwd: tmpdir() })).toMatchObject({ stdout: "fast\n", exitCode: 0 });
+    expect(Date.now() - quick).toBeLessThan(1500);
+  }, 40000);
+
+  // codex exec.rs kill_child_process_group / opencode killTree: signalling only
+  // the direct shell orphans its children, which keep holding the output pipe
+  // and any port they bound.
+  it("signals the whole process group so an aborted command orphans nothing", async () => {
+    const tag = `swarmgrouptest${Date.now()}`;
+    const controller = new AbortController();
+    const running = runSwarmBash(
+      { command: `sh -c 'sleep 120 #${tag}' & sleep 120 #${tag}` },
+      { defaultCwd: tmpdir(), signal: controller.signal },
+    );
+    // Let the shell fork its child before killing the group.
+    await new Promise((r) => setTimeout(r, 500));
+    controller.abort();
+    expect(await running).toMatchObject({ exitCode: -1 });
+    await new Promise((r) => setTimeout(r, 500));
+    const survivors = execFileSync("ps", ["-eo", "args"], { encoding: "utf8" })
+      .split("\n").filter((line) => line.includes(tag) && !line.includes("ps -eo"));
+    expect(survivors).toEqual([]);
+  }, 30000);
   it("names the spill file like os.CreateTemp(dir, \"bash-full-*.txt\")", () => {
     const t = bashTruncateOutput("x\n".repeat(2500), mkdtempSync(join(tmpdir(), "pi-spill-")));
     expect(t.truncated).toBe(true);

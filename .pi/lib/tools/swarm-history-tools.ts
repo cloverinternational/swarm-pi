@@ -182,16 +182,17 @@ export async function historySearch(params: AnyMap, runtime: HistoryRuntime): Pr
   const cwd = canonicalWorkspace(runtime.cwd, "workspace path");
   const scope = params.scope ?? "current";
   if (scope !== "current" && scope !== "all") throw new Error("HistorySearch: scope must be one of current or all");
-  if (params.workspace_path != null && scope === "all") throw new Error("HistorySearch: workspace_path and scope=all are mutually exclusive");
-  const workspace = scope === "all" ? "" : params.workspace_path != null ? canonicalWorkspace(params.workspace_path, "workspace_path") : cwd;
+  const requestedWorkspace = typeof params.workspace_path === "string" && params.workspace_path.trim() !== "" ? params.workspace_path : undefined;
+  if (requestedWorkspace !== undefined && scope === "all") throw new Error("HistorySearch: workspace_path and scope=all are mutually exclusive");
+  const workspace = scope === "all" ? "" : requestedWorkspace !== undefined ? canonicalWorkspace(requestedWorkspace, "workspace_path") : cwd;
   const limit = integer(params, "limit", 10, 50);
   const caseSensitive = bool(params, "case_sensitive", false);
   const searchBody = bool(params, "search_body", String(params.query ?? "").trim() !== "" || Boolean(params.regex));
   const query = typeof params.query === "string" ? params.query.trim() : "";
   const terms = query.split(/\s+/).filter(Boolean);
   const rx = regexFor({ ...params, case_sensitive: caseSensitive });
-  const fields: string[] = params.fields ?? ["title", "preview", "body"];
-  if (!Array.isArray(fields)) throw new Error("HistorySearch: fields must be an array of title, preview or body");
+  if (params.fields !== undefined && !Array.isArray(params.fields)) throw new Error("HistorySearch: fields must be an array of title, preview or body");
+  const fields: string[] = (params.fields ?? ["title", "preview", "body"]).map((f: unknown) => String(f).toLowerCase().trim());
   for (const f of fields) if (!["title", "preview", "body"].includes(String(f).toLowerCase().trim())) throw new Error(`HistorySearch: fields must contain only title, preview or body (got ${JSON.stringify(f)})`);
   const sortBy = params.sort ?? ((query || rx) ? "relevance" : "recency");
   if (!["relevance", "recency", "message_count"].includes(sortBy)) throw new Error("HistorySearch: sort must be one of relevance, recency, message_count");
@@ -199,8 +200,7 @@ export async function historySearch(params: AnyMap, runtime: HistoryRuntime): Pr
   const minMessages = integer(params, "min_messages", 0, Number.MAX_SAFE_INTEGER, true);
   if (params.origin != null && !["interactive", "subagent", "headless"].includes(params.origin)) throw new Error("HistorySearch: origin must be one of interactive, subagent, headless");
   const sessions = (await loadSessions(runtime)).filter((s) => !workspace || resolve(s.cwd) === workspace).filter((s) => s.messages.length >= minMessages);
-  const segmentRequested = ["tool_name", "tool_outcome", "segment_kind", "stats", "ngram", "top_terms"].some((k) => params[k] !== undefined);
-  if (params.ngram !== undefined && !params.stats || params.top_terms !== undefined && !params.stats) throw new Error("HistorySearch: ngram and top_terms are only meaningful with stats=true");
+  const segmentRequested = ["tool_name", "tool_outcome", "segment_kind"].some((k) => params[k] !== undefined) || params.stats === true;
   if (segmentRequested) return segmentSearch(params, sessions, scope, workspace);
   const ranked: { session: Session; score: number; snippets: AnyMap[] }[] = [];
   for (const s of sessions) {
@@ -256,11 +256,24 @@ function segmentSearch(params: AnyMap, sessions: Session[], scope: string, works
     const terms = [...map].map(([term, v]) => ({ term, occurrences: v.occurrences, segments: v.segments.size, conversations: v.conversations.size })).sort((a, b) => b.occurrences - a.occurrences || a.term.localeCompare(b.term)).slice(0, top);
     return { stats: true, scope, filter, ngram, top_terms: top, segments_scanned: segments.length, terms, ...(requestedTop > 500 ? { top_terms_capped: true, requested_top_terms: requestedTop } : {}) };
   }
-  const query = String(params.query ?? "").trim(), terms = query.toLowerCase().split(/\s+/).filter(Boolean), rx = regexFor(params);
-  segments = segments.filter((s) => terms.every((t) => s.text.toLowerCase().includes(t)) && (!rx || (rx.lastIndex = 0, rx.test(s.text))));
+  const query = String(params.query ?? "").trim(), caseSensitive = Boolean(params.case_sensitive);
+  const terms = query.split(/\s+/).filter(Boolean), rx = regexFor({ ...params, case_sensitive: caseSensitive });
+  const fold = (value: string) => caseSensitive ? value : value.toLowerCase();
+  segments = segments.filter((s) => {
+    const text = params.exclude_runtime ? cleanHistoryText(s.text) : s.text;
+    return terms.every((term) => fold(text).includes(fold(term))) && (!rx || (rx.lastIndex = 0, rx.test(text)));
+  });
+  const sortBy = params.sort ?? (query || rx ? "relevance" : "recency");
+  const order = params.order ?? "desc";
+  const rank = (hit: typeof segments[number]) => sortBy === "message_count" ? hit.session.messages.length : sortBy === "recency" ? Date.parse(hit.session.updatedAt) || 0 : (fold(hit.session.title).includes(fold(query)) ? 1 : 0);
+  segments.sort((a, b) => {
+    const delta = rank(a) - rank(b);
+    if (delta) return order === "asc" ? delta : -delta;
+    return a.session.id.localeCompare(b.session.id) || a.ordinal - b.ordinal;
+  });
   const seen = new Set<string>(), limit = integer(params, "limit", 10, 50), results: AnyMap[] = [];
   for (const hit of segments) { if (seen.has(hit.session.id)) continue; seen.add(hit.session.id); const s = hit.session; results.push({ id: s.id, title: s.title, ...(s.preview !== s.title ? { preview: s.preview } : {}), message_count: s.messages.length, updated_at: s.updatedAt, ...(scope === "all" ? { workspace_path: s.cwd } : {}), matched_segment: { kind: hit.kind, ordinal: hit.ordinal, text: compactTitle(hit.text).slice(0, 320), ...(hit.messageId ? { message_id: hit.messageId } : {}), ...(hit.role ? { role: hit.role } : {}), ...(hit.toolName ? { tool_name: hit.toolName } : {}), ...(hit.kind === "tool_result" ? { outcome: hit.failed ? "failed" : "succeeded" } : {}) } }); if (results.length === limit) break; }
-  return { scope, query: params.case_sensitive ? query : query.toLowerCase(), sort: params.sort ?? (query || rx ? "relevance" : "recency"), order: params.order ?? "desc", segment_filter: filter, results, ...(workspace ? { workspace_path: workspace } : {}) };
+  return { scope, query: caseSensitive ? query : query.toLowerCase(), sort: sortBy, order, segment_filter: filter, results, ...(workspace ? { workspace_path: workspace } : {}) };
 }
 
 function sanitize(value: any, key = ""): any {

@@ -10,9 +10,15 @@ const parameters = {
     action: { type: "string", enum: ["add", "list", "remove"] },
     id: { type: "string", description: "Credential identifier." },
     kind: { type: "string", description: "Credential kind, such as password, api_key, or ssh_key." },
+    query: { type: "string", description: "Optional case-insensitive search across credential id, name, and kind." },
+    scope: { type: "string", description: "Optional credential scope filter." },
+    tags: { type: "array", items: { type: "string" }, description: "Optional tags that every result must contain." },
+    limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    cursor: { type: "string", description: "Cursor returned by a previous list operation." },
+    details: { type: "boolean", default: false, description: "Include nonessential metadata such as tags and allowed hosts." },
     secret: { type: "string", description: "Credential value. Stored transparently in the global local vault." },
     name: { type: "string" },
-    target: { type: "string", description: "Environment variable or file target used by vault_exec." },
+    target: { type: "string", description: "Environment variable or file target associated with the credential." },
   },
   required: ["action"],
 };
@@ -30,7 +36,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
     parameters,
     async execute(_id: string, input: any) {
       if (input?.action === "add") return text(await vaultAdd({ ...input, scope: "global" }, vault));
-      if (input?.action === "list") return text(await vaultList({ kind: input.kind }, vault));
+      if (input?.action === "list") return text(await vaultList(input, vault));
       if (input?.action === "remove") return text(await vaultRemove(input, vault));
       return text({ success: false, error: "action must be add, list, or remove" });
     },

@@ -6,6 +6,15 @@ yet an implementation.
 
 ## Research conclusions
 
+Implemented session-local automation lives in `swarm-goal`: `/goal` evaluates
+turn evidence and continues without a turn cap; `/loop` and the single
+`scheduler` tool create same-session wake-ups. `.pi/lib/runtime/session-wakeup.ts`
+shares the background-agent completion delivery boundary. Generation checks
+invalidate stale callbacks, timers are cancelled on shutdown/reload, and goal
+state persists in Pi custom entries. Daemon goal/loop APIs remain available to
+non-TUI clients but are no longer registered by the TUI runtime. Cancellation
+stops future timer fires; messages already handed to Pi's queue may still run.
+
 Official Pi documentation describes a deliberately small core. Workflow-specific
 behavior belongs in extensions, skills, prompt templates, or external tools:
 

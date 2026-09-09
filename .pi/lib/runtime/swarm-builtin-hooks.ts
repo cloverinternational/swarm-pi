@@ -28,7 +28,7 @@
 import { formatHookContext, nextReminderSeq, wrapReminder } from "../policy/swarm-annoyance-nudge.ts";
 import {
   isBashReadOnly, isBashTool, isPlanModeTool, isReadOnlyExplorationTool, isSkillTool,
-  isTaskManagementTool, isUserInteractionTool, normalizeToolName,
+  isTaskManagementTool, isUserInteractionTool, isCodeModeTool, normalizeToolName,
 } from "./swarm-toolclass.ts";
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export class TaskEnforcementHook {
     const toolName = event.toolName;
     if (!toolName) return CONTINUE;
     if (isPlanModeTool(toolName)) this.planModeUsed = true;
-    if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName)) return CONTINUE;
+    if (isTaskManagementTool(toolName) || isPlanModeTool(toolName) || isSkillTool(toolName) || isUserInteractionTool(toolName) || isCodeModeTool(toolName)) return CONTINUE;
     if (isReadOnlyExplorationTool(toolName)) return CONTINUE;
     if (isBashTool(toolName)) {
       const cmd = event.params?.command;
@@ -182,6 +182,7 @@ const sessionTaskStatuses = (tasks: readonly HookTask[]) => {
     if (t.status === "pending") pending.push(t);
     else if (t.status === "in_progress") inProgress.push(t);
   }
+  inProgress.sort((a, b) => Number(b.active === true) - Number(a.active === true));
   return { pending, inProgress };
 };
 
@@ -349,7 +350,8 @@ export class AutogenBudgetEnforcementHook {
   constructor(private readonly trigger: AutogenTriggerConfig = SWARM_TUI_AUTOGEN_TRIGGER) {}
   private exempt(event: ToolCallEvent): boolean {
     const n = event.toolName;
-    if (isSkillTool(n) || isTaskManagementTool(n) || isPlanModeTool(n) || isUserInteractionTool(n) || isReadOnlyExplorationTool(n)) return true;
+    if (n === "bootstrap") return true; // Recovery must work even at an exhausted skill budget.
+    if (isSkillTool(n) || isTaskManagementTool(n) || isPlanModeTool(n) || isUserInteractionTool(n) || isCodeModeTool(n) || isReadOnlyExplorationTool(n)) return true;
     if (isBashTool(n)) { const cmd = event.params?.command; if (typeof cmd === "string" && isBashReadOnly(cmd)) return true; }
     return false;
   }

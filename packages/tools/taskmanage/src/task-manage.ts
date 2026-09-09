@@ -400,7 +400,7 @@ export class TaskManager {
     if (!isObj(op) || typeof op.key !== "string" || !op.key || !["create","update","get","list"].includes(op.op))
       return fail("validation_failed", `operation ${index} must contain a valid key and op`);
     const allowed: Record<Operation["op"], string[]> = {
-      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy"],
+      create: ["key","op","subject","description","activeForm","category","priority","metadata","parentTaskId","owner_id","status","active","addBlocks","addBlockedBy","addNote","noteType"],
       update: ["key","op","taskId","subject","description","activeForm","category","priority","metadata","status","active","parentTaskId","addBlocks","addBlockedBy","addNote","noteType"],
       get: ["key","op","taskId","include_audit"],
       list: ["key","op","subject","category","status","active","limit","offset"],
@@ -485,7 +485,7 @@ export class TaskManager {
     for (let i=0;i<ops.length;i++) {
       const e = this.validate(ops[i], i); if (e) return { status: "failed", results: [{ key: ops[i]?.key ?? "batch", op: ops[i]?.op ?? "list", status: "failed", error: e }] };
       const prior = seen.get(ops[i].key);
-      if (prior && (prior !== "create" || ops[i].op === "create")) return { status: "failed", results: [{ key: ops[i].key, op: ops[i].op, status: "failed", error: fail("validation_failed", `duplicate operation key ${ops[i].key}`) }] };
+      if (prior && (prior === "create" || ops[i].op === "create") && !(prior === "create" && ops[i].op !== "create")) return { status: "failed", results: [{ key: ops[i].key, op: ops[i].op, status: "failed", error: fail("validation_failed", `duplicate operation key ${ops[i].key}`) }] };
       seen.set(ops[i].key, prior ?? ops[i].op);
     }
     const before = this.snapshot(), local: Record<string,string> = {}, results: Result[] = [];
@@ -554,7 +554,7 @@ export class TaskManager {
       for (const d of blocks as string[]) if (!this.find(d)) return {key:op.key,op:op.op,status:"failed",error:fail("not_found",`task ${d} not found`)};
       const owner = op.owner_id ?? "";
       const sequence = this.state.tasks.filter(t => (t.owner_id ?? "") === owner).reduce((max, t) => Math.max(max, t.sequence ?? 0), 0) + 1;
-      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:[], audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
+      const now = goNow(), task: Task = { id:String(this.state.nextId++), subject:op.subject!.trim(), description:op.description, activeForm:op.activeForm, category:op.category ?? this.inferCategory(`${op.subject} ${op.description ?? ""}`), priority:op.priority ?? "medium", metadata:op.metadata&&clone(op.metadata), parentTaskId:parentId, owner_id:op.owner_id, status:op.status === "in_progress" || op.status === "completed" ? op.status : "pending", active:op.status === "in_progress" || op.active === true, dependsOn:[...new Set(deps as string[])], notes:op.addNote ? [op.addNote] : [], typed_notes: op.addNote && op.noteType ? [{text:op.addNote,type:op.noteType,at:now}] : undefined, audit_events:[{action:"created",at:now}], createdAt:now, updatedAt:now, sequence };
       this.state.tasks.push(task);
       if (task.status === "in_progress") for (const other of this.state.tasks) if (other.id !== task.id) other.active = false;
       for (const d of blocks as string[]) {

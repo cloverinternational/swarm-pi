@@ -127,6 +127,8 @@ const parseProgram = (code: string): ProgramNode => {
       `Failed to parse TypeScript: ${flattenDiagnosticMessageText(diagnostic.messageText, "\n")}`,
       undefined,
       "ParseError",
+      ["Rewrite the malformed source; use backticks or escape inner quotes in nested examples."],
+      { action: "rewrite", message: "The submitted CodeMode program did not parse. Repair the reported syntax and retry; do not resend the same source unchanged.", retryable: true },
     )
   }
 
@@ -158,6 +160,7 @@ const normalizeError = (error: unknown): Diagnostic => {
       message: `${error.message}${formatLocation(error.node)}`,
       ...(error.node?.loc ? { location: sourceLocation(error.node) } : {}),
       ...(error.suggestions ? { suggestions: error.suggestions } : {}),
+      ...(error.repair ? { repair: error.repair } : {}),
     }
   }
 
@@ -3268,7 +3271,7 @@ class Interpreter<R> {
     const binding = this.resolveBinding(name)
 
     if (!binding) {
-      throw new InterpreterRuntimeError(`Unknown identifier '${name}'.`, node).as("ReferenceError")
+      throw new InterpreterRuntimeError(`Unknown identifier '${name}'. CodeMode tools are rooted at \`tools\`; use an exact catalog path such as \`tools.workspace.read(...)\` or discover names with \`Object.keys(tools)\`.`, node, "ExecutionFailure", [name === "workspace" ? "Use tools.workspace.<tool>(input), never workspace.<tool>(input)." : name === "Agent" || name === "AgentControl" ? `Use tools.${name}(input) only if that exact tool is listed; bare ${name}(...) is invalid.` : "Use tools.<namespace>.<tool>(input) with the exact path shown in the catalog."], { action: "rewrite", message: `Replace the bare identifier ${name} with an exact tools-rooted catalog path, then retry.`, example: name === "workspace" ? "tools.workspace.read({ path: \"AGENTS.md\" })" : `tools.${name}(input)`, retryable: true }).as("ReferenceError")
     }
 
     // A parameter default that forward-references a later (not-yet-bound) parameter - JS TDZ.

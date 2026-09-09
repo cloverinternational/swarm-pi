@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { rememberShared, searchShared } from "../../lib/state/shared-memory.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 export const MEMORY_ENTRY_TYPE = "pi-swarm-memory";
@@ -117,17 +118,26 @@ const schema = { type: "object", required: ["operation"], additionalProperties: 
 
 export default function memoryHistoryExtension(pi: any): void {
   const history = new MemoryHistory();
+  let cwd = process.cwd();
   let scope = scopeOf();
   let sessionEntries: unknown[] = [];
   pi.on?.("session_start", (_event: any, ctx: any) => {
-    const cwd = ctx?.cwd ?? process.cwd();
+    cwd = ctx?.cwd ?? process.cwd();
     const session = ctx?.sessionManager?.getSessionFile?.() ?? ctx?.sessionManager?.sessionFile ?? "current";
     scope = scopeOf({ workspace: cwd, session: String(session) }, cwd);
     sessionEntries = ctx?.sessionManager?.getEntries?.() ?? [];
-    history.load(sessionEntries);
+    history.load(sessionEntries.map((e: any) => e.type === "custom" ? { type: e.customType, data: e.data } : e));
   });
-  pi.registerTool?.(withDefaultToolRenderer({ name: "memory_history", label: "Memory History", description: "Durable, redacted, workspace/session-scoped memory and history retrieval.", parameters: schema, async execute(_id: string, params: any) {
+  pi.registerTool?.(withDefaultToolRenderer({ name: "memory_history", label: "Memory History", description: "Durable redacted memory. Defaults to shared repository scope; worktrees share repository facts. Choose worktree for unmerged facts, global only for explicitly shareable knowledge, or session for legacy notes. Search scope all includes repository/worktree/global.", parameters: { ...schema, properties: { ...schema.properties, scope: { type: "string", enum: ["repository", "worktree", "global", "session", "all"] } } }, async execute(_id: string, params: any) {
     try {
+      const selectedScope = params.scope ?? "repository";
+      if (selectedScope !== "session" && params.operation !== "migrate") {
+        if (params.operation === "remember" && selectedScope === "all") throw new Error("Choose a single write scope");
+        const value = params.operation === "remember"
+          ? rememberShared(cwd, selectedScope, redact(params.text ?? ""), (params.tags ?? []).map((s: string) => redact(String(s))), params.namespace ?? "default")
+          : searchShared(cwd, params.operation === "replay" ? "" : params.query ?? "", selectedScope === "all" ? ["repository", "worktree", "global"] : [selectedScope], params.limit ?? 20, params.namespace ?? "default");
+        return { content: [{ type: "text", text: JSON.stringify(value) }], details: {} };
+      }
       if (params.operation === "remember") {
         const entry = history.remember(params.text ?? "", { ...scope, namespace: params.namespace ?? scope.namespace }, params.tags ?? [], "memory_history");
         pi.appendEntry?.(MEMORY_ENTRY_TYPE, entry.data);

@@ -1,0 +1,556 @@
+name: OpenCodeReview
+
+# Security boundary:
+# - pull_request_target exposes repository secrets, so PR code is untrusted data.
+# - Only the trusted base SHA is checked out.
+# - The PR head is fetched into a detached ref for git diff/OCR inspection only.
+# - No PR-provided action, script, build, test, package install, or OCR rule runs.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  OCR_NO_UPDATE: '1'
+  NO_COLOR: '1'
+
+jobs:
+  review:
+    name: Plexus OpenCodeReview
+    runs-on: ubuntu-latest
+    # OpenCodeReview is advisory and LLM-bound: measured runs are 6-8 minutes
+    # but a large changeset legitimately takes far longer, and being cut off at
+    # 45 minutes wasted the whole run rather than producing a review. 360 is
+    # the ceiling GitHub-hosted runners allow -- job execution is hard-capped
+    # at 6 hours regardless of what this value says, so a longer budget would
+    # require a self-hosted runner.
+    timeout-minutes: 360
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (
+        github.event.issue.pull_request != null &&
+        (
+          github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR'
+        ) &&
+        github.event.comment.body == '/open-code-review'
+      )
+    concurrency:
+      group: ocr-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+      cancel-in-progress: true
+    steps:
+      - name: Resolve pull request context
+        id: pr
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        env:
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          script: |
+            let pull;
+            if (context.eventName === 'pull_request_target') {
+              pull = context.payload.pull_request;
+            } else {
+              const raw = context.eventName === 'workflow_dispatch'
+                ? process.env.DISPATCH_PR_NUMBER
+                : context.payload.issue.number;
+              const number = Number(raw);
+              if (!Number.isSafeInteger(number) || number <= 0) {
+                core.setFailed('A positive integer PR number is required.');
+                return;
+              }
+              const response = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: number,
+              });
+              pull = response.data;
+            }
+            if (!pull || !pull.number || !pull.base || !pull.head) {
+              core.setFailed('Could not resolve a complete pull request context.');
+              return;
+            }
+            core.setOutput('number', String(pull.number));
+            core.setOutput('base_sha', pull.base.sha);
+            core.setOutput('head_sha', pull.head.sha);
+            core.setOutput('base_ref', pull.base.ref);
+            core.setOutput('draft', String(Boolean(pull.draft)));
+
+      - name: Reserve automatic review attempt
+        id: budget
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          IS_DRAFT: ${{ steps.pr.outputs.draft }}
+          # Automatic-review budgets. Blank, 0 or unparseable means unlimited,
+          # which is the deliberate default: an advisory review must never be
+          # silently withheld from a PR. Set these repository variables to a
+          # positive integer to reimpose a cap without editing the workflow.
+          #
+          # OpenCodeReview flagged this default twice as a medium security risk,
+          # reasoning that pull_request_target plus a 360-minute job budget lets
+          # an untrusted fork author burn runner and LLM quota by pushing
+          # repeatedly. That threat model does not apply to this repository, and
+          # the difference is structural rather than a matter of configuration
+          # hygiene: cloverinternational/plataforma is private with
+          # allow_forking=false, so a fork PR cannot be opened at all (zero have
+          # ever existed), and the only accounts that can push a branch are the
+          # repository's collaborators -- who can spend this quota far more
+          # directly anyway. Every PR head here is already trusted-author code.
+          #
+          # If this repository is ever made public, or forking is enabled, this
+          # reasoning expires and OCR's finding becomes correct: set
+          # OCR_AUTO_COVERAGE_LIMIT and OCR_AUTO_ATTEMPT_LIMIT to finite values
+          # at that moment. No workflow edit is needed to do so, which is
+          # exactly why the caps are repository variables and not constants.
+          COVERAGE_LIMIT: ${{ vars.OCR_AUTO_COVERAGE_LIMIT }}
+          ATTEMPT_LIMIT: ${{ vars.OCR_AUTO_ATTEMPT_LIMIT }}
+        with:
+          script: |
+            const marker = '<!-- clover-ocr-budget -->';
+            const countPattern = /<!-- count:(\d+) -->/;
+            const attemptsPattern = /<!-- attempts:(\d+) -->/;
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              core.setFailed('Cannot reserve an OCR attempt without a valid PR number.');
+              return;
+            }
+            if (context.eventName === 'pull_request_target' && process.env.IS_DRAFT === 'true') {
+              core.setOutput('should_run', 'false');
+              core.notice('Skipping automatic OCR for a draft PR.');
+              return;
+            }
+            if (context.eventName !== 'pull_request_target') {
+              core.setOutput('should_run', 'true');
+              return;
+            }
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user &&
+              comment.user.type === 'Bot' &&
+              ['github-actions[bot]', 'github-actions'].includes(comment.user.login) &&
+              typeof comment.body === 'string' &&
+              comment.body.includes(marker));
+            const match = existing ? countPattern.exec(existing.body) : null;
+            const attemptsMatch = existing ? attemptsPattern.exec(existing.body) : null;
+            const count = match ? Number(match[1]) : 0;
+            const attempts = attemptsMatch ? Number(attemptsMatch[1]) : count;
+            // Infinity => no cap. Only a positive, safe integer imposes one.
+            const parseLimit = (raw) => {
+              const value = Number(raw);
+              return Number.isSafeInteger(value) && value > 0 ? value : Infinity;
+            };
+            const limit = parseLimit(process.env.COVERAGE_LIMIT);
+            const attemptLimit = parseLimit(process.env.ATTEMPT_LIMIT);
+            const describe = (value) => (Number.isFinite(value) ? String(value) : 'unlimited');
+            if (
+              !Number.isSafeInteger(count) ||
+              count < 0 ||
+              !Number.isSafeInteger(attempts) ||
+              attempts < count
+            ) {
+              core.setFailed('The authenticated OCR budget marker is malformed.');
+              return;
+            }
+            if (count >= limit) {
+              core.setOutput('should_run', 'false');
+              core.notice(`Automatic OCR coverage budget exhausted (${count}/${describe(limit)}). Use /open-code-review for an authorized manual run.`);
+              return;
+            }
+            if (attempts >= attemptLimit) {
+              core.setOutput('should_run', 'false');
+              core.notice(`Automatic OCR attempt budget exhausted (${attempts}/${describe(attemptLimit)}). Use /open-code-review for an authorized manual run.`);
+              return;
+            }
+            const nextAttempts = attempts + 1;
+            const body = [
+              marker,
+              `Automatic OpenCodeReview coverage: ${count} of ${describe(limit)} completed.`,
+              `Automatic attempt budget: ${nextAttempts} of ${describe(attemptLimit)} used.`,
+              `<!-- count:${count} -->`,
+              `<!-- attempts:${nextAttempts} -->`,
+              '',
+              'Maintainers can request another review with `/open-code-review`.',
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                body,
+              });
+            }
+            core.setOutput('should_run', 'true');
+
+      - name: Checkout trusted base
+        if: steps.budget.outputs.should_run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted OCR assets
+        if: steps.budget.outputs.should_run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ocr-trusted
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/ocr-runtime/package.json
+            .github/ocr-runtime/package-lock.json
+            .github/scripts/ocr-review-post.cjs
+          sparse-checkout-cone-mode: false
+
+      - name: Fetch untrusted head as data
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          { set +x; } 2>/dev/null
+          cleanup_auth() {
+            unset AUTH_B64 GH_TOKEN
+          }
+          trap cleanup_auth EXIT
+          AUTH_B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_B64}" \
+            fetch --no-tags origin \
+            "refs/pull/${PR_NUMBER}/head:refs/remotes/ocr/head"
+          test "$(git rev-parse refs/remotes/ocr/head)" = "$HEAD_SHA"
+          MERGE_BASE="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          test -n "$MERGE_BASE"
+          {
+            echo "BASE_SHA=$MERGE_BASE"
+            echo "HEAD_SHA=$HEAD_SHA"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize OCR diagnostics
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > ocr-result.json
+          : > ocr-stderr.log
+          : > ocr-preview.txt
+          : > ocr-exit-code.txt
+          : > ocr-phase.txt
+
+      - name: Setup Node
+        if: steps.budget.outputs.should_run == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          # Cache the OCR runtime npm tarballs: the install step previously
+          # re-downloaded the full dependency tree on every review run.
+          cache: npm
+          cache-dependency-path: .ocr-trusted/**/package-lock.json
+
+      - name: Install pinned OpenCodeReview
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "install" > ocr-phase.txt
+          OCR_RUNTIME="${GITHUB_WORKSPACE}/.ocr-trusted/.github/ocr-runtime"
+          if ! npm ci \
+            --prefix "$OCR_RUNTIME" \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            2>>ocr-stderr.log
+          then
+            echo "70" > ocr-exit-code.txt
+            exit 0
+          fi
+          OCR_BIN="${OCR_RUNTIME}/node_modules/.bin"
+          if [ ! -x "${OCR_BIN}/ocr" ]; then
+            echo "127" > ocr-exit-code.txt
+            echo "OpenCodeReview executable was not installed." >> ocr-stderr.log
+            exit 0
+          fi
+          echo "$OCR_BIN" >> "$GITHUB_PATH"
+          "${OCR_BIN}/ocr" version
+
+      - name: Join the Plexus tailnet
+        id: tailscale
+        if: steps.budget.outputs.should_run == 'true'
+        continue-on-error: true
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          authkey: ${{ secrets.TS_OCR_AUTHKEY }}
+          tags: tag:github-ocr
+
+      - name: Validate Plexus connectivity
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        env:
+          TAILSCALE_OUTCOME: ${{ steps.tailscale.outcome }}
+          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
+          OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
+          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
+          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
+        run: |
+          set -euo pipefail
+          if [ -s ocr-exit-code.txt ]; then
+            exit 0
+          fi
+          echo "llm-preflight" > ocr-phase.txt
+          missing=0
+          for name in OCR_LLM_URL OCR_LLM_TOKEN OCR_LLM_MODEL OCR_LLM_PROTOCOL; do
+            if [ -z "${!name:-}" ]; then
+              echo "Required OCR configuration ${name} is missing." >> ocr-stderr.log
+              missing=1
+            fi
+          done
+          if [ "$OCR_LLM_PROTOCOL" != "openai" ]; then
+            echo "OCR_LLM_PROTOCOL must be openai for Plexus Chat Completions." >> ocr-stderr.log
+            missing=1
+          fi
+          if [ "$TAILSCALE_OUTCOME" != "success" ]; then
+            echo "The ephemeral Tailscale connection failed." >> ocr-stderr.log
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "78" > ocr-exit-code.txt
+            exit 0
+          fi
+          set +e
+          timeout 120s ocr llm test >>ocr-stderr.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "$status" > ocr-exit-code.txt
+          fi
+
+      - name: Preview monorepo review scope
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        env:
+          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
+          OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
+          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
+          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
+        run: |
+          set -euo pipefail
+          if [ -s ocr-exit-code.txt ]; then
+            exit 0
+          fi
+          echo "preview" > ocr-phase.txt
+          set +e
+          ocr review --preview --from "$BASE_SHA" --to "$HEAD_SHA" \
+            >ocr-preview.txt 2>>ocr-stderr.log
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "$status" > ocr-exit-code.txt
+          fi
+
+      - name: Run OpenCodeReview through Plexus
+        if: steps.budget.outputs.should_run == 'true'
+        shell: bash
+        env:
+          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
+          OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
+          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL }}
+          OCR_LLM_PROTOCOL: ${{ vars.OCR_LLM_PROTOCOL }}
+        run: |
+          set -euo pipefail
+          if [ -s ocr-exit-code.txt ]; then
+            exit 0
+          fi
+          echo "review" > ocr-phase.txt
+          set +e
+          # OCR reviews files in parallel; its own default is 8. This workflow
+          # shipped with 2 from the first commit with no recorded rationale,
+          # which serialised the single step that dominates the run (6m48s
+          # measured). If the Plexus backend starts rate-limiting, lower this
+          # rather than raising the job timeout.
+          ocr review \
+            --from "$BASE_SHA" \
+            --to "$HEAD_SHA" \
+            --format json \
+            --audience agent \
+            --concurrency 8 \
+            >ocr-result.json 2>ocr-stderr.log
+          status=$?
+          set -e
+          echo "$status" > ocr-exit-code.txt
+
+      - name: Redact OCR output
+        if: always() && steps.budget.outputs.should_run == 'true'
+        shell: bash
+        env:
+          OCR_LLM_URL: ${{ vars.OCR_LLM_URL }}
+          OCR_LLM_TOKEN: ${{ secrets.OCR_PLEXUS_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ocr-artifacts
+          node <<'NODE'
+          const fs = require('fs');
+          const exact = [process.env.OCR_LLM_URL, process.env.OCR_LLM_TOKEN]
+            .filter((value) => typeof value === 'string' && value.length > 0);
+          function sanitize(value) {
+            let output = String(value || '');
+            for (const secret of exact) output = output.split(secret).join('[REDACTED]');
+            return output
+              .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s"',;]+/gi, '$1[REDACTED]')
+              .replace(/(x-api-key\s*[:=]\s*)[^\s"',;]+/gi, '$1[REDACTED]')
+              .replace(/((?:api[_-]?key|auth[_-]?token|access[_-]?token|secret)\s*[:=]\s*)[^\s"',;]+/gi, '$1[REDACTED]');
+          }
+          const files = [
+            ['ocr-result.json', 'ocr-safe-result.json'],
+            ['ocr-stderr.log', 'ocr-safe-stderr.log'],
+            ['ocr-preview.txt', 'ocr-safe-preview.txt'],
+            ['ocr-exit-code.txt', 'ocr-exit-code.txt'],
+            ['ocr-phase.txt', 'ocr-phase.txt'],
+          ];
+          for (const [source, target] of files) {
+            let content = '';
+            try { content = fs.readFileSync(source, 'utf8'); } catch (_) {}
+            const safe = sanitize(content);
+            fs.writeFileSync(target, safe);
+            fs.writeFileSync(`ocr-artifacts/${target}`, safe);
+          }
+          NODE
+
+      - name: Publish advisory review
+        id: publish
+        if: always() && steps.budget.outputs.should_run == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        with:
+          script: |
+            const publisher = require('${{ github.workspace }}/.ocr-trusted/.github/scripts/ocr-review-post.cjs');
+            const result = await publisher.postReview({ github, context, core });
+            core.setOutput('coverage', result.coverage);
+
+      - name: Commit automatic review budget
+        if: >-
+          always() &&
+          github.event_name == 'pull_request_target' &&
+          steps.publish.outcome == 'success' &&
+          steps.publish.outputs.coverage == 'complete_best_effort'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          # Must match the reservation step exactly; see the comment there.
+          COVERAGE_LIMIT: ${{ vars.OCR_AUTO_COVERAGE_LIMIT }}
+          ATTEMPT_LIMIT: ${{ vars.OCR_AUTO_ATTEMPT_LIMIT }}
+        with:
+          script: |
+            const marker = '<!-- clover-ocr-budget -->';
+            const countPattern = /<!-- count:(\d+) -->/;
+            const attemptsPattern = /<!-- attempts:(\d+) -->/;
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              core.setFailed('Cannot commit OCR budget without a valid PR number.');
+              return;
+            }
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) =>
+              comment.user &&
+              comment.user.type === 'Bot' &&
+              ['github-actions[bot]', 'github-actions'].includes(comment.user.login) &&
+              typeof comment.body === 'string' &&
+              comment.body.includes(marker));
+            const match = existing ? countPattern.exec(existing.body) : null;
+            const attemptsMatch = existing ? attemptsPattern.exec(existing.body) : null;
+            const count = match ? Number(match[1]) : 0;
+            const attempts = attemptsMatch ? Number(attemptsMatch[1]) : count;
+            // Infinity => no cap. Only a positive, safe integer imposes one.
+            const parseLimit = (raw) => {
+              const value = Number(raw);
+              return Number.isSafeInteger(value) && value > 0 ? value : Infinity;
+            };
+            const limit = parseLimit(process.env.COVERAGE_LIMIT);
+            const attemptLimit = parseLimit(process.env.ATTEMPT_LIMIT);
+            const describe = (value) => (Number.isFinite(value) ? String(value) : 'unlimited');
+            if (
+              !Number.isSafeInteger(count) ||
+              count < 0 ||
+              !Number.isSafeInteger(attempts) ||
+              attempts <= count ||
+              attempts > attemptLimit
+            ) {
+              core.setFailed('The authenticated OCR budget marker is malformed.');
+              return;
+            }
+            if (count >= limit) {
+              core.setFailed(`Automatic OCR budget changed before commit (${count}/${describe(limit)}).`);
+              return;
+            }
+            const next = count + 1;
+            const body = [
+              marker,
+              `Automatic OpenCodeReview coverage: ${next} of ${describe(limit)} completed.`,
+              `Automatic attempt budget: ${attempts} of ${describe(attemptLimit)} used.`,
+              `<!-- count:${next} -->`,
+              `<!-- attempts:${attempts} -->`,
+              '',
+              'Maintainers can request another review with `/open-code-review`.',
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                body,
+              });
+            }
+
+      - name: Upload redacted OCR diagnostics
+        if: always() && steps.budget.outputs.should_run == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ocr-review-${{ steps.pr.outputs.number }}-${{ github.run_attempt }}
+          path: ocr-artifacts/
+          if-no-files-found: ignore
+          retention-days: 3

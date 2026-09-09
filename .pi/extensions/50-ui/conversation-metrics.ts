@@ -1,5 +1,5 @@
 /** Small, session-backed status line for the native Pi editor. */
-import { formatRunningWorkDuration, onRunningWorkChange, runningWorkExpanded, runningWorkSelection, runningWorkSnapshot } from "../../lib/ui/running-work.ts";
+import { formatRunningWorkDuration, onRunningWorkChange, runningWorkExpanded, runningWorkSelection, visibleRunningWork } from "../../lib/ui/running-work.ts";
 export interface ConversationMetrics {
   version: 1;
   walltimeMs: number;
@@ -10,6 +10,20 @@ export interface ConversationMetrics {
 }
 
 const ENTRY = "pi-conversation-metrics";
+const CODEMODE_FOOTER_STATE = Symbol.for("pi-swarm-codemode-footer-state");
+
+function codeModeEnabled(): boolean {
+  const state = (globalThis as any)[CODEMODE_FOOTER_STATE];
+  return state?.enabled === true;
+}
+
+export function codeModeBadge(theme: any): string {
+  // Compact inline marker for the active mode; avoid a large background block.
+  const label = "CodeMode";
+  const colored = theme.fg?.("success", label) ?? label;
+  return theme.bold?.(colored) ?? colored;
+}
+
 const ROOT_KEY = Symbol.for("pi-swarm-conversation-metrics");
 /**
  * Pi exposes exactly one native footer slot (`ctx.ui.setFooter`). This extension
@@ -43,6 +57,49 @@ export function formatWalltime(ms: number): string {
   return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
+export function wrapFooterText(text: string, width: number): string[] {
+  if (width <= 0 || text.length <= width) return [text];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(/(\s+)/)) {
+    if (current && current.length + word.length > width) {
+      lines.push(current.trimEnd());
+      current = "";
+    }
+    if (word.length > width) {
+      if (current) { lines.push(current.trimEnd()); current = ""; }
+      for (let i = 0; i < word.length; i += width) lines.push(word.slice(i, i + width));
+    } else current += word;
+  }
+  if (current) lines.push(current.trimEnd());
+  return lines.length ? lines : [""];
+}
+
+export function currentModelLabel(ctx: any): string | undefined {
+  const model = ctx?.model;
+  if (!model?.id && !model?.provider) return undefined;
+  return `${model.provider ?? "unknown"}/${model.id ?? "unknown"}`;
+}
+
+export function footerIdentityLine(state: "running" | "idle", model?: string): string {
+  return `${state === "running" ? "●" : "○"}  ${model ? `model ${model}` : "model unavailable"}`;
+}
+
+export function footerMetricsLine(walltime: string, outputTokens: number, segments: readonly string[] = [], hint?: string): string {
+  return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments, hint].filter(Boolean).join("  ·  ");
+}
+
+function styleIdentityLine(line: string, state: "running" | "idle", theme: any): string {
+  const marker = state === "running" ? theme.fg("success", "●") : theme.fg("muted", "○");
+  const hasCodeMode = line.endsWith("  CODE");
+  const model = (hasCodeMode ? line.slice(0, -6) : line).replace(/^[●○]  /, "");
+  const styledModel = model.startsWith("model ") ? theme.fg("muted", "model") + " " + theme.fg("accent", model.slice(6)) : theme.fg("muted", model);
+  return marker + "  " + styledModel + (hasCodeMode ? theme.fg("dim", "  ·  ") + codeModeBadge(theme) : "");
+}
+function styleMetricsLine(line: string, theme: any): string {
+  return line.replace(/(\d+h \d+m|\d+m \d+s)/, (time) => theme.fg("dim", time)).replace(/(↓ [\d,]+ tok)/, (tokens) => theme.fg("dim", tokens));
+}
+
 function usageOutput(message: any): number {
   const usage = message?.usage ?? message?.data?.usage ?? message?.message?.usage;
   return Math.max(0, Number(usage?.output ?? usage?.outputTokens ?? usage?.completion_tokens ?? usage?.completionTokens) || 0);
@@ -67,28 +124,38 @@ class MetricsFooter {
   render(width: number): string[] {
     const m = shared.metrics ?? blank();
     const state = m.active ? "running" : "idle";
-    const parts = [`${state}  ${formatWalltime(currentWalltime())}  ·  out ${m.outputTokens.toLocaleString()} tok`];
+    const model = currentModelLabel(shared.ctx);
+    const segments: string[] = [];
     for (const [, provider] of footerSegments()) {
       let text: string | undefined;
       try { text = provider(); } catch { text = undefined; }
-      if (text) parts.push(text);
+      if (text) segments.push(text);
     }
-    const line = parts.join("  ·  ");
-    const clipped = width > 0 && line.length > width ? line.slice(0, Math.max(0, width - 1)) + "…" : line;
-    const work = runningWorkSnapshot();
+    const work = visibleRunningWork();
     if (!runningWorkExpanded() || !work.length) {
       const activeBash = work.some(item => item.kind === "bash" && item.status === "running");
-      return [this.theme.fg("dim", activeBash ? `${clipped}  ·  Ctrl+B background Bash/wait` : clipped)];
+      const identity = footerIdentityLine(state, model) + (codeModeEnabled() ? "  CODE" : "");
+      const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments, activeBash ? "Ctrl+B background Bash" : undefined);
+      return [
+        ...wrapFooterText(identity, width).map((row) => styleIdentityLine(row, state, this.theme)),
+        ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme)),
+      ];
     }
-    const rows = [this.theme.fg("accent", `Running work (${work.length})  ↑↓ select  Enter inspect  Esc close  Ctrl+B background Bash/wait`)];
+    const header = `Running work (${work.length})  Down select  Enter inspect  Esc close`;
+    const rows = wrapFooterText(header, width).map((row) => this.theme.fg("accent", row));
     for (const [index, item] of work.entries()) {
       const marker = index === runningWorkSelection() ? this.theme.fg("accent", "❯") : " ";
-      const glyph = item.status === "running" ? this.theme.fg("accent", "●") : item.status === "completed" ? this.theme.fg("success", "✓") : item.status === "failed" ? this.theme.fg("error", "✗") : this.theme.fg("warning", "■");
+      const glyph = item.status === "running" ? this.theme.fg("success", "●") : item.status === "completed" ? this.theme.fg("success", "✓") : item.status === "failed" ? this.theme.fg("error", "✗") : this.theme.fg("warning", "■");
       const tokens = item.tokens === undefined ? "tokens —" : `tokens ${item.tokens.toLocaleString()}`;
-      const row = `${marker} ${glyph} ${item.kind} ${item.label}  ${item.status}  ${formatRunningWorkDuration(item)}  ${tokens}`;
-      rows.push(width > 0 && row.length > width ? row.slice(0, Math.max(0, width - 1)) + "…" : row);
+      // Bash commands can be long, sensitive, and numerous. The footer is a
+      // status surface, not a command transcript; keep the command itself in
+      // the inspection view instead of rendering it for every process.
+      const label = item.kind === "bash" ? "bash" : `${item.kind} ${item.label}`;
+      const row = `${marker} ${glyph} ${label}  ${item.status}  ${formatRunningWorkDuration(item)}  ${tokens}`;
+      rows.push(...wrapFooterText(row, width));
     }
-    return [...rows, this.theme.fg("dim", clipped)];
+    const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments);
+    return [...rows, ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme))];
   }
   dispose() {}
   invalidate() { this.onInvalidate(); }

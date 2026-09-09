@@ -421,11 +421,14 @@ export function cliIsolation(argv: readonly string[] = process.argv): { systemPr
   return { systemPrompt, noContextFiles: argv.includes("--no-context-files"), noSkills: argv.includes("--no-skills") };
 }
 
+import { memorySystemPrompt } from "../../lib/context/memory-ceremony.ts";
+
 export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
   if (promptRegistrations.has(pi as object)) return;
   promptRegistrations.add(pi as object);
   registerHook(pi, "swarm-prompt", "before_agent_start", (event: PromptExtensionEvent, ctx: PromptExtensionContext) => {
     const cwd = ctx.cwd ?? event.systemPromptOptions?.cwd ?? process.cwd();
+    const assemble = () => {
     const interactive = (ctx as { hasUI?: boolean }).hasUI === true;
     const isolation = cliIsolation();
     const config = loadPromptContextConfig(cwd, undefined, { persistMigration: false });
@@ -463,6 +466,11 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const systemPrompt = withSkillCatalog(assembly.prompt, catalog);
     assembledPromptKinds.set(hash(systemPrompt), interactive ? "interactive" : "headless");
     return { systemPrompt };
+    };
+    const assembled = assemble();
+    const base = assembled?.systemPrompt ?? event.systemPrompt;
+    const final = memorySystemPrompt(base, cwd);
+    return assembled || final !== base ? { systemPrompt: final } : undefined;
   });
 }
 export default function swarmPromptExtension(pi: PromptExtensionAPI): void { registerSwarmPrompt(pi); }

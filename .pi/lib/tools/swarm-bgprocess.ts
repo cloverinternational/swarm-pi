@@ -4,10 +4,10 @@
  * ReadBackgroundCommand's output is a wire contract, not merely diagnostics.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { stripANSI, type BashParams } from "./swarm-bash.ts";
+import { WAIT_DELAY_MS, decodeSignalExit, signalNote, stripANSI, type BashParams } from "./swarm-bash.ts";
 import { setRunningWork } from "../ui/running-work.ts";
 
 export type ProcessState = "running" | "completed" | "failed" | "cancelled";
@@ -88,18 +88,55 @@ export function formatBackgroundDone(done: BackgroundDone): string {
 /** Go os/exec ExitError.Error() for a non-zero exit, as stored in ProcessResult.Error. */
 const goExitStatus = (code: number, signal: NodeJS.Signals | null) => signal ? `signal: ${signal.toLowerCase().replace(/^sig/, "")}` : `exit status ${code}`;
 
-let stdbufPath: string | undefined;
-/** bash_cmd_builder.go detectBufferingMethod: stdbuf -oL -eL when on PATH. */
-function detectStdbuf(): string {
-  if (stdbufPath !== undefined) return stdbufPath;
-  stdbufPath = "";
+/** First executable named `name` on PATH, or "" when absent. */
+function onPath(name: string): string {
   for (const dir of (process.env.PATH ?? "").split(":")) {
     if (!dir) continue;
-    const candidate = join(dir, "stdbuf");
-    if (existsSync(candidate)) { stdbufPath = candidate; break; }
+    const candidate = join(dir, name);
+    try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* keep looking */ }
   }
-  return stdbufPath;
+  return "";
 }
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
+
+/**
+ * bash_cmd_builder.go detectBufferingMethod, with the tiers ordered by what
+ * actually delivers incremental output (measured, stdout is a pipe):
+ *
+ *   program           direct      stdbuf -oL   script (PTY)
+ *   C / libc stdio    streams     streams      streams
+ *   python3, node     1 chunk     1 chunk      streams
+ *
+ * `stdbuf` only retunes libc's buffer, so runtimes that buffer above libc
+ * (python, node) still withhold everything until exit. A PTY makes the child
+ * believe it is interactive, which is the only tier that fixes those — and
+ * long-running python jobs are exactly what the caller wants to watch. So
+ * prefer `script`, keep `stdbuf` as the fallback, then direct.
+ *
+ * `-e` is required: without it `script` exits 0 even when the command failed.
+ * A PTY has one stream, so stderr arrives interleaved on stdout and newlines
+ * arrive as CRLF; callers must normalize (see ptyNewlines).
+ */
+export interface BufferingMethod { argv: string[]; pty: boolean }
+export function detectBufferingMethod(shell: string, command: string): BufferingMethod {
+  const script = onPath("script");
+  // util-linux `script -q -e -c "<cmd>" /dev/null`. The BSD/macOS argument
+  // order differs (`script -q /dev/null <shell> -c <cmd>`), and its -e is
+  // implicit, so only take this path on Linux.
+  if (script && process.platform === "linux") {
+    return { argv: [script, "-q", "-e", "-c", `${shellQuote(shell)} -c ${shellQuote(command)}`, "/dev/null"], pty: true };
+  }
+  if (script && process.platform === "darwin") {
+    return { argv: [script, "-q", "/dev/null", shell, "-c", command], pty: true };
+  }
+  const stdbuf = onPath("stdbuf");
+  if (stdbuf) return { argv: [stdbuf, "-oL", "-eL", shell, "-c", command], pty: false };
+  return { argv: [shell, "-c", command], pty: false };
+}
+
+/** A PTY reports every newline as CRLF; restore normal line endings. */
+export const ptyNewlines = (text: string) => text.includes("\r") ? text.replaceAll("\r\n", "\n") : text;
 /** executor.go detectShell (unix). */
 const detectShell = () => process.env.SHELL || (existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");
 
@@ -217,8 +254,8 @@ export class SwarmBackgroundProcessManager {
     const id = this.newID();
     const startedMs = Date.now();
     const shell = detectShell();
-    const stdbuf = detectStdbuf();
-    const argv = stdbuf ? [stdbuf, "-oL", "-eL", shell, "-c", command] : [shell, "-c", command];
+    const buffering = detectBufferingMethod(shell, command);
+    const argv = buffering.argv;
     const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     let finish!: () => void;
     const completion = new Promise<void>(r => { finish = r; });
@@ -230,8 +267,14 @@ export class SwarmBackgroundProcessManager {
     };
     this.processes.set(id, rec);
     setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command });
-    child.stdout?.on("data", (d: Buffer) => rec.pendingStdout.push(d));
-    child.stderr?.on("data", (d: Buffer) => rec.pendingStderr.push(d));
+    // Under a PTY the child sees one terminal, so stderr is interleaved into
+    // stdout and every newline arrives as CRLF. Strip the CR so stored lines,
+    // regex filters and byte counts match the non-PTY tiers.
+    const normalize = buffering.pty
+      ? (d: Buffer) => Buffer.from(ptyNewlines(d.toString("utf8")), "utf8")
+      : (d: Buffer) => d;
+    child.stdout?.on("data", (d: Buffer) => rec.pendingStdout.push(normalize(d)));
+    child.stderr?.on("data", (d: Buffer) => rec.pendingStderr.push(normalize(d)));
     const poller = setInterval(() => this.poll(rec), 50);
     poller.unref?.();
     child.once("spawn", () => settleSpawn(undefined));
@@ -247,16 +290,32 @@ export class SwarmBackgroundProcessManager {
       settleSpawn(rec.spawnError);
       finish();
     });
-    child.on("close", (code, signal) => {
+    // "close" waits for every pipe holder, which a background child that
+    // inherited stdout defers indefinitely (Go issue #21922; bash.go caps this
+    // with cmd.WaitDelay). Settle on whichever of close/exit comes first, after
+    // a short grace period for output still in flight.
+    let settled = false;
+    let waitDelay: ReturnType<typeof setTimeout> | undefined;
+    const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
       clearInterval(poller);
+      if (waitDelay) clearTimeout(waitDelay);
       this.poll(rec);
       rec.endedMs = Date.now();
-      rec.signal = signal;
-      rec.exitCode = code ?? (signal ? -1 : 0);
+      // Under the PTY tier `script` reports a signalled shell as 128+signal.
+      const outcome = buffering.pty ? decodeSignalExit(code, signal) : { exitCode: code ?? (signal ? -1 : 0), signal };
+      rec.signal = outcome.signal;
+      rec.exitCode = outcome.exitCode;
       if (rec.state !== "cancelled") rec.state = rec.exitCode === 0 ? "completed" : "failed";
       setRunningWork({ id: rec.id, kind: "bash", label: rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
       finish();
       this.notifyTerminal(rec);
+    };
+    child.on("close", (code, signal) => settle(code, signal));
+    child.on("exit", (code, signal) => {
+      waitDelay = setTimeout(() => settle(code, signal), WAIT_DELAY_MS);
+      waitDelay.unref?.();
     });
     return rec;
   }
@@ -335,7 +394,7 @@ export class SwarmBackgroundProcessManager {
     }
     // bash_tool.go completedProcessResult: plain text, IsError on non-zero.
     const exitCode = rec.exitCode ?? -1;
-    const output = completedOutput(this.outputBytes(rec).toString("utf8"), exitCode);
+    const output = completedOutput(this.outputBytes(rec).toString("utf8"), exitCode, rec.signal);
     if (exitCode !== 0) throw new Error(output);
     return { text: output, details: { exit_code: exitCode, duration_ms: (rec.endedMs ?? Date.now()) - rec.startedMs, command: params.command, ...(params.description ? { description: params.description } : {}) } };
   }
@@ -442,8 +501,10 @@ export class SwarmBackgroundProcessManager {
 }
 
 /** bash_tool.go completedProcessResult over ProcessResult.Output. */
-export const completedOutput = (rawOutput: string, exitCode: number) => {
+export const completedOutput = (rawOutput: string, exitCode: number, signal?: NodeJS.Signals | null) => {
   let output = stripANSI(rawOutput);
   if (!output) output = exitCode === 0 ? "Command completed successfully (no output)" : "Command failed with no output";
-  return exitCode === 0 ? output : `Exit code: ${exitCode}\n${output}`;
+  if (exitCode === 0) return output;
+  const note = signalNote(exitCode, signal);
+  return `Exit code: ${exitCode}\n${note ? `${note}\n` : ""}${output}`;
 };

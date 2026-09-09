@@ -14,8 +14,8 @@ const CATEGORIES = new Set(["researching", "planning", "acting", "verifying", "d
 const PRIORITIES = new Set(["low", "medium", "high"]);
 const NOTE_TYPES = new Set(["decision", "blocker", "learning", "milestone", "question", "observation", "other"]);
 const ALLOWED: Record<string, string[]> = {
-  create: ["subject", "description", "activeForm", "category", "priority", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy"],
-  update: ["taskId", "status", "category", "priority", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
+  create: ["subject", "description", "activeForm", "category", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "addNote", "noteType"],
+  update: ["taskId", "status", "category", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
   get: ["taskId", "include_audit"],
   list: ["category", "status", "active", "limit", "offset", "subject"],
 };
@@ -128,7 +128,10 @@ export function swarmValidateTaskManageParams(params: unknown): string | undefin
       const op = parseOperation(item as Record<string, unknown>, index);
       const seen = first.get(op.key);
       if (seen !== undefined) {
-        if (seen !== "create" || op.kind === "create") fail(`duplicate operation key ${q(op.key)}: keys must be unique per operation, except that an update/get MAY reuse the exact key an earlier create in this batch used, to target the task that create just made (e.g. [{"key":${q(op.key)},"op":"create",...},{"key":${q(op.key)},"op":"update",...}]). Give this operation a distinct key instead, and if it needs to target another operation's task, use taskId:{"ref":"<that operation's key>"}.`);
+        const rawOp = (ops as unknown[])[index] as Record<string, unknown>;
+        const sameCreateFollowup = seen === "create" && op.kind !== "create";
+        const explicitTargetFollowup = op.kind === "update" && ("taskId" in rawOp);
+        if (!sameCreateFollowup && !explicitTargetFollowup) fail(`duplicate operation key ${q(op.key)}: keys must be unique per operation`);
       } else first.set(op.key, op.kind);
     });
     return undefined;
