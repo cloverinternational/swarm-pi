@@ -16,3 +16,6 @@
 [submodule "vendor/oh-my-pi"]
 	path = vendor/oh-my-pi
 	url = https://github.com/can1357/oh-my-pi.git
+[submodule "vendor/paseo"]
+	path = vendor/paseo
+	url = https://github.com/getpaseo/paseo.git

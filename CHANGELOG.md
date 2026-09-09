@@ -11,6 +11,7 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 - Refine bootstrap selector evidence, shared-memory namespaces, and renderer output.
 - Register the agent-mcp and oh-my-pi vendor submodules in `.gitmodules` so CI checkout succeeds.
 - Sync `package-lock.json` with the `@pi-swarm/bootstrap` workspace so `npm ci` succeeds.
+- Make tests CI-safe: honor explicit `headless: false` in InteractionBroker and derive the project name from the checkout path.
 
 To publish a release, update the root package version, this changelog, and
 `update-manifest.json` in one commit, then tag the commit. The checker only

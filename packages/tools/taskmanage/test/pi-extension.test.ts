@@ -73,7 +73,7 @@ describe("root Pi TaskManage extension", () => {
   });
 
   it("supports structured option values and batched questionnaires", async () => {
-    const broker = new InteractionBroker({ ui: { select: async () => "PostgreSQL — relational", input: async (title) => title === "First" ? "answer-1" : "answer-2" } });
+    const broker = new InteractionBroker({ ui: { select: async () => "PostgreSQL — relational", input: async (title) => title === "First" ? "answer-1" : "answer-2" } }, { headless: false });
     await expect(broker.ask({ id: "db", header: "Database", question: "Which DB?", options: [{ value: "pg", label: "PostgreSQL", description: "relational" }, { value: "sqlite", label: "SQLite" }] })).resolves.toMatchObject({ status: "answered", question: "Which DB?" });
     const result = await broker.askQuestionnaire({ questions: [{ id: "one", question: "First" }, { id: "two", question: "Second" }] });
     expect(result.status).toBe("answered");
@@ -86,7 +86,7 @@ describe("root Pi TaskManage extension", () => {
   });
 
   it("times out unanswered questions and approvals", async () => {
-    const broker = new InteractionBroker({ ui: { input: async () => new Promise<string>(() => {}) , confirm: async () => new Promise<boolean>(() => {}) } }, { timeoutMs: 10 });
+    const broker = new InteractionBroker({ ui: { input: async () => new Promise<string>(() => {}) , confirm: async () => new Promise<boolean>(() => {}) } }, { timeoutMs: 10, headless: false });
     expect(await broker.ask({ question: "Wait" })).toMatchObject({ status: "timed_out" });
     expect(await broker.approve({ title: "Wait" })).toMatchObject({ approved: false, status: "timed_out" });
   });
