@@ -10,3 +10,12 @@
 [submodule "vendor/pi-extensions-bacnh85"]
 	path = vendor/pi-extensions-bacnh85
 	url = https://github.com/bacnh85/pi-extensions.git
+[submodule "vendor/agent-mcp"]
+	path = vendor/agent-mcp
+	url = https://github.com/rinadelph/Agent-MCP.git
+[submodule "vendor/oh-my-pi"]
+	path = vendor/oh-my-pi
+	url = https://github.com/can1357/oh-my-pi.git
+[submodule "vendor/paseo"]
+	path = vendor/paseo
+	url = https://github.com/getpaseo/paseo.git
