@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
-import { historyGet, historySearch } from "../../lib/tools/swarm-history-tools.ts";
+import { historyGet, historySearch, normalizeHistoryGetParams } from "../../lib/tools/swarm-history-tools.ts";
 import { parseVaultDuration, vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];

@@ -14,7 +14,7 @@ const CATEGORIES = new Set(["researching", "planning", "acting", "verifying", "d
 const PRIORITIES = new Set(["low", "medium", "high"]);
 const NOTE_TYPES = new Set(["decision", "blocker", "learning", "milestone", "question", "observation", "other"]);
 const ALLOWED: Record<string, string[]> = {
-  create: ["subject", "description", "activeForm", "category", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "addNote", "noteType"],
+  create: ["subject", "description", "activeForm", "category", "metadata", "parentTaskId", "owner_id", "status", "active", "addBlocks", "addBlockedBy"],
   update: ["taskId", "status", "category", "subject", "description", "activeForm", "active", "parentTaskId", "metadata", "addBlocks", "addBlockedBy", "addNote", "noteType"],
   get: ["taskId", "include_audit"],
   list: ["category", "status", "active", "limit", "offset", "subject"],
