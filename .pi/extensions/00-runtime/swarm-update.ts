@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
-export const UPDATE_URL = "https://raw.githubusercontent.com/cloverinternational/swarm-pi/main/update-manifest.json";
+export const DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/cloverinternational/swarm-pi/main/update-manifest.json";
+export const updateUrl = () => process.env.PI_SWARM_UPDATE_URL || DEFAULT_UPDATE_URL;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const CURRENT_VERSION = "0.1.0";
@@ -59,7 +60,7 @@ export default function swarmUpdateExtension(pi: any) {
     lastCheck = Date.now();
     if (process.env.PI_OFFLINE === "1" || process.env.PI_SWARM_SKIP_UPDATE_CHECK === "1") return false;
     try {
-      const manifest = await fetchManifest(UPDATE_URL);
+      const manifest = await fetchManifest(updateUrl());
       if (compareVersions(manifest.version, CURRENT_VERSION) > 0) { notify(ctx, `Pi-Swarm ${manifest.version} is available (installed ${CURRENT_VERSION}). Changelog: ${manifest.changelog}\nRun /swarm-update install to update.`, "warning"); return true; }
       if (force) notify(ctx, `Pi-Swarm is up to date (${CURRENT_VERSION}).`);
     } catch (error) { if (force) notify(ctx, `Could not check for Pi-Swarm updates: ${error instanceof Error ? error.message : String(error)}`, "error"); }
