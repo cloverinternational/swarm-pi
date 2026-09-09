@@ -58,6 +58,9 @@ export function swarmSurfaceFor(environment: GatingEnvironment): Set<string> {
   // the model surface even though it is a Pi-specific composition tool; its
   // nested calls are dispatched through the normal hook/policy bridge.
   names.add("codemode");
+  // Durable memory is a Pi-Swarm state extension, not part of the upstream
+  // Swarm wire fixture, but it is an intentional model-facing capability.
+  names.add("memory_history");
   for (const name of ["CronCreate", "CronList", "CronDelete", "ScheduleWakeup"]) names.delete(name);
   names.add("scheduler");
   if (environment.interactive) {
