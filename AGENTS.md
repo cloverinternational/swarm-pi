@@ -59,7 +59,7 @@ address in each tree.
 | 20 | `policy` | disk hooks, sleep blocker, nudges |
 | 30 | `tools` | every `registerTool` surface: bash, fs, search, agents, tasks, schedule, history, vault, research, MCP, ask-user, annoyed, codemode |
 | 40 | `state` | durable session entries: memory history, conversation metadata |
-| 50 | `ui` | control panel, metrics widgets, themes, tools-status command |
+| 50 | `ui` | control panel, metrics widgets, themes, tools-status command, Pi-Swarm-owned `/btw` side-question overlay |
 
 | Path | Purpose |
 | --- | --- |
@@ -181,7 +181,7 @@ When changing discovery, preserve these invariants:
 | `20-policy` | `swarm-disk-hooks` |
 | `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
-| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status` |
+| `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw` |
 
 The list in each layer's `package.json` is authoritative; this table mirrors
 it. Adding an extension means adding the file *and* its manifest entry.
