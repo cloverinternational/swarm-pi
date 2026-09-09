@@ -4,6 +4,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Add optional `/mem on|off|status` bootstrap memory enforcement with prompt and tool-call safeguards.
+
 - Align HistorySearch field normalization and segment filtering with case, runtime, sorting, and ordering options.
 
 - Add the paseo tool extension and register it in the 30-tools layer.

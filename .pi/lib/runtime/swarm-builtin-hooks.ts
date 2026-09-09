@@ -350,6 +350,7 @@ export class AutogenBudgetEnforcementHook {
   constructor(private readonly trigger: AutogenTriggerConfig = SWARM_TUI_AUTOGEN_TRIGGER) {}
   private exempt(event: ToolCallEvent): boolean {
     const n = event.toolName;
+    if (n === "bootstrap") return true; // Recovery must work even at an exhausted skill budget.
     if (isSkillTool(n) || isTaskManagementTool(n) || isPlanModeTool(n) || isUserInteractionTool(n) || isCodeModeTool(n) || isReadOnlyExplorationTool(n)) return true;
     if (isBashTool(n)) { const cmd = event.params?.command; if (typeof cmd === "string" && isBashReadOnly(cmd)) return true; }
     return false;
