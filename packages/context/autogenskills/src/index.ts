@@ -1088,6 +1088,7 @@ export class AutoSkillManager {
   }
   private isExempt(toolName: string | undefined, input: any) {
     const n = String(toolName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (n === "bootstrap") return true;
     if (/^(skill|skillmanage|swarmskill|taskmanage|taskcreate|taskupdate|tasklist|taskget|todowrite|todoread|todo|enterplanmode|exitplanmode|plan|planmode|askuserquestion|requestapproval|pushagentupdate|submitfeedback|read|grep|find|glob|ls|listdir|lsp|websearch|webfetch|browser|xsearch|xaiwebsearch|fetch)$/.test(n)) return true;
     // Bash has no command-level exemption. Every Bash invocation counts.
   }
