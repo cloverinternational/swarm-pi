@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Mandatory changelog
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a CHANGELOG.md entry in every PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md updated."
+          else
+            echo '::error file=CHANGELOG.md::Every pull request must update CHANGELOG.md (add your change under [Unreleased]).'
+            exit 1
+          fi
+
+  release-metadata:
+    name: Release metadata consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: package.json, update-manifest.json, and CHANGELOG.md agree
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const manifest = JSON.parse(readFileSync("update-manifest.json", "utf8"));
+          const changelog = readFileSync("CHANGELOG.md", "utf8");
+          const fail = (message) => { console.error(`::error::${message}`); process.exit(1); };
+          if (manifest.schemaVersion !== 1) fail("update-manifest.json schemaVersion must be 1");
+          if (manifest.package !== pkg.name) fail(`update-manifest.json package ${manifest.package} != package.json name ${pkg.name}`);
+          if (manifest.version !== pkg.version) fail(`update-manifest.json version ${manifest.version} != package.json version ${pkg.version}`);
+          if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(manifest.version)) fail("version must be strict semver");
+          if (!changelog.includes(`## [${manifest.version}]`)) fail(`CHANGELOG.md is missing a "## [${manifest.version}]" release section`);
+          for (const key of ["releasedAt", "changelog", "source", "updateCommand"]) if (!manifest[key]) fail(`update-manifest.json is missing ${key}`);
+          console.log(`Release metadata consistent at ${manifest.version}.`);
+          NODE
+
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node tools/repo/rewrite-imports.mjs --check
+      - run: npm test
