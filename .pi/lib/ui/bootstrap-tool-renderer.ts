@@ -91,7 +91,7 @@ export function formatBootstrapTool(details: BootstrapToolDetails | undefined, o
     bits.push(`tasks drafted ${details.tasksDrafted ?? 0}, committed ${details.tasksCommitted ?? 0}`);
   }
   if (details.elapsedMs !== undefined) bits.push(`${Math.max(0, details.elapsedMs)}ms`);
-  const lines = [bits.join(" · ")];
+  const lines = [bits.slice(0, details.mode ? 3 : 1).join(" · "), ...bits.slice(details.mode ? 3 : 1).map(bit => `  ${bit}`)];
   if (details.failures?.length) {
     for (const failure of details.failures.slice(0, 3)) lines.push(`  ${failure.stage ? `${failure.stage}: ` : ""}${failure.summary}`);
     if (details.failures.length > 3) lines.push(`  … ${details.failures.length - 3} more failures`);
@@ -122,7 +122,7 @@ export interface BootstrapToolRenderer {
 export function createBootstrapToolRenderer(): BootstrapToolRenderer {
   return {
     renderCall(args) {
-      return new BootstrapComponent(`⋯ bootstrap · scope resolution${args?.scope ? ` · scope=${args.scope}` : ""}`);
+      return new BootstrapComponent(`Bootstrap${args?.scope ? ` · scope=${args.scope}` : ""}`);
     },
     renderResult(result, options = {}) {
       // Each result belongs to one execution. Never reuse another call's

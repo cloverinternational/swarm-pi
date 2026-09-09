@@ -19,6 +19,7 @@ function directory(cwd: string, scope: SharedScope) {
 }
 /** One immutable file per entry avoids lost updates between concurrent writers. */
 export function rememberShared(cwd: string, scope: SharedScope, text: string, tags: string[] = [], namespace = "default"): SharedMemory {
+  namespace = namespace.trim() || "default";
   if (!text.trim() || text.length > 20_000) throw new Error("Memory must contain 1–20000 characters");
   const record: SharedMemory = { id: randomUUID(), text: text.trim(), tags, namespace, scope, createdAt: new Date().toISOString(), source: scope === "global" ? "explicit-global" : memoryIdentity(cwd)[scope] };
   const dir = directory(cwd, scope); mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -27,6 +28,7 @@ export function rememberShared(cwd: string, scope: SharedScope, text: string, ta
   return record;
 }
 export function searchShared(cwd: string, query = "", scopes: SharedScope[] = ["repository", "worktree", "global"], limit = 20, namespace = "default"): SharedMemory[] {
+  namespace = namespace.trim() || "default";
   const records: SharedMemory[] = [];
   for (const scope of scopes) {
     const dir = directory(cwd, scope); let files: string[];
@@ -35,7 +37,7 @@ export function searchShared(cwd: string, query = "", scopes: SharedScope[] = ["
       try {
         const path = join(dir, file); if (statSync(path).size > 40_000) continue;
         const value = JSON.parse(readFileSync(path, "utf8"));
-        if (value.scope === scope && value.namespace === namespace && typeof value.text === "string" && value.text.toLowerCase().includes(query.toLowerCase())) records.push(value);
+        if (value.scope === scope && (value.namespace || "default") === namespace && typeof value.text === "string" && value.text.toLowerCase().includes(query.toLowerCase())) records.push(value);
       } catch { /* A corrupt entry cannot make all recall unavailable. */ }
     }
   }
