@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "package": "@pi-swarm/integration",
+  "version": "0.1.0",
+  "releasedAt": "2026-01-01T00:00:00Z",
+  "changelog": "https://github.com/cloverinternational/swarm-pi/blob/main/CHANGELOG.md",
+  "source": "git:github.com/cloverinternational/swarm-pi@main",
+  "updateCommand": "pi update --extensions"
+}
