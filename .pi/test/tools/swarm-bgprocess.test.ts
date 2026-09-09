@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { registerSwarmBackgroundBash } from "../../extensions/30-tools/swarm-background-bash.ts";
 import { PERMISSIVE_PARAMETERS, overlaySwarmToolSchemas } from "../../lib/runtime/swarm-tool-surface.ts";
 import { bgOutputPreview, formatBackgroundDone, SwarmBackgroundProcessManager } from "../../lib/tools/swarm-bgprocess.ts";
@@ -73,6 +74,41 @@ describe("Swarm interactive background bash", () => {
     expect((await invoke(bash, { command: "echo hi" })).content[0].text).toBe("hi\n");
   });
 
+  // Issues #342/#340/#324/#322: a self-matching `pkill -f` kills the tool's own
+  // shell. The output produced before the kill must survive and the -1 must be
+  // explained by naming the signal.
+  it("explains a signalled shell and keeps the output produced before the kill", async () => {
+    const { bash } = harness();
+    // `kill -TERM $$` is the deterministic form of the reported shape: the
+    // shell is terminated by its own command line, exactly as a self-matching
+    // `pkill -f <pattern>` does, without depending on what else is running.
+    await expect(invoke(bash, { command: "echo before; kill -TERM $$; echo after", timeout_seconds: 5 }))
+      .rejects.toThrow(/Exit code: -1\nCommand terminated by SIGTERM\..*statements after the kill did not run\./s);
+    // Near-miss: a bracket-escaped pattern cannot match this shell's own argv,
+    // so the no-match case still completes normally (pkill's exit 1 is fine),
+    // and a genuine non-zero exit keeps its real code.
+    expect((await invoke(bash, { command: `pkill -f "[n]o-such-process-zzz"; echo done`, timeout_seconds: 5 })).content[0].text).toBe("done\n");
+    await expect(invoke(bash, { command: "echo out; exit 4", timeout_seconds: 5 })).rejects.toThrow("Exit code: 4\nout\n");
+  }, 20000);
+
+  // Issues #526/#546/#551: a background child that inherits the shell's stdout
+  // holds the pipe open after the shell exits, so waiting for stream EOF hung
+  // until the outer timeout. bash.go caps this with cmd.WaitDelay = 2s.
+  it("does not wait on a background child that inherited the shell's pipes", async () => {
+    const { bash } = harness();
+    const started = Date.now();
+    const result = await invoke(bash, { command: "sleep 30 & echo started; exit 0", timeout_seconds: 60 });
+    const elapsed = Date.now() - started;
+    expect(result.content[0].text).toBe("started\n");
+    // Settles via the WaitDelay grace period, nowhere near the 60s timeout.
+    expect(elapsed).toBeLessThan(15000);
+    // Near-miss: a command whose output is fully flushed and whose children are
+    // redirected must still settle immediately, not linger for the grace period.
+    const quick = Date.now();
+    expect((await invoke(bash, { command: "echo fast", timeout_seconds: 60 })).content[0].text).toBe("fast\n");
+    expect(Date.now() - quick).toBeLessThan(1500);
+  }, 40000);
+
   it("reports spawn failures like manager.Spawn and queues the failed-status notification", async () => {
     const { bash, sent, emit } = harness();
     emit("agent_start");
@@ -98,6 +134,41 @@ describe("Swarm interactive background bash", () => {
       else process.env.PATH = previousPath;
     }
   });
+
+  // bash_cmd_builder.go detectBufferingMethod. Measured with stdout on a pipe:
+  // python/node buffer above libc, so `stdbuf -oL` changes nothing for them and
+  // only a PTY streams. Without this, a chatty python job looks idle and gets
+  // auto-backgrounded while it is in fact healthy.
+  it("streams output from a runtime that buffers above libc", async () => {
+    const { bash } = harness();
+    const script = join(tmpdir(), `swarm-buffered-${Date.now()}.py`);
+    // Prints every 300ms for ~4.5s: comfortably longer than the idle window, so
+    // a full-buffered pipe (which emits nothing until exit) is reported idle.
+    writeFileSync(script, 'import time\nfor i in range(15):\n    print("tick%d" % i)\n    time.sleep(0.3)\n');
+    try {
+      const result = await invoke(bash, { command: `python3 ${script}`, timeout_seconds: 2 });
+      const text = result.content[0].text;
+      expect(text).not.toMatch(/idle/);
+      expect(text).toContain("tick14");
+      // A PTY reports newlines as CRLF; stored output must not leak the CR.
+      expect(text).not.toContain("\r");
+    } finally { rmSync(script, { force: true }); }
+  }, 30000);
+
+  // `script` without -e exits 0 even when the command failed, and it reaps the
+  // signalled shell itself so Node sees 128+signal rather than a signal.
+  it("preserves exit status and signal naming through the buffering wrapper", async () => {
+    const { bash } = harness();
+    const failure = await invoke(bash, { command: "echo before-failure; exit 7", timeout_seconds: 5 })
+      .then(() => "resolved", (error: Error) => error.message);
+    // Without `script -e` the wrapper swallows the status and this reports exit 0.
+    expect(failure).toBe("Exit code: 7\nbefore-failure\n");
+    // Near-miss: an ordinary non-zero exit must not be dressed up as a signal.
+    expect(failure).not.toMatch(/SIGTERM|terminated by/);
+    const signalled = await invoke(bash, { command: "kill -TERM $$", timeout_seconds: 5 })
+      .then(() => "resolved", (error: Error) => error.message);
+    expect(signalled).toMatch(/SIGTERM/);
+  }, 20000);
 
   it("wakes an idle agent with the joined completion notifications", async () => {
     const { bash, sent } = harness();
