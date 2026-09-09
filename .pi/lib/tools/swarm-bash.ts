@@ -14,9 +14,9 @@
  */
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, closeSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join, relative, resolve, isAbsolute } from "node:path";
+import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
 
 export const SWARM_BASH_DESCRIPTION =
   "Execute a shell command and capture stdout, stderr, exit code, duration, and timeout status. Pipes and redirections are supported.\n\nSet timeout_seconds for every command; values below the enforced 60-second minimum are raised automatically. Use cwd instead of cd.";
@@ -86,6 +86,36 @@ export function goQuote(value: string): string {
 
 export const mergeOutput = (stdout: string, stderr: string) => (stderr.length === 0 ? stdout : stdout.length === 0 ? stderr : stdout + "\n" + stderr);
 
+/**
+ * Go ProcessState.ExitCode() is -1 for a signalled process, which on its own
+ * tells the model nothing. A `pkill -f <pattern>` whose pattern also matches
+ * this tool's own `bash -c <command>` argv kills the shell running it, so the
+ * bare -1 reads like a harness crash. Name the signal instead.
+ */
+export function signalNote(exitCode: number, signal: NodeJS.Signals | null | undefined): string {
+  if (exitCode !== -1 || !signal) return "";
+  return `Command terminated by ${signal}. A shell killed by its own command (for example \`pkill -f <pattern>\` whose pattern also matches this command line) reports no exit status; statements after the kill did not run.`;
+}
+
+/**
+ * A wrapper that owns the PTY (`script`) reaps the signalled shell itself and
+ * reports the shell's death as a normal exit status of 128+signal, so Node sees
+ * no signal at all. codex encodes the same convention as
+ * `EXIT_CODE_SIGNAL_BASE + <signal>`. Recover the signal so a self-`pkill`
+ * still gets explained instead of surfacing as a bare "exit status 143".
+ */
+const SIGNAL_EXIT_BASE = 128;
+const SIGNALLED_EXITS = new Map<number, NodeJS.Signals>(
+  (["SIGINT", "SIGQUIT", "SIGABRT", "SIGKILL", "SIGSEGV", "SIGPIPE", "SIGTERM"] as const)
+    .map((name) => [SIGNAL_EXIT_BASE + osConstants.signals[name], name]),
+);
+export function decodeSignalExit(code: number | null, signal: NodeJS.Signals | null): { exitCode: number; signal: NodeJS.Signals | null } {
+  if (signal) return { exitCode: code ?? -1, signal };
+  const decoded = code === null ? undefined : SIGNALLED_EXITS.get(code);
+  if (decoded) return { exitCode: -1, signal: decoded };
+  return { exitCode: code ?? 0, signal: null };
+}
+
 export interface Truncation { output: string; outputPath: string; truncated: boolean }
 /** os.CreateTemp(dir, "bash-full-*.txt"): the "*" becomes a random uint32 in decimal. */
 function createTempLikeGo(dir: string, prefix: string, suffix: string): string {
@@ -115,7 +145,7 @@ export function bashTruncateOutput(output: string, tempRoot = tmpdir()): Truncat
   return { output, outputPath, truncated: true };
 }
 
-export interface BashOutcome { exitCode: number; durationMs: number; stdout: string; stderr: string; timedOut: boolean; requestedSecs: number; effectiveSecs: number; description?: string }
+export interface BashOutcome { exitCode: number; durationMs: number; stdout: string; stderr: string; timedOut: boolean; requestedSecs: number; effectiveSecs: number; description?: string; signal?: NodeJS.Signals | null }
 
 /** bash.go buildResult → tools.NewXML("result")…Build(). */
 export function buildResultXML(o: BashOutcome): string {
@@ -140,10 +170,12 @@ export function buildResultXML(o: BashOutcome): string {
 export const newErrorID = () => "err_" + randomBytes(10).toString("hex");
 
 /** bash.go bashCommandFailedError as surfaced by agent_tools.go + sdkerr.Error(). */
-export function commandFailedMessage(exitCode: number, stdout: string, stderr: string, errorId = newErrorID()): string {
+export function commandFailedMessage(exitCode: number, stdout: string, stderr: string, errorId = newErrorID(), signal?: NodeJS.Signals | null): string {
   const so = bashTruncateOutput(stripANSI(stdout)).output || "(no output)";
   const se = bashTruncateOutput(stripANSI(stderr)).output || "(no output)";
-  return `Error executing bash: Command exited with code ${exitCode}: exit status ${exitCode}\n\nstderr:\n${se}\n\nstdout:\n${so} (error_id=${errorId})`;
+  const note = signalNote(exitCode, signal);
+  const status = note ? `signal: ${signal!.toLowerCase().replace(/^sig/, "")}` : `exit status ${exitCode}`;
+  return `Error executing bash: Command exited with code ${exitCode}: ${status}\n\n${note ? `${note}\n\n` : ""}stderr:\n${se}\n\nstdout:\n${so} (error_id=${errorId})`;
 }
 export function timedOutMessage(effectiveSecs: number, exitCode: number, errorId = newErrorID()): string {
   return `Error executing bash: command timed out after ${effectiveSecs}s (exit_code=${exitCode}): context deadline exceeded (error_id=${errorId})`;
@@ -202,10 +234,53 @@ export function checkAllowedPath(absPath: string, allowedPaths: readonly string[
   return `Path not allowed (not_allowed): ${absPath}`;
 }
 
+/**
+ * `git rev-parse --git-common-dir` without spawning git: the shared directory
+ * that every linked worktree of one repository points at. Empty when `dir` is
+ * not inside a repository.
+ */
+export function gitCommonDir(dir: string): string {
+  let current = resolve(dir);
+  for (;;) {
+    const dot = join(current, ".git");
+    if (existsSync(dot)) {
+      if (lstatSync(dot).isDirectory()) return realpathSync(dot);
+      const line = readFileSync(dot, "utf8").trim();
+      if (line.startsWith("gitdir:")) {
+        let git = line.slice(7).trim();
+        if (!isAbsolute(git)) git = resolve(current, git);
+        // <common>/worktrees/<name> for a linked worktree; <common> otherwise.
+        const parent = dirname(git);
+        const target = basename(parent) === "worktrees" ? dirname(parent) : git;
+        try { return realpathSync(target); } catch { return ""; }
+      }
+    }
+    const parent = dirname(current);
+    if (parent === current) return "";
+    current = parent;
+  }
+}
+
+/** True when both paths are checkouts of the same repository. */
+export function sharesGitCommonDir(workspace: string, target: string): boolean {
+  let common: string;
+  try { common = gitCommonDir(workspace); } catch { return false; }
+  if (!common) return false;
+  let resolved: string;
+  try { resolved = resolvePathForCheck(resolve(target)); } catch { return false; }
+  if (!existsSync(resolved)) return false;
+  try { return gitCommonDir(resolved) === common; } catch { return false; }
+}
+
 export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allowedPaths: readonly string[] = defaultAllowedPaths(defaultCwd)): { dir: string } | { error: string } {
   if (!cwd) return { dir: defaultCwd };
   const abs = resolve(cwd);
-  const denied = checkAllowedPath(abs, allowedPaths);
+  let denied = checkAllowedPath(abs, allowedPaths);
+  // A linked git worktree of the workspace's own repository is the same
+  // authorized checkout reached by another path, so read-only inspection of it
+  // must not be refused just because it lives outside the workspace root.
+  // apply_patch already allows this via the shared git common directory.
+  if (denied && sharesGitCommonDir(defaultCwd, abs)) denied = undefined;
   if (denied) return { error: denied };
   if (!existsSync(abs)) return { error: `cwd does not exist: ${abs}` };
   try { if (!statSync(abs).isDirectory()) return { error: `cwd is not a directory: ${abs}` }; } catch (e) { return { error: `failed to access cwd ${abs}: ${String(e)}` }; }
@@ -213,6 +288,35 @@ export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allo
 }
 
 export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal }
+
+/**
+ * bash.go prepareCmd: `cmd.WaitDelay = 2 * time.Second`. Go issue #21922 — a
+ * background child that inherits the shell's stdout/stderr keeps those pipes
+ * open after the shell itself exits, so waiting for stream EOF hangs until the
+ * tool's own timeout. Go stops waiting 2s after process exit and closes the
+ * pipes itself; without this a bounded command such as `svc start & echo ok`
+ * burns the whole timeout and reports nothing.
+ */
+export const WAIT_DELAY_MS = 2000;
+
+/**
+ * Signal the whole process group, falling back to the direct child.
+ *
+ * A timeout or abort that kills only the direct shell leaves its children
+ * running: `svc & long-task` orphans `svc`, which keeps holding the output
+ * pipe and the port it bound. codex's exec.rs does the same thing via
+ * `kill_child_process_group` before `start_kill`, and opencode's `killTree`
+ * signals `-pid` before falling back to the child. Requires the child to have
+ * been spawned detached so it leads its own group; otherwise `-pid` would
+ * signal this agent's own group too.
+ */
+export function killProcessTree(child: { pid?: number; kill: (s: NodeJS.Signals) => boolean }, signal: NodeJS.Signals = "SIGKILL"): void {
+  const pid = child.pid;
+  if (pid && process.platform !== "win32") {
+    try { process.kill(-pid, signal); return; } catch { /* group already gone, or not a group leader */ }
+  }
+  try { child.kill(signal); } catch { /* already exited */ }
+}
 
 /** bash.go runBatch: temp-file capture, /dev/null stdin, non-interactive env, 60s-min timeout. */
 export function runSwarmBash(params: BashParams, options: RunOptions): Promise<BashOutcome | { error: string }> {
@@ -223,21 +327,37 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: "dumb", DEBIAN_FRONTEND: "noninteractive", CI: "true", PS1: "", PROMPT_COMMAND: "", ...(params.env ?? {}) };
   return new Promise((resolveP) => {
     const started = Date.now();
-    const child = spawn(options.shell ?? "/bin/bash", ["-c", params.command], { cwd: wd.dir || undefined, env, stdio: ["ignore", "pipe", "pipe"] });
+    // detached: the shell leads its own process group, so a timeout or abort can
+    // signal the whole tree instead of orphaning children that keep the output
+    // pipe (and any bound port) alive. bgprocess spawns the same way.
+    const child = spawn(options.shell ?? "/bin/bash", ["-c", params.command], { cwd: wd.dir || undefined, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const out: Buffer[] = [], err: Buffer[] = [];
     child.stdout.on("data", (d: Buffer) => out.push(d));
     child.stderr.on("data", (d: Buffer) => err.push(d));
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, effectiveSecs * 1000);
-    const onAbort = () => child.kill("SIGKILL");
+    const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, effectiveSecs * 1000);
+    const onAbort = () => killProcessTree(child);
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    child.on("close", (code, signal) => {
+    // "close" fires only once every pipe holder is gone, which an inherited
+    // background child defers indefinitely; "exit" fires on process exit. Wait
+    // for whichever comes first, then allow WAIT_DELAY_MS for in-flight output.
+    let settled = false;
+    const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      clearTimeout(waitDelay);
       options.signal?.removeEventListener("abort", onAbort);
       // Go ProcessState.ExitCode() is -1 when killed by a signal.
       const exitCode = code ?? (signal ? -1 : 0);
-      resolveP({ exitCode, durationMs: Date.now() - started, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), timedOut, requestedSecs, effectiveSecs, description: params.description });
+      resolveP({ exitCode, durationMs: Date.now() - started, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8"), timedOut, requestedSecs, effectiveSecs, description: params.description, signal });
+    };
+    let waitDelay: ReturnType<typeof setTimeout>;
+    child.on("close", (code, signal) => settle(code, signal));
+    child.on("exit", (code, signal) => {
+      waitDelay = setTimeout(() => settle(code, signal), WAIT_DELAY_MS);
+      waitDelay.unref?.();
     });
-    child.on("error", (e) => { clearTimeout(timer); resolveP({ error: invalidCwdMessage(String(e)) }); });
+    child.on("error", (e) => { clearTimeout(timer); settled = true; resolveP({ error: invalidCwdMessage(String(e)) }); });
   });
 }

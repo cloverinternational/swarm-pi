@@ -53,7 +53,7 @@ export function registerSwarmBash(pi: Pi): void {
       if ("error" in outcome) return fail(outcome.error);
       const details = { exit_code: outcome.exitCode, duration_ms: outcome.durationMs, timed_out: outcome.timedOut, command: params.command, ...(params.description ? { description: params.description } : {}) };
       if (outcome.timedOut) return fail(timedOutMessage(outcome.effectiveSecs, outcome.exitCode));
-      if (outcome.exitCode !== 0) return fail(commandFailedMessage(outcome.exitCode, outcome.stdout, outcome.stderr));
+      if (outcome.exitCode !== 0) return fail(commandFailedMessage(outcome.exitCode, outcome.stdout, outcome.stderr, undefined, outcome.signal));
       return text(buildResultXML(outcome), details);
     },
   }));
