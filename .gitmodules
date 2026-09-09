@@ -19,3 +19,4 @@
 [submodule "vendor/paseo"]
 	path = vendor/paseo
 	url = https://github.com/getpaseo/paseo.git
+	shallow = true

@@ -4,6 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Add the paseo tool extension and register it in the 30-tools layer.
+- Add a bootstrap-settings adapter that augments the native /settings panel.
+- Mark the paseo vendor submodule as shallow.
+
 - Add a repository-backed update checker with hourly checks and `/swarm-update`.
 - Allow overriding the update manifest URL with `PI_SWARM_UPDATE_URL` for testing.
 - Add CI: mandatory changelog gate, release-metadata consistency, build and test.

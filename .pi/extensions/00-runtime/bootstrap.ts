@@ -6,6 +6,8 @@ import { MemoryHistory, scopeOf } from "../40-state/memory-history.ts";
 import { searchShared } from "../../lib/state/shared-memory.ts";
 import { dispatchBootstrapHandoff } from "../../lib/runtime/bootstrap-dispatch.ts";
 import { createBootstrapToolRenderer, type BootstrapToolDetails } from "../../lib/ui/bootstrap-tool-renderer.ts";
+import { SettingsList } from "@earendil-works/pi-tui";
+import { installBootstrapSettings } from "../../lib/ui/bootstrap-settings.ts";
 
 export default function bootstrapExtension(pi: any) {
   let busy = false;
@@ -28,12 +30,21 @@ export default function bootstrapExtension(pi: any) {
     ctx.ui?.notify?.(`Bootstrap: ${current.mode}; model: ${current.model || "Use session model"}; ready: ${ready}`, "info");
   };
   pi.registerCommand("bootstrap", { description: "Bootstrap strategy, model and status", handler: command });
-  // Bare /settings is intercepted by Pi's TUI before extensions. The qualified
-  // command reaches this handler without replacing the built-in settings panel.
-  pi.registerCommand("settings", { description: "Bootstrap model settings: /settings bootstrap", handler: async (args: string, ctx: any) => {
-    if (args.trim() === "bootstrap") await command("model", ctx);
-    else ctx.ui?.notify?.("Use /settings bootstrap for the bootstrap model, or /settings for Pi settings.", "info");
-  } });
+  let removeSettings: (() => void) | undefined;
+  pi.on("session_start", (_event: any, ctx: any) => {
+    removeSettings?.();
+    if (ctx.mode !== "tui") return;
+    removeSettings = installBootstrapSettings(SettingsList, {
+      current: () => readBootstrapSettings(ctx.cwd).model || "Use session model",
+      models: () => ctx.modelRegistry.getAvailable().map((m: any) => `${m.provider}/${m.id}`),
+      save: value => {
+        if (busy) throw new Error("Cancel bootstrap or wait for it to finish before changing its model.");
+        writeBootstrapSettings(ctx.cwd, readBootstrapSettings(ctx.cwd).mode, value === "Use session model" ? "" : value);
+      },
+      error: message => ctx.ui.notify(message, "error"),
+    });
+  });
+  pi.on("session_shutdown", () => { removeSettings?.(); removeSettings = undefined; });
   pi.on("session_start", () => { ready = false; });
   pi.on("before_agent_start", (event: any, ctx: any) => {
     if (ready || readBootstrapSettings(ctx.cwd).mode === "off") return;

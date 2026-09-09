@@ -10,6 +10,7 @@
       "exa-search.ts",
       "history-search.ts",
       "ask-user/index.ts",
+      "paseo.ts",
       "research-tools.ts",
       "swarm-goal.ts",
       "swarm-agent-tools.ts",
