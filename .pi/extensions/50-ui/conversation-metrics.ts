@@ -162,8 +162,6 @@ class MetricsFooter {
 }
 
 function render(ctx?: any) {
-  const codeModeState = (globalThis as any)[CODEMODE_FOOTER_STATE];
-  if (codeModeState) codeModeState.requestRender = () => ctx?.ui?.requestRender?.();
   // Keep this a single native footer line; unlike a widget it cannot push or
   // scroll the user's input box and never becomes transcript content.
   if (!shared.footer) ctx?.ui?.setFooter?.((tui: any, theme: any) => (shared.footer = new MetricsFooter(theme, () => tui?.requestRender?.())));

@@ -47,6 +47,15 @@ export function formatBashCall(args: { command?: string; timeout_seconds?: numbe
 }
 
 /** Dependency-free equivalent of Pi's Text component for extension tests. */
+export function bashResultComponent(result: any, options: any = {}, theme: any = {}): { render: (width: number) => string[]; invalidate: () => void } {
+  const command = typeof result?.details?.command === "string" ? result.details.command : "";
+  const text = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
+  const prefix = command ? `${options?.isPartial ? "⋯" : result?.isError || options?.isError ? "✗" : "✓"} $ ${command}` : "";
+  const value = [prefix, text].filter(Boolean).join("\n");
+  const fit = (line: string, width: number) => width <= 0 ? "" : line.length <= width ? line : `${line.slice(0, Math.max(0, width - 1))}…`;
+  return { render: (width: number) => value.split("\n").flatMap((line: string) => line.length <= width ? [line] : Array.from({ length: Math.ceil(line.length / Math.max(1, width)) }, (_, i) => fit(line.slice(i * width, (i + 1) * width), width))), invalidate: () => {} };
+}
+
 export function bashCallComponent(value: string): { render: (width: number) => string[]; invalidate: () => void } {
   // Pi validates every rendered line against the terminal width. Commands can
   // be arbitrarily long (especially repository-discovery commands), so the
@@ -287,7 +296,7 @@ export function resolveWorkdir(cwd: string | undefined, defaultCwd: string, allo
   return { dir: abs };
 }
 
-export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal }
+export interface RunOptions { defaultCwd: string; shell?: string; signal?: AbortSignal; onData?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void }
 
 /**
  * bash.go prepareCmd: `cmd.WaitDelay = 2 * time.Second`. Go issue #21922 — a
@@ -332,8 +341,8 @@ export function runSwarmBash(params: BashParams, options: RunOptions): Promise<B
     // pipe (and any bound port) alive. bgprocess spawns the same way.
     const child = spawn(options.shell ?? "/bin/bash", ["-c", params.command], { cwd: wd.dir || undefined, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const out: Buffer[] = [], err: Buffer[] = [];
-    child.stdout.on("data", (d: Buffer) => out.push(d));
-    child.stderr.on("data", (d: Buffer) => err.push(d));
+    child.stdout.on("data", (d: Buffer) => { out.push(d); options.onData?.({ stream: "stdout", text: d.toString("utf8") }); });
+    child.stderr.on("data", (d: Buffer) => { err.push(d); options.onData?.({ stream: "stderr", text: d.toString("utf8") }); });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; killProcessTree(child); }, effectiveSecs * 1000);
     const onAbort = () => killProcessTree(child);
