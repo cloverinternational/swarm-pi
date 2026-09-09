@@ -21,17 +21,17 @@ export function readBootstrapSettings(cwd: string): BootstrapSettings {
   try {
     const value: unknown = JSON.parse(readFileSync(settingsPath(cwd), "utf8"));
     if (typeof value === "object" && value !== null && MODES.includes((value as { mode?: BootstrapMode }).mode as BootstrapMode)) {
-      const parsed = value as { mode: BootstrapMode; updatedAt?: unknown; model?: unknown };
-      return { mode: parsed.mode, version: 1, updatedAt: String(parsed.updatedAt ?? ""), ...(typeof parsed.model === "string" && parsed.model.trim() ? { model: parsed.model.trim() } : {}) };
+      const parsed = value as { mode: BootstrapMode; updatedAt?: unknown; model?: unknown; enforce?: boolean };
+      return { mode: parsed.mode, version: 1, enforce: parsed.enforce === true, updatedAt: String(parsed.updatedAt ?? ""), ...(typeof parsed.model === "string" && parsed.model.trim() ? { model: parsed.model.trim() } : {}) };
     }
   } catch { /* Missing or malformed settings use the safe default. */ }
   return { mode: "parallel", version: 1, updatedAt: new Date(0).toISOString() };
 }
 
-export function writeBootstrapSettings(cwd: string, mode: BootstrapMode, model: string | undefined = readBootstrapSettings(cwd).model): BootstrapSettings {
+export function writeBootstrapSettings(cwd: string, mode: BootstrapMode, model: string | undefined = readBootstrapSettings(cwd).model, enforce = readBootstrapSettings(cwd).enforce === true): BootstrapSettings {
   if (!MODES.includes(mode)) throw new Error(`invalid bootstrap mode: ${mode}`);
   const path = settingsPath(cwd);
-  const value: BootstrapSettings = { mode, version: 1, updatedAt: new Date().toISOString(), ...(model?.trim() ? { model: model.trim() } : {}) };
+  const value: BootstrapSettings = { mode, version: 1, enforce: mode !== "off" && enforce, updatedAt: new Date().toISOString(), ...(model?.trim() ? { model: model.trim() } : {}) };
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });

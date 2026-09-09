@@ -3,6 +3,7 @@ export type BootstrapMode = "parallel" | "combined" | "off";
 export interface BootstrapSettings {
   mode: BootstrapMode;
   model?: string;
+  enforce?: boolean;
   version: 1;
   updatedAt: string;
 }

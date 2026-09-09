@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { memoryGate, memorySystemPrompt } from "../../lib/context/memory-ceremony.ts";
 import { readBootstrapSettings, writeBootstrapSettings, runBootstrap, type BootstrapSelection } from "../../../packages/runtime/bootstrap/src/index.ts";
 import { consultModel } from "../../../packages/runtime/bootstrap/src/consult.ts";
 import { getSwarmSkillRegistry } from "../../lib/context/swarm-skill-registry.ts";
@@ -30,6 +31,18 @@ export default function bootstrapExtension(pi: any) {
     ctx.ui?.notify?.(`Bootstrap: ${current.mode}; model: ${current.model || "Use session model"}; ready: ${ready}`, "info");
   };
   pi.registerCommand("bootstrap", { description: "Bootstrap strategy, model and status", handler: command });
+  pi.registerCommand("mem", { description: "Enforce memory bootstrap: on, off, status", handler: async (args: string, ctx: any) => {
+    const value = args.trim() || "status";
+    if (!["on", "off", "status"].includes(value)) { ctx.ui.notify("Usage: /mem on|off|status", "warning"); return; }
+    if (busy && value !== "status") { ctx.ui.notify("Cancel bootstrap or wait before changing memory mode.", "warning"); return; }
+    const settings = readBootstrapSettings(ctx.cwd);
+    if (value !== "status") {
+      writeBootstrapSettings(ctx.cwd, value === "on" && settings.mode === "off" ? "parallel" : settings.mode, settings.model, value === "on");
+      ready = false;
+    }
+    ctx.ui.notify(`Memory enforcement: ${readBootstrapSettings(ctx.cwd).enforce ? "on" : "off"}; bootstrap: ${ready ? "ready" : "pending"}`, "info");
+  } });
+  pi.on("tool_call", (event: any, ctx: any) => memoryGate(readBootstrapSettings(ctx.cwd).enforce === true, ready, event.toolName));
   let removeSettings: (() => void) | undefined;
   pi.on("session_start", (_event: any, ctx: any) => {
     removeSettings?.();
@@ -47,6 +60,7 @@ export default function bootstrapExtension(pi: any) {
   pi.on("session_shutdown", () => { removeSettings?.(); removeSettings = undefined; });
   pi.on("session_start", () => { ready = false; });
   pi.on("before_agent_start", (event: any, ctx: any) => {
+    if (readBootstrapSettings(ctx.cwd).enforce) return { systemPrompt: memorySystemPrompt(event.systemPrompt, ctx.cwd) };
     if (ready || readBootstrapSettings(ctx.cwd).mode === "off") return;
     return { systemPrompt: event.systemPrompt + "\nBefore substantive work, call bootstrap with the user's task. Afterwards invoke recommended skills through Skill and create proposed tasks through TaskManage. Selection is not skill activation. If bootstrap fails, explain the failure and continue with direct inspection or ask the user." };
   });
