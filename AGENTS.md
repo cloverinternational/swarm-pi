@@ -228,6 +228,13 @@ Names may be filtered by active-tool policy. `swarm-tools-status` and
 `system-inspector` show the runtime's actual registered/active surface; use
 those instead of assuming every row above is enabled.
 
+`/mem on|off|status` persists bootstrap enforcement per repository. On adds a
+memory ceremony to the final assembled system prompt and blocks ordinary tool
+calls until bootstrap succeeds in the current session. Bootstrap and user/plan
+interaction remain available; `/mem off` is the recovery escape. Bootstrap is
+exempt from skill-budget gates, but selected skills still require real invocation
+to activate the working budget. Reload resets readiness, not the persisted mode.
+
 ### Skills and their locations
 
 | Skill source | Location | Owner / notes |

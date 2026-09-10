@@ -6,11 +6,12 @@ import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool
 type UI = { notify?: (message: string, type?: string) => void };
 type Pi = {
   getCwd?: () => string;
+  on?: (event: string, handler: (...args: any[]) => unknown) => void;
   registerTool?: (tool: unknown) => void;
   registerCommand?: (name: string, spec: { description: string; handler: (args: string, ctx: { ui?: UI }) => Promise<void> }) => void;
 };
 
-const DEFAULT_LISTEN = "127.0.0.1:6767";
+const DEFAULT_PORT = "6767";
 
 function repoRoot(pi: Pi): string { return resolve(pi.getCwd?.() ?? process.cwd()); }
 function paseoDir(pi: Pi): string { return join(repoRoot(pi), "vendor", "paseo"); }
@@ -18,6 +19,12 @@ function stateDir(pi: Pi): string { return join(repoRoot(pi), "artifacts", "pase
 function pidFile(pi: Pi): string { return join(stateDir(pi), "daemon.pid"); }
 function logFile(pi: Pi): string { return join(stateDir(pi), "daemon.log"); }
 function cliEntry(pi: Pi): string { return join(paseoDir(pi), "packages", "cli", "dist", "index.js"); }
+function defaultListen(): string {
+  if (process.env.PASEO_LISTEN) return process.env.PASEO_LISTEN;
+  const result = spawnSync("tailscale", ["ip", "-4"], { encoding: "utf8", timeout: 1500 });
+  const ip = result.status === 0 ? result.stdout.trim().split(/\s+/)[0] : "";
+  return /^100\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}$/.test(ip) ? `${ip}:${DEFAULT_PORT}` : `127.0.0.1:${DEFAULT_PORT}`;
+}
 
 function sh(cwd: string, cmd: string, args: string[], timeoutMs = 15 * 60 * 1000) {
   const result = spawnSync(cmd, args, { cwd, encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: "1" } });
@@ -45,7 +52,7 @@ export function paseoStatus(pi: Pi) {
   const cloned = existsSync(join(dir, "package.json"));
   const built = existsSync(cliEntry(pi));
   const rev = cloned ? sh(dir, "git", ["log", "-1", "--format=%h %s"]).output : "";
-  return { cloned, built, revision: rev, pid: daemonPid(pi), listen: process.env.PASEO_LISTEN || DEFAULT_LISTEN };
+  return { cloned, built, revision: rev, pid: daemonPid(pi), listen: defaultListen() };
 }
 
 export function paseoUpdate(pi: Pi) {
@@ -65,7 +72,7 @@ export function paseoBuild(pi: Pi) {
   return { success: build.ok, step: "build:server", output: build.output };
 }
 
-export function paseoStart(pi: Pi, listen = process.env.PASEO_LISTEN || DEFAULT_LISTEN) {
+export function paseoStart(pi: Pi, listen = defaultListen()) {
   const existing = daemonPid(pi);
   if (existing) return { success: true, alreadyRunning: true, pid: existing, listen };
   if (!existsSync(cliEntry(pi))) return { success: false, error: "paseo is not built; run the paseo tool with action=build first" };
@@ -90,6 +97,10 @@ export function paseoStop(pi: Pi) {
   return { success: true, wasRunning: true, pid };
 }
 
+export function paseoPair(pi: Pi) {
+  return sh(paseoDir(pi), process.execPath, ["--disable-warning=DEP0040", cliEntry(pi), "daemon", "pair", "--relay", "--json"]);
+}
+
 function tailLog(pi: Pi, lines = 40): string {
   try { return readFileSync(logFile(pi), "utf8").split("\n").slice(-lines).join("\n"); } catch { return "(no log)"; }
 }
@@ -97,8 +108,8 @@ function tailLog(pi: Pi, lines = 40): string {
 const parameters = {
   type: "object",
   properties: {
-    action: { type: "string", enum: ["status", "update", "build", "start", "stop", "logs"], description: "status: report clone/build/daemon state. update: pull latest upstream main into vendor/paseo. build: npm install + build:server. start/stop: manage the daemon. logs: tail daemon log." },
-    listen: { type: "string", description: `Listen target for start (default ${DEFAULT_LISTEN}).` },
+    action: { type: "string", enum: ["status", "update", "build", "start", "stop", "pair", "logs"], description: "status/update/build/start/stop manage Paseo; pair creates a mobile relay link; logs tails the daemon log." },
+    listen: { type: "string", description: `Listen target for start (defaults to the machine's Tailscale IPv4 on port ${DEFAULT_PORT}).` },
     lines: { type: "integer", minimum: 1, maximum: 500, default: 40, description: "Log lines for action=logs." },
   },
   required: ["action"],
@@ -107,6 +118,18 @@ const parameters = {
 const text = (value: unknown) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, undefined, 1) }], details: value });
 
 export default function paseoExtension(pi: Pi): void {
+  // Paseo is part of every Pi session: start the local daemon before the
+  // first prompt, but never block session startup on a stale/broken install.
+  pi.on?.("session_start", (_event: unknown, ctx: any) => {
+    const result = paseoStart(pi);
+    if (!result.success) {
+      ctx?.ui?.notify?.(`Paseo auto-start skipped: ${result.error}`, "warning");
+      return;
+    }
+    process.env.PASEO_HOST ||= `http://${result.listen}`;
+    ctx?.ui?.notify?.(result.alreadyRunning ? `Paseo connected on ${result.listen}.` : `Paseo started on ${result.listen}.`, "info");
+  });
+
   pi.registerTool?.(withDefaultToolRenderer({
     name: "paseo",
     label: "Paseo daemon",
@@ -122,14 +145,15 @@ export default function paseoExtension(pi: Pi): void {
         case "build": return text(paseoBuild(pi));
         case "start": return text(paseoStart(pi, input.listen));
         case "stop": return text(paseoStop(pi));
+        case "pair": return text(paseoPair(pi));
         case "logs": return text(tailLog(pi, input.lines ?? 40));
-        default: return text({ success: false, error: "action must be status, update, build, start, stop, or logs" });
+        default: return text({ success: false, error: "action must be status, update, build, start, stop, pair, or logs" });
       }
     },
   }));
 
   pi.registerCommand?.("paseo", {
-    description: "Paseo daemon controls: /paseo status|update|build|start|stop|logs",
+    description: "Paseo daemon controls: /paseo status|update|build|start|stop|pair|logs",
     handler: async (args, ctx) => {
       const action = args.trim().split(/\s+/, 1)[0] || "status";
       try {
@@ -149,6 +173,9 @@ export default function paseoExtension(pi: Pi): void {
         } else if (action === "stop") {
           const r = paseoStop(pi);
           ctx.ui?.notify?.(r.wasRunning ? `Stopped daemon (pid ${r.pid}).` : "Daemon was not running.", "info");
+        } else if (action === "pair") {
+          const r = paseoPair(pi);
+          ctx.ui?.notify?.(r.ok ? r.output : `Pairing failed: ${r.output}`, r.ok ? "info" : "error");
         } else if (action === "logs") {
           ctx.ui?.notify?.(tailLog(pi), "info");
         } else {
