@@ -12,6 +12,7 @@ import {
 } from "../../lib/tools/swarm-bash.ts";
 import { PERMISSIVE_PARAMETERS } from "../../lib/runtime/swarm-tool-surface.ts";
 import { wrapToolForHookRows } from "../../lib/runtime/hook-render-bridge.ts";
+import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -42,10 +43,10 @@ export function registerSwarmBash(pi: Pi): void {
     label: "bash",
     description: SWARM_BASH_DESCRIPTION,
     renderCall(args: BashParams, theme: any) {
-      return bashCallComponent(formatBashCall(args, theme));
+      return bashCallComponent(formatBashCall(args, theme), (text, width) => truncateToWidth(text, width, "…"));
     },
     renderResult(result: any, options: any, theme: any) {
-      return bashResultComponent(result, options, theme);
+      return bashResultComponent(result, options, theme, wrapTextWithAnsi);
     },
     // Swarm decodes BashParams with encoding/json: a missing command runs
     // `bash -c ""`. The canonical schema (SWARM_BASH_PARAMETERS) is put on
