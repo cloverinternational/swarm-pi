@@ -21,6 +21,21 @@ const child = (pid: number) => { const c: any = new EventEmitter(); c.pid = pid;
 const base = (fs: any, processKill: any, spawn: any) => createPaseoSetup({ root: "/project", state: "/state", paseoHome: "/home", fs, processKill, spawn, platform: "linux", now: () => Date.now(), sleep: async () => {}, fetch: vi.fn(async () => ({ status: 200 })) as any, websocket: vi.fn(async () => true) });
 
 describe("Paseo lifecycle review", () => {
+  it("refuses to signal when a validated PID generation changes", async () => {
+    const f = fixture({ "/state/daemon.json": JSON.stringify({ pid: 42, listen: "127.0.0.1:6767" }),
+      "/proc/42/cmdline": `${process.execPath}\0--disable-warning=DEP0040\0/project/vendor/paseo/packages/cli/dist/index.js\0daemon\0start\0--foreground\0`,
+      "/proc/42/environ": "PASEO_LISTEN=127.0.0.1:6767\0" });
+    const original = f.fs.readFileSync;
+    let generation = 1;
+    f.fs.readFileSync = (path: string) => path.endsWith("/stat")
+      ? `42 (node) ${["S", ...Array(18).fill("0"), String(generation++)].join(" ")}` : original(path);
+    const kill = vi.fn();
+    const result = await base(f.fs, kill, vi.fn()).stop();
+    expect(result.success).toBe(false);
+    expect(kill.mock.calls.every(call => call[1] === 0)).toBe(true);
+    expect(f.files.has("/state/daemon.json")).toBe(true);
+  });
+
   it("refuses update/build with a live record or an occupied operation lock", async () => {
     const f = fixture({ "/state/daemon.json": JSON.stringify({ pid: 42 }) });
     const spawn = vi.fn();
@@ -64,6 +79,7 @@ describe("Paseo lifecycle review", () => {
 
   it("stops and removes a validated legacy record", async () => {
     const f = fixture({ "/project/artifacts/paseo/daemon.pid": JSON.stringify({ pid: 42, listen: "127.0.0.1:6767" }), "/proc/42/cmdline": `${process.execPath}\0--disable-warning=DEP0040\0/project/vendor/paseo/packages/cli/dist/index.js\0daemon\0start\0--foreground\0`, "/proc/42/environ": "PASEO_LISTEN=127.0.0.1:6767\0" });
+    f.files.set("/proc/42/stat", `42 (node) ${["S", ...Array(18).fill("0"), "12345"].join(" ")}`);
     let gone = false;
     const kill = vi.fn((_pid: number, signal?: string | number) => {
       if (signal === "SIGTERM") gone = true;

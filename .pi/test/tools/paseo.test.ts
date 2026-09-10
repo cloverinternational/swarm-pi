@@ -51,16 +51,43 @@ function commandHarness(options: { status?: unknown; routes?: unknown; reloadOk?
     });
     return child;
   });
-  return { spawn, calls };
+  const serveApi = vi.fn(async (method: string, body?: string, etag?: string) => {
+    if (method === "GET") return { status: 200, body: JSON.stringify(routes), etag: '"version-1"' };
+    expect(etag).toBe('"version-1"');
+    calls.push(["serve-api-post"]);
+    routes = JSON.parse(body!);
+    return { status: options.serveOk === false ? 403 : 200, body: "" };
+  });
+  return { spawn, calls, serveApi };
 }
 
 function setup(fs: MemFs, commands: ReturnType<typeof commandHarness>, extra: Record<string, unknown> = {}) {
-  return createPaseoSetup({ root: "/project", state: "/state", paseoHome: "/paseo-home", fs: fs.fs, spawn: commands.spawn as any, fetch: vi.fn(async () => ({ status: 200 })) as any, websocket: vi.fn(async () => true), ...extra });
+  return createPaseoSetup({ root: "/project", state: "/state", paseoHome: "/paseo-home", fs: fs.fs, spawn: commands.spawn as any, serveApi: commands.serveApi, fetch: vi.fn(async () => ({ status: 200 })) as any, websocket: vi.fn(async () => true), ...extra });
 }
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("Paseo setup safety", () => {
+  it("preserves JSON larger than 64 KiB and explicitly rejects over-limit output", async () => {
+    const s = setup(memoryFs(), commandHarness());
+    const big = JSON.stringify({ BackendState: "Running", padding: "x".repeat(100000) });
+    const commands = commandHarness({ status: JSON.parse(big) });
+    const result = await setup(memoryFs(), commands).run("/project", "tailscale", ["status", "--json"], 1000, true);
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(result.output).padding.length).toBe(100000);
+  });
+
+  it("fails closed when an ETag mutation loses a race", async () => {
+    const commands = commandHarness();
+    commands.serveApi.mockImplementation(async method => method === "GET"
+      ? { status: 200, body: "{}", etag: '"version-1"' }
+      : { status: 412, body: "conflict" });
+    const result = await setup(memoryFs(), commands).setup("127.0.0.1:6767", true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("conditional update rejected");
+    expect(commands.calls.some(args => args.includes("--bg"))).toBe(false);
+  });
+
   it("merges nested config and preserves legacy policy, but rejects invalid and wildcard policies", () => {
     expect(mergePaseoConfig({ keep: { nested: true }, other: 1 }, { keep: { changed: true } })).toEqual({ keep: { changed: true }, other: 1 });
     expect(mergePaseoHost({ keep: true, daemon: { allowedHosts: ["old.ts.net"] } }, "machine.ts.net")).toEqual({ keep: true, daemon: { allowedHosts: ["old.ts.net"], hostnames: ["old.ts.net", "machine.ts.net"] } });
@@ -77,10 +104,10 @@ describe("Paseo setup safety", () => {
     const config = JSON.parse(fs.files.get("/paseo-home/config.json")!);
     expect(config.daemon.hostnames).toEqual(["machine.example.ts.net"]);
     const reload = commands.calls.findIndex(a => a.includes("daemon") && a.includes("reload"));
-    const serve = commands.calls.findIndex(a => a[0] === "serve" && a.includes("--bg"));
+    const serve = commands.calls.findIndex(a => a[0] === "serve-api-post");
     expect(reload).toBeGreaterThanOrEqual(0);
     expect(serve).toBeGreaterThan(reload);
-    expect(commands.calls.some(a => a[0] === "serve" && a.includes("--https=443"))).toBe(true);
+    expect(commands.serveApi).toHaveBeenCalledWith("POST", expect.any(String), '"version-1"');
   });
 
   it("repeated correct setup writes no config, does not mutate the route, but still reloads and verifies", async () => {

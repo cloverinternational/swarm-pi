@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { constants, fstatSync } from "node:fs";
+import { request } from "node:http";
 
 export type PaseoDeps = {
   spawn?: typeof childProcess.spawn; fetch?: typeof fetch;
@@ -12,10 +13,12 @@ export type PaseoDeps = {
   now?: () => number; sleep?: (ms: number) => Promise<void>; processKill?: (pid: number, signal?: NodeJS.Signals | number) => void;
   websocket?: (url: string, timeoutMs: number) => Promise<unknown>;
   processCommand?: (pid: number) => string;
+  serveApi?: (method: "GET" | "POST", body?: string, etag?: string) => Promise<{ status: number; body: string; etag?: string }>;
 };
 export type CommandResult = { ok: boolean; code: number | null; output: string; timedOut?: boolean };
 export type PaseoResult = { success: boolean; partial?: boolean; error?: string; steps?: Array<{ name: string; ok: boolean; output?: string }>; [key: string]: unknown };
 const CAP = 64 * 1024;
+const JSON_CAP = 8 * 1024 * 1024;
 const tail = (s: string, n = 4000) => s.length > n ? `…${s.slice(-n)}` : s;
 const defaultRoot = () => resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 export function mergePaseoConfig<T extends Record<string, unknown>>(current: T, patch: Partial<T>): T { return { ...current, ...patch }; }
@@ -37,11 +40,11 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
   const paseo = join(d.root!, "vendor", "paseo"), paseoHome = input.paseoHome ?? d.env!.PASEO_HOME ?? join(homedir(), ".paseo");
   const cli = join(paseo, "packages", "cli", "dist", "index.js"), pidFile = join(d.state!, "daemon.json"), lock = join(d.state!, "start.lock"), log = join(d.state!, "daemon.log");
   const run = (cwd: string, command: string, args: string[], timeout = 15 * 60_000, preserve = false): Promise<CommandResult> => new Promise(resolveResult => {
-    let output = "", settled = false; let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = (r: CommandResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolveResult({ ...r, output: preserve ? output : tail(output) }); };
+    let output = "", settled = false, overflow = false; let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (r: CommandResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolveResult({ ...r, ok: r.ok && !overflow, output: overflow ? "JSON output exceeds 8 MiB safety limit" : output || r.output }); };
     try {
       const child = d.spawn!(command, args, { cwd, env: { ...d.env, CI: "1" }, stdio: ["ignore", "pipe", "pipe"] });
-      const collect = (x: unknown) => { output += String(x ?? ""); if (output.length > CAP) output = output.slice(-CAP); };
+      const collect = (x: unknown) => { if (overflow) return; output += String(x ?? ""); if (preserve && output.length > JSON_CAP) { overflow = true; output = ""; } else if (!preserve && output.length > CAP) output = output.slice(-CAP); };
       child.stdout?.on("data", collect); child.stderr?.on("data", collect);
       child.once("error", e => finish({ ok: false, code: null, output: String(e) }));
       child.once("close", (code, signal) => finish({ ok: code === 0, code: code ?? (signal ? null : 0), output }));
@@ -61,7 +64,11 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
       const env = d.fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
       const listen = env.find(x => x.startsWith("PASEO_LISTEN="))?.slice(13);
       if (!listen || (raw.listen && raw.listen !== listen)) return;
-      return { pid, listen, unverifiable: false };
+      const stat = d.fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+      const started = fields[19];
+      if (!started || !/^\d+$/.test(started)) return;
+      return { pid, listen, unverifiable: false, started, file };
     } catch { return; }
   };
   const owned = () => record(pidFile);
@@ -74,7 +81,19 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
   });
   const health = async (listen: string) => { try { const r = await d.fetch!(`http://${listen}/api/health`, { signal: AbortSignal.timeout(3000), redirect: "error" }); if (r.status !== 200) return false; const result = d.websocket ? await d.websocket(`ws://${listen}/ws`, 3000) : await nativeWebsocket(`ws://${listen}/ws`, 3000); return result === true || (typeof result === "object" && result !== null && (result as any).hello === true && (result as any).status === true && (result as any).ping === true); } catch { return false; } };
   const safeConfig = () => { if (!paseoHome.startsWith("/") || paseoHome.split("/").includes("..")) throw new Error("PASEO_HOME must be an absolute safe path"); try { if (d.fs.lstatSync?.(paseoHome).isSymbolicLink()) throw new Error("refusing symlink PASEO_HOME"); } catch (e: any) { if (e?.code !== "ENOENT") throw e; } return join(paseoHome, "config.json"); };
-  const readConfig = (file: string): Record<string, unknown> | undefined => { try { const v = JSON.parse(d.fs.readFileSync!(file, "utf8")); return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : undefined; } catch (e: any) { return e?.code === "ENOENT" ? {} : undefined; } };
+  // Tailscale local API supports ETag/If-Match, unlike a CLI read-then-write.
+  // Never fall back to an unconditional mutation if conditional writes fail.
+  const serveApi = input.serveApi ?? ((method: "GET" | "POST", body?: string, etag?: string) => new Promise<{ status: number; body: string; etag?: string }>((resolveApi, reject) => {
+    const req = request({ socketPath: d.env.TAILSCALE_SOCKET ?? "/var/run/tailscale/tailscaled.sock", path: "/localapi/v0/serve-config", method,
+      headers: { Host: "local-tailscaled.sock", "Content-Type": "application/json", ...(etag ? { "If-Match": etag } : {}) } }, res => {
+      let text = "";
+      res.on("data", chunk => { text += String(chunk); if (text.length > JSON_CAP) req.destroy(Error("Serve JSON exceeds 8 MiB safety limit")); });
+      res.on("error", reject);
+      res.on("end", () => resolveApi({ status: res.statusCode ?? 0, body: text, etag: typeof res.headers.etag === "string" ? res.headers.etag : undefined }));
+    });
+    req.setTimeout(10000, () => req.destroy(Error("Tailscale local API timeout")));
+    req.on("error", reject); req.end(body);
+  }));
   const verifyDirectory = (path: string) => {
     const st = d.fs.lstatSync!(path) as any;
     if (st.isSymbolicLink?.()) throw Error("Refusing symlink config ancestor");
@@ -178,6 +197,11 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
       const c = conflicts(routes.output, dnsName, listen);
       if (c.funnel || c.root) throw Error("Conflicting Serve/Funnel route; existing configuration left untouched");
       if (!apply) return { success: true, changed: false, dnsName, listen };
+      const snapshot = await serveApi("GET");
+      if (snapshot.status !== 200 || !snapshot.etag) throw Error("Conditional Serve updates unavailable; refusing mutation");
+      const snapshotConfig = JSON.parse(snapshot.body) ?? {};
+      const initial = conflicts(JSON.stringify(snapshotConfig), dnsName, listen);
+      if (initial.funnel || initial.root) throw Error("Serve configuration changed; refusing mutation");
       if (!await health(listen)) throw Error("Direct daemon handshake failed; no configuration changed");
       const file = safeConfig();
       let before: string;
@@ -191,12 +215,12 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
       // Reload on repeats too: a previous run may have persisted config then failed.
       const reload = await run(d.root!, process.execPath, ["--disable-warning=DEP0040", cli, "daemon", "reload", "--host", `http://${listen}`], 10_000, true);
       if (!reload.ok) throw Error("Daemon hot reload failed; hostname config retained for retry");
-      const check = await run(d.root!, "tailscale", ["serve", "status", "--json"], 10_000, true);
-      if (!check.ok || JSON.stringify(JSON.parse(check.output)) !== JSON.stringify(JSON.parse(routes.output))) throw Error("Serve configuration changed concurrently; refusing to overwrite");
-      if (!c.same) {
+      if (!initial.same) {
         routeAttempted = true;
-        const serve = await run(d.root!, "tailscale", ["serve", "--bg", "--yes", "--https=443", `http://${listen}`], 10_000, true);
-        if (!serve.ok) throw Error("Tailscale Serve failed; check local permissions");
+        const next = { ...snapshotConfig, TCP: { "443": { HTTPS: true } }, Web: { [`${dnsName}:443`]: { Handlers: { "/": { Proxy: `http://${listen}` } } } } };
+        const serve = await serveApi("POST", JSON.stringify(next), snapshot.etag);
+        if (serve.status === 412) throw Error("Serve changed concurrently; conditional update rejected without overwrite");
+        if (serve.status !== 200) throw Error("Conditional Tailscale Serve update failed; check local permissions");
       }
       const after = await run(d.root!, "tailscale", ["serve", "status", "--json"], 10_000, true);
       if (!after.ok) throw Error("Serve target verification failed");
@@ -277,8 +301,12 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
       })();
       if (x?.unverifiable) return { success: false, partial: true, error: "Daemon record could not be verified; record retained" };
       if (!x) { return { success: true, wasRunning: false }; }
-      try { d.processKill!(-x.pid, "SIGTERM"); } catch (e: any) { if (e?.code !== "ESRCH" && e?.code !== "EPERM") throw e; }
-      try { d.processKill!(x.pid, "SIGTERM"); } catch (e: any) { if (e?.code !== "ESRCH" && e?.code !== "EPERM") throw e; }
+      if (!("file" in x) || !("started" in x)) throw Error("Missing process generation; record retained");
+      const fresh = record(x.file!);
+      if (!fresh || fresh.unverifiable || fresh.pid !== x.pid || fresh.started !== x.started) throw Error("Process identity changed before stop; no signal sent");
+      // Signal only the validated supervisor, never a potentially recycled group.
+      // Linux kill is not pidfd-based; validation and signal are adjacent sync calls.
+      try { d.processKill!(x.pid, "SIGTERM"); } catch (e: any) { if (e?.code !== "ESRCH") throw e; }
       const gone = await waitGone(x.pid);
       if (!gone) return { success: false, partial: true, pid: x.pid, error: "Daemon did not stop; record retained" };
       for (const file of [pidFile, join(d.root!, "artifacts", "paseo", "daemon.pid")]) {

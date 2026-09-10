@@ -187,7 +187,7 @@ the current Pi session. New daemons default to `127.0.0.1:6767`; an explicit
 `$XDG_STATE_HOME/pi-swarm/paseo` (default `~/.local/state/pi-swarm/paseo`).
 
 With Tailscale installed, logged in, and authorized to manage Serve, an explicit
-`/paseo setup` discovers this machine's hostname, merges it into
+`/paseo setup apply` discovers this machine's hostname, merges it into
 `daemon.hostnames` in `$PASEO_HOME/config.json` (default `~/.paseo/config.json`),
 hot-reloads Paseo, and configures a persistent **tailnet-only** HTTPS route.
 No machine-specific hostname or manual JSON edit is needed for normal setup.
@@ -200,8 +200,9 @@ hello/status/pong exchange, not merely an open port.
 
 ```text
 /paseo status         # inspect the daemon
-/paseo setup          # retry automatic connection setup
-/paseo setup inspect  # inspect without applying changes
+/paseo setup          # inspect without applying changes
+/paseo setup apply    # retry automatic connection setup
+
 ```
 
 Tailscale login/permissions remain prerequisites. This integration is not a
@@ -214,6 +215,11 @@ Update/build operations refuse while a daemon record is live; stop it explicitly
 first. Failed stops retain their records for recovery. Linux config writes use
 verified directory descriptors; unrelated Serve ports, hosts, and services cause
 setup to refuse rather than risk replacing them.
+Serve changes use Tailscale's local API with `ETag`/`If-Match`; a concurrent
+change is rejected rather than overwritten. Linux defaults to
+`/var/run/tailscale/tailscaled.sock` (`TAILSCALE_SOCKET` can override it).
+An unavailable API, missing ETag, or permission denial fails closed without
+falling back to an unconditional Serve command.
 
 ## Development and validation
 

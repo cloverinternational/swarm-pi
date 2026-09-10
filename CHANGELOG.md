@@ -4,7 +4,10 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
-- Require explicit `/paseo setup` or tool `apply: true` before modifying hostname
+- Use Tailscale LocalAPI ETag/If-Match conditional writes to reject concurrent
+  Serve changes, preserve JSON responses up to an explicit 8 MiB bound, and
+  revalidate process start-time identity immediately before stopping a daemon.
+- Require explicit `/paseo setup apply` or tool `apply: true` before modifying hostname
   configuration or Tailscale Serve; ordinary session startup does not expose the daemon.
 - Retain daemon records on failed stops, clean up failed launches, support legacy
   stop records, and serialize update/build with lifecycle operations. Reject

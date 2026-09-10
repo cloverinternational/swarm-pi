@@ -233,11 +233,11 @@ Paseo integration is currently Linux-only for managed process ownership checks
 per-user state under `$XDG_STATE_HOME/pi-swarm/paseo` (default
 `~/.local/state/pi-swarm/paseo`). Existing owned PID records are checked before
 launch, subprocesses are bounded, and daemon health includes HTTP validation.
-`/paseo setup inspect` only inspects Tailscale. Explicit `/paseo setup` (or a tool
+`/paseo setup inspect` only inspects Tailscale. Explicit `/paseo setup apply` (or a tool
 setup call with `apply: true`) discovers the machine hostname, merges `daemon.hostnames`,
 hot-reloads the daemon, and creates an unoccupied persistent tailnet-only Serve
 route. Session startup only starts/checks the daemon, never changes network
-exposure. `/paseo setup` retries the same operation. Existing conflicting routes or
+exposure. `/paseo setup apply` retries the same operation. Existing conflicting routes or
 Funnel exposure fail closed; matching routes are reverified without replacement.
 Success requires HTTPS health plus a WebSocket hello/status/pong handshake.
 `PASEO_HOME` is injected into managed launches. Config writes are atomic and mode
