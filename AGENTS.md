@@ -179,7 +179,7 @@ When changing discovery, preserve these invariants:
 | `00-runtime` | `cache-telemetry`, `swarm-update`, `bootstrap`, `hooks`, `swarm-runtime`, `swarm-transport-parity` |
 | `10-context` | `autogenskills`, `prompt-context-configure`, `swarm-plan-mode`, `swarm-prompt`, `swarm-skills`, `swarm-thinking`, `system-inspector`, `system-prompts` |
 | `20-policy` | `swarm-disk-hooks` |
-| `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
+| `30-tools` | `annoyed/`, `codemode`, `control-task-tools`, `exa-search`, `history-search`, `ask-user/`, `paseo`, `research-tools`, `swarm-goal`, `swarm-agent-tools`, `swarm-background-bash`, `swarm-bash`, `swarm-fs-tools`, `swarm-history-vault-tools`, `swarm-search`, `taskmanage`, `vault` |
 | `40-state` | `memory-history`, `swarm-conversation-metadata` |
 | `50-ui` | `control-panel`, `conversation-metrics`, `swarm-themes`, `swarm-tools-status`, `swarm-btw` |
 
@@ -227,6 +227,24 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 Names may be filtered by active-tool policy. `swarm-tools-status` and
 `system-inspector` show the runtime's actual registered/active surface; use
 those instead of assuming every row above is enabled.
+
+Paseo integration is currently Linux-only for managed process ownership checks
+(`.pi/lib/tools/paseo-setup.ts`, adapted by `.pi/extensions/30-tools/paseo.ts`). New launches default to loopback and use
+per-user state under `$XDG_STATE_HOME/pi-swarm/paseo` (default
+`~/.local/state/pi-swarm/paseo`). Existing owned PID records are checked before
+launch, subprocesses are bounded, and daemon health includes HTTP validation.
+`/paseo setup inspect` only inspects Tailscale. After a successful session startup,
+setup automatically discovers the machine hostname, merges `daemon.hostnames`,
+hot-reloads the daemon, and creates an unoccupied persistent tailnet-only Serve
+route. `/paseo setup` retries the same operation. Existing conflicting routes or
+Funnel exposure fail closed; matching routes are reverified without replacement.
+Success requires HTTPS health plus a WebSocket hello/status/pong handshake.
+`PASEO_HOME` is injected into managed launches. Config writes are atomic and mode
+0600; setup/start share a lock. Interrupted locks require inspection, not age-only
+automatic stealing. This is not yet an unattended cross-platform
+installer or boot-time service. Fresh global package clones do not include a
+built Paseo submodule. Validate with `npx vitest run .pi/test/tools/paseo.test.ts`;
+those tests do not prove process supervision or cross-device connectivity.
 
 `/mem on|off|status` persists bootstrap enforcement per repository. On adds a
 memory ceremony to the final assembled system prompt and blocks ordinary tool
