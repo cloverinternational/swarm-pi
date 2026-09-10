@@ -4,6 +4,13 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Automate per-machine Paseo Tailscale setup: preserve nested hostname config,
+  hot-reload without restarting agents, configure nonconflicting persistent
+  tailnet-only HTTPS routes, and verify HTTP plus WebSocket readiness.
+- Use installation-relative Paseo paths, per-user daemon state, loopback defaults,
+  bounded asynchronous subprocesses, and shared setup/start locking. Add focused
+  regression tests and document installation prerequisites and limitations.
+
 - Harden tool reliability, history argument normalization, and TaskManage validation.
 
 - Add optional `/mem on|off|status` bootstrap memory enforcement with prompt and tool-call safeguards.

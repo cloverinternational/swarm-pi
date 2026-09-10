@@ -179,6 +179,35 @@ context files are discovered:
 pi
 ```
 
+## Paseo remote access
+
+On Linux, the Paseo extension starts an already-built daemon independently of
+the current Pi session. New daemons default to `127.0.0.1:6767`; an explicit
+`PASEO_LISTEN` override is honored. State is shared per user under
+`$XDG_STATE_HOME/pi-swarm/paseo` (default `~/.local/state/pi-swarm/paseo`).
+
+With Tailscale installed, logged in, and authorized to manage Serve, startup
+automatically discovers this machine's hostname, merges it into
+`daemon.hostnames` in `$PASEO_HOME/config.json` (default `~/.paseo/config.json`),
+hot-reloads Paseo, and configures a persistent **tailnet-only** HTTPS route.
+No machine-specific hostname or manual JSON edit is needed for normal setup.
+Existing unrelated config is preserved; conflicting Serve/Funnel routes are
+reported rather than overwritten. Success requires HTTPS health and a WebSocket
+hello/status/pong exchange, not merely an open port.
+
+```text
+/paseo status         # inspect the daemon
+/paseo setup          # retry automatic connection setup
+/paseo setup inspect  # inspect without applying changes
+```
+
+Tailscale login/permissions remain prerequisites. This integration is not a
+boot-time supervisor or a complete cross-platform installer. Fresh global Pi
+package clones do not contain a built Paseo submodule; provision the Paseo build
+before expecting automatic startup. Interrupted setup locks fail closed and
+require inspection before removal. A working same-host connection does not prove
+mobile roaming, machine reboot, or long-duration network-drop resilience.
+
 ## Development and validation
 
 Run the focused test suite:
