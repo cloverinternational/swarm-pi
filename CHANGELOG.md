@@ -4,6 +4,8 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Harden tool reliability, history argument normalization, and TaskManage validation.
+
 - Add optional `/mem on|off|status` bootstrap memory enforcement with prompt and tool-call safeguards.
 
 - Align HistorySearch field normalization and segment filtering with case, runtime, sorting, and ordering options.

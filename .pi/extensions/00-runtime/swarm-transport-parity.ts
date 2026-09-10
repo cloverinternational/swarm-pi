@@ -54,7 +54,7 @@ export function registerSwarmTransportParity(pi: Pi): void {
     const selected = configured?.mode === "allowlist"
       ? effectiveSelection(available.length ? available : active, configured)
       : active;
-    const gated = gateActiveTools(selected, { interactive }) ?? selected;
+    const gated = gateActiveTools(selected, { interactive }, process.env, available) ?? selected;
     const ordered = swarmToolOrder(gated) ?? (gated === active ? undefined : gated);
     if (ordered) pi.setActiveTools?.(ordered);
   };

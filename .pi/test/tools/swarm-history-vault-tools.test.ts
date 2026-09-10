@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
-import { historyGet, historySearch } from "../../lib/tools/swarm-history-tools.ts";
+import { historyGet, historySearch, normalizeHistoryGetParams } from "../../lib/tools/swarm-history-tools.ts";
 import { parseVaultDuration, vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];
@@ -18,7 +18,7 @@ async function fixture() {
   ].map((x) => JSON.stringify(x)).join("\n");
   await writeFile(join(root, "one.jsonl"), session("session-one", "2026-01-01T00:00:00Z", ["Alpha banana request", "Gamma response", "final note"]));
   await writeFile(join(root, "two.jsonl"), session("session-two", "2026-01-02T00:00:00Z", ["Beta request", "error PR #123 happened", "banana banana"]));
-  return { root, cwd };
+  return { root, cwd, session };
 }
 
 describe("Swarm history and vault surfaces", () => {
@@ -67,11 +67,115 @@ describe("Swarm history and vault surfaces", () => {
     const tail = await historyGet({ conversation_id: "session-one", tail: 1 }, runtime);
     expect(tail).toMatchObject({ window_start: 2, window_end: 3, omitted_message_count: 2, truncated: true });
     expect(tail.messages.map((x: any) => x.id)).toEqual(["session-one-m2"]);
+    const materialized = {
+      conversation_id: "session-one",
+      tail: 1,
+      offset: 0,
+      workspace_path: "",
+    };
+    expect(normalizeHistoryGetParams(materialized)).toEqual({
+      conversation_id: "session-one",
+      tail: 1,
+    });
+    const neutral = await historyGet(materialized, runtime);
+    expect(neutral.messages.map((x: any) => x.id)).toEqual(["session-one-m2"]);
     const page = await historyGet({ conversation_id: "session-one", offset: 1, max_messages: 1 }, runtime);
     expect(page.messages.map((x: any) => x.id)).toEqual(["session-one-m1"]);
+    const first = await historyGet({ conversation_id: "session-one", offset: 0, max_messages: 1 }, runtime);
+    expect(first.messages.map((x: any) => x.id)).toEqual(["session-one-m0"]);
+    await expect(historyGet({
+      conversation_id: "session-one",
+      tail: 1,
+      offset: 1,
+    }, runtime)).rejects.toThrow(/tail and offset are mutually exclusive/);
     const bounded = await historyGet({ conversation_id: "session-one", max_chars: 120 }, runtime);
     expect(bounded.content_truncated).toBe(true);
     expect(bounded.omitted_message_count).toBeGreaterThan(0);
+  });
+
+  it("caps tail by max_messages and preserves identity through the registered tool", async () => {
+    const runtime = await fixture();
+    await writeFile(join(runtime.root, "many.jsonl"), runtime.session(
+      "session-many",
+      "2026-01-03T00:00:00Z",
+      Array.from({ length: 6 }, (_, index) => `message-${index} ${"x".repeat(600)}`),
+    ));
+    const capped = await historyGet({
+      conversation_id: "session-many",
+      tail: 10,
+      max_messages: 3,
+      max_chars: 50000,
+      offset: 0,
+    }, runtime);
+    expect(capped).toMatchObject({
+      conversation_id: "session-many",
+      workspace_path: runtime.cwd,
+      window_start: 3,
+      window_end: 6,
+      rendered_message_count: 3,
+    });
+    expect(capped.messages.map((message: any) => message.id)).toEqual([
+      "session-many-m3",
+      "session-many-m4",
+      "session-many-m5",
+    ]);
+    const registered: any[] = [];
+    registerSwarmHistoryVaultTools({
+      registerTool: (tool: any) => registered.push(tool),
+      on() {},
+      getCwd: () => runtime.cwd,
+    }, { historyRoot: runtime.root, cwd: runtime.cwd });
+    const get = registered.find(tool => tool.name === "HistoryGet");
+    const result = await get.execute("bounded-tail", {
+      conversation_id: "session-many",
+      tail: 10,
+      max_messages: 3,
+      max_chars: 1000,
+      offset: 0,
+      workspace_path: "",
+    });
+    const value = JSON.parse(result.content[0].text);
+    expect(Buffer.byteLength(result.content[0].text)).toBeLessThanOrEqual(1000);
+    expect(value).toMatchObject({
+      conversation_id: "session-many",
+      workspace_path: runtime.cwd,
+      total_message_count: 6,
+      window_start: 3,
+      window_end: 6,
+    });
+    expect(value.rendered_message_count).toBeLessThanOrEqual(3);
+
+    const independent = await get.execute("independent", {
+      conversation_id: "session-two",
+      tail: 1,
+      max_messages: 1,
+      human_only: true,
+    });
+    const second = JSON.parse(independent.content[0].text);
+    expect(second.conversation_id).toBe("session-two");
+    expect(independent.content[0].text).not.toContain("session-many");
+  });
+
+  it("resolves duplicate IDs within the requested workspace and rejects global ambiguity", async () => {
+    const runtime = await fixture();
+    const otherCwd = join(runtime.root, "other-workspace");
+    const duplicate = (cwd: string, text: string) => [
+      { type: "session", version: 3, id: "duplicate-id", timestamp: "2026-01-04T00:00:00Z", cwd },
+      { type: "message", id: `${text}-m0`, parentId: null, timestamp: "2026-01-04T00:00:01Z", message: { role: "user", content: [{ type: "text", text }] } },
+    ].map(value => JSON.stringify(value)).join("\n");
+    await writeFile(join(runtime.root, "duplicate-current.jsonl"), duplicate(runtime.cwd, "current"));
+    await writeFile(join(runtime.root, "duplicate-other.jsonl"), duplicate(otherCwd, "other"));
+
+    const current = await historyGet({ conversation_id: "duplicate-id" }, runtime);
+    expect(current).toMatchObject({
+      conversation_id: "duplicate-id",
+      workspace_path: runtime.cwd,
+      messages: [{ content: "current" }],
+    });
+    await expect(historyGet({
+      conversation_id: "duplicate-id",
+      all_workspaces: true,
+    }, runtime)).rejects.toThrow(/conversation_id is ambiguous/);
   });
 
   it("adds/lists without exposing secrets, updates metadata only, and injects env", async () => {
