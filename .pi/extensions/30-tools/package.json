@@ -12,6 +12,7 @@
       "ask-user/index.ts",
       "paseo.ts",
       "research-tools.ts",
+      "swarm-monitor.ts",
       "swarm-goal.ts",
       "swarm-agent-tools.ts",
       "swarm-background-bash.ts",
