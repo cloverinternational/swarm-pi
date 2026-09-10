@@ -4,6 +4,12 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Require explicit `/paseo setup` or tool `apply: true` before modifying hostname
+  configuration or Tailscale Serve; ordinary session startup does not expose the daemon.
+- Retain daemon records on failed stops, clean up failed launches, support legacy
+  stop records, and serialize update/build with lifecycle operations. Reject
+  non-target Serve routes and anchor Linux atomic writes to directory descriptors.
+
 - Automate per-machine Paseo Tailscale setup: preserve nested hostname config,
   hot-reload without restarting agents, configure nonconflicting persistent
   tailnet-only HTTPS routes, and verify HTTP plus WebSocket readiness.

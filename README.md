@@ -186,11 +186,14 @@ the current Pi session. New daemons default to `127.0.0.1:6767`; an explicit
 `PASEO_LISTEN` override is honored. State is shared per user under
 `$XDG_STATE_HOME/pi-swarm/paseo` (default `~/.local/state/pi-swarm/paseo`).
 
-With Tailscale installed, logged in, and authorized to manage Serve, startup
-automatically discovers this machine's hostname, merges it into
+With Tailscale installed, logged in, and authorized to manage Serve, an explicit
+`/paseo setup` discovers this machine's hostname, merges it into
 `daemon.hostnames` in `$PASEO_HOME/config.json` (default `~/.paseo/config.json`),
 hot-reloads Paseo, and configures a persistent **tailnet-only** HTTPS route.
 No machine-specific hostname or manual JSON edit is needed for normal setup.
+Ordinary Pi startup only starts/checks the daemon; it does not change config or
+network exposure. Tool callers must explicitly supply `apply: true` to apply
+setup; without it, `setup` and `serve` only inspect.
 Existing unrelated config is preserved; conflicting Serve/Funnel routes are
 reported rather than overwritten. Success requires HTTPS health and a WebSocket
 hello/status/pong exchange, not merely an open port.
@@ -207,6 +210,10 @@ package clones do not contain a built Paseo submodule; provision the Paseo build
 before expecting automatic startup. Interrupted setup locks fail closed and
 require inspection before removal. A working same-host connection does not prove
 mobile roaming, machine reboot, or long-duration network-drop resilience.
+Update/build operations refuse while a daemon record is live; stop it explicitly
+first. Failed stops retain their records for recovery. Linux config writes use
+verified directory descriptors; unrelated Serve ports, hosts, and services cause
+setup to refuse rather than risk replacing them.
 
 ## Development and validation
 

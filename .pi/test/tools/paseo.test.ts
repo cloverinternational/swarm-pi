@@ -95,7 +95,10 @@ describe("Paseo setup safety", () => {
   });
 
   it("refuses conflicting route or Funnel without writing config or invoking Serve", async () => {
-    for (const routes of [{ AllowFunnel: { "machine.example.ts.net": true } }, { TCP: { "443": { HTTPS: false } } }]) {
+    for (const routes of [{ AllowFunnel: { "machine.example.ts.net": true } }, { TCP: { "443": { HTTPS: false } } },
+      { TCP: { "8443": { HTTPS: true } } }, { Services: { other: {} } },
+      { Web: { "other.example.ts.net:443": { Handlers: { "/": { Proxy: "http://localhost:9999" } } } } },
+      { Web: { "machine.example.ts.net:8080": { Handlers: { "/": { Proxy: "http://localhost:9999" } } } } }]) {
       const fs = memoryFs(); const commands = commandHarness({ routes }); const s = setup(fs, commands);
       const result = await s.setup("127.0.0.1:6767", true);
       expect(result.success).toBe(false); expect(fs.writes).toEqual([]); expect(commands.calls.some(a => a[0] === "serve" && a[1] !== "status")).toBe(false);
