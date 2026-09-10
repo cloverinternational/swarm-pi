@@ -4,6 +4,22 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Use Tailscale LocalAPI ETag/If-Match conditional writes to reject concurrent
+  Serve changes, preserve JSON responses up to an explicit 8 MiB bound, and
+  revalidate process start-time identity immediately before stopping a daemon.
+- Require explicit `/paseo setup apply` or tool `apply: true` before modifying hostname
+  configuration or Tailscale Serve; ordinary session startup does not expose the daemon.
+- Retain daemon records on failed stops, clean up failed launches, support legacy
+  stop records, and serialize update/build with lifecycle operations. Reject
+  non-target Serve routes and anchor Linux atomic writes to directory descriptors.
+
+- Automate per-machine Paseo Tailscale setup: preserve nested hostname config,
+  hot-reload without restarting agents, configure nonconflicting persistent
+  tailnet-only HTTPS routes, and verify HTTP plus WebSocket readiness.
+- Use installation-relative Paseo paths, per-user daemon state, loopback defaults,
+  bounded asynchronous subprocesses, and shared setup/start locking. Add focused
+  regression tests and document installation prerequisites and limitations.
+
 - Harden tool reliability, history argument normalization, and TaskManage validation.
 
 - Add optional `/mem on|off|status` bootstrap memory enforcement with prompt and tool-call safeguards.
