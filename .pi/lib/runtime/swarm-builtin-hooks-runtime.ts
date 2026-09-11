@@ -104,7 +104,7 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     tasks: hookTasks,
     isSubAgent: () => process.env.PI_SWARM_SUBAGENT === "1",
     enforcementMode: options.enforcementMode,
-    completion: options.completion ?? { enabled: true },
+    completion: options.completion,
     extraPre, extraPost,
     planMode: planModeHooks(),
   });

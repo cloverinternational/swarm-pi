@@ -104,9 +104,9 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
       const attempts = Number(raw?.attempts);
       const maxAttempts = Number(raw?.maxAttempts);
       const nextAt = Number(raw?.nextAt);
-      if (!raw?.id || !raw?.target || !raw?.check || !Number.isFinite(intervalMs) || intervalMs < 5_000 || intervalMs > MAX_INTERVAL || !Number.isFinite(nextAt)) continue;
+      if (typeof raw?.id !== "string" || !raw.id.trim() || typeof raw?.target !== "string" || typeof raw?.check !== "string" || !Number.isInteger(intervalMs) || intervalMs < 5_000 || intervalMs > MAX_INTERVAL || !Number.isInteger(nextAt) || nextAt < 0) continue;
       const safeMaxAttempts = Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 ? maxAttempts : 3;
-      const safeAttempts = Number.isInteger(attempts) && attempts >= 0 ? attempts : 0;
+      const safeAttempts = Number.isInteger(attempts) && attempts >= 0 && attempts <= safeMaxAttempts ? attempts : 0;
       monitors.set(raw.id, { id: raw.id, target: clean(raw.target, "target"), check: clean(raw.check, "check"), ...(typeof raw.action === "string" && raw.action.length <= 8_000 ? { action: clean(raw.action, "action") } : {}), intervalMs, nextAt: safeAttempts >= safeMaxAttempts ? EXHAUSTED_AT : nextAt, attempts: safeAttempts, maxAttempts: safeMaxAttempts, history: [], status: raw.status === "paused" ? "paused" : "active" });
     }
   };

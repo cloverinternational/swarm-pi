@@ -98,6 +98,7 @@ export class CompletionRegistry {
   private readonly entries = new Map<string, CompletionRegistryEntry>();
   register(entry: CompletionRegistryEntry): this {
     if (!entry || typeof entry.key !== "string" || !entry.key.trim() || typeof entry.handler !== "function") throw new TypeError("completion registry entries require a key and handler");
+    if (this.entries.has(entry.key)) throw new Error(`completion registry entry already registered: ${entry.key}`);
     this.entries.set(entry.key, entry); return this;
   }
   dispatch(key: string, value: unknown): HookResult { const entry = this.entries.get(key); return entry ? entry.handler(value) : CONTINUE; }
@@ -722,7 +723,10 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
   planMode?: PlanModeHooks;   // interactive TUI only (PlanBroker present)
 }): SwarmHookPipeline {
   const enforcement = new TaskEnforcementHook(options.enforcementMode ?? "advise");
-  const completion = new TaskCompletionEnforcementHook({ ...options.completion, enabled: options.enforcementMode !== "off" && options.completion?.enabled !== false });
+  const completion = new TaskCompletionEnforcementHook({
+    ...options.completion,
+    enabled: options.completion?.enabled !== false && options.enforcementMode !== "off",
+  });
   const maintenance = new TaskMaintenanceReminderHook();
   const lifecycle = new AutogenLifecycleHook(options.trigger);
   const postActing = new PostActingHook();
