@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createSessionWakeup } from "../runtime/session-wakeup.ts";
+import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 /** A provider-neutral long-running monitor. The check is an agent instruction,
  * so the target can be a PR, deployment, inbox, filesystem, API, ticket, or
@@ -25,6 +26,7 @@ export type MonitorOptions = { now?: () => number; append?: (data: unknown) => v
 const ENTRY = "pi-swarm-monitor";
 const MAX_MONITORS = 100;
 const MAX_INTERVAL = 24 * 60 * 60_000;
+const EXHAUSTED_AT = Number.MAX_SAFE_INTEGER;
 const result = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }], details: value });
 const parseInterval = (value: unknown): number => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -71,7 +73,10 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     const due = [...monitors.values()].filter(m => m.status === "active" && m.nextAt <= now());
     for (const monitor of due) {
       monitor.lastCheckedAt = now(); monitor.attempts++; pendingChecks.add(monitor.id);
-      monitor.nextAt = now() + monitor.intervalMs;
+      // Reserve the final attempt without scheduling another timer. A later
+      // agent_end may still record its observation, but a missing response
+      // must not create an unbounded retry loop.
+      monitor.nextAt = monitor.attempts >= monitor.maxAttempts ? EXHAUSTED_AT : now() + monitor.intervalMs;
       const action = monitor.action ? `\nIf the condition is met, follow up with this action (only when safe and authorized): ${monitor.action}` : "";
       const prompt = `[MONITOR ${monitor.id}] Check target: ${monitor.target}\nInspection instructions: ${monitor.check}${action}\nReport exactly one status (complete, pending, blocked, failed, unavailable, or invalid), a concise summary, and concrete evidence. Do not claim completion without fresh evidence.`;
       await wake.send({ customType: "swarm-monitor", content: prompt, display: true, details: { monitorId: monitor.id, target: monitor.target } }, wake.capture());
@@ -84,9 +89,18 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     const last = [...entries].reverse().find((e: any) => e.customType === ENTRY && Array.isArray(e.data));
     if (!last) return;
     monitors.clear();
-    for (const raw of last.data) if (raw?.id && raw?.target && raw?.check && Number.isFinite(raw.intervalMs)) monitors.set(raw.id, { ...raw, attempts: Number.isInteger(raw.attempts) ? raw.attempts : 0, maxAttempts: Number.isInteger(raw.maxAttempts) ? raw.maxAttempts : 3, history: Array.isArray(raw.history) ? raw.history.slice(-10) : [], status: raw.status === "paused" ? "paused" : "active" });
+    for (const raw of last.data) {
+      const intervalMs = Number(raw?.intervalMs);
+      const attempts = Number(raw?.attempts);
+      const maxAttempts = Number(raw?.maxAttempts);
+      const nextAt = Number(raw?.nextAt);
+      if (!raw?.id || !raw?.target || !raw?.check || !Number.isFinite(intervalMs) || intervalMs < 5_000 || intervalMs > MAX_INTERVAL || !Number.isFinite(nextAt)) continue;
+      const safeMaxAttempts = Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 ? maxAttempts : 3;
+      const safeAttempts = Number.isInteger(attempts) && attempts >= 0 ? attempts : 0;
+      monitors.set(raw.id, { ...raw, intervalMs, nextAt: safeAttempts >= safeMaxAttempts ? EXHAUSTED_AT : nextAt, attempts: safeAttempts, maxAttempts: safeMaxAttempts, history: Array.isArray(raw.history) ? raw.history.slice(-10) : [], status: raw.status === "paused" ? "paused" : "active" });
+    }
   };
-  pi.registerTool?.({ name: "monitor_agent", label: "Monitor agent", description: "Monitor any long-running target using periodic agent checks. Targets may be GitHub PRs, deployments, tickets, files, APIs, inboxes, jobs, or anything the session can inspect. Actions never happen unless explicitly included in the monitor action and permitted by normal policy.", parameters: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["create", "list", "pause", "resume", "cancel", "check"] }, id: { type: "string" }, target: { type: "string" }, check: { type: "string" }, interval: { type: ["string", "number"] }, max_attempts: { type: "integer", minimum: 1, maximum: 5 }, follow_up: { type: "string" } } }, execute: async (_id: string, p: any) => {
+  pi.registerTool?.(withDefaultToolRenderer({ name: "monitor_agent", label: "Monitor agent", description: "Monitor any long-running target using periodic agent checks. Targets may be GitHub PRs, deployments, tickets, files, APIs, inboxes, jobs, or anything the session can inspect. Actions never happen unless explicitly included in the monitor action and permitted by normal policy.", parameters: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["create", "list", "pause", "resume", "cancel", "check"] }, id: { type: "string" }, target: { type: "string" }, check: { type: "string" }, interval: { type: "string" }, max_attempts: { type: "integer", minimum: 1, maximum: 5 }, follow_up: { type: "string" } } }, execute: async (_id: string, p: any) => {
     if (p.action === "list") return result([...monitors.values()].map(describe));
     if (p.action === "create") {
       if (monitors.size >= MAX_MONITORS) throw new Error(`monitor limit reached (${MAX_MONITORS})`);
@@ -99,13 +113,13 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     }
     if (typeof p.id !== "string" || !monitors.has(p.id)) throw new Error("monitor id not found");
     const monitor = monitors.get(p.id)!;
-    if (p.action === "cancel") { monitors.delete(p.id); persist(); arm(); return result({ cancelled: p.id }); }
-    if (p.action === "pause") monitor.status = "paused";
+    if (p.action === "cancel") { pendingChecks.delete(p.id); monitors.delete(p.id); persist(); arm(); return result({ cancelled: p.id }); }
+    if (p.action === "pause") { pendingChecks.delete(p.id); monitor.status = "paused"; }
     else if (p.action === "resume") { monitor.status = "active"; monitor.nextAt = now(); }
     else if (p.action === "check") { monitor.nextAt = now(); await pollDue(); return result(describe(monitor)); }
     else throw new Error("action must be create, list, pause, resume, cancel, or check");
     persist(); arm(); return result(describe(monitor));
-  } });
+  } }));
   pi.on?.("agent_end", (event: any) => {
     const text = (event?.messages ?? []).map((m: any) => typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? "")).join("\n");
     const eventMonitorId = typeof event?.monitorId === "string" ? event.monitorId : undefined;
@@ -117,7 +131,7 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     const matched = candidates.length === 1 ? candidates : candidates.length === 0 && dueFallback.length === 1 ? dueFallback : [];
     for (const monitor of matched) {
       const observation = observationFromMessage(text, monitor.attempts, now());
-      if (!observation) continue;
+      if (!observation) { pendingChecks.delete(monitor.id); continue; }
       pendingChecks.delete(monitor.id); monitor.lastObservation = observation; monitor.history = [...monitor.history, observation].slice(-10);
       if (observation.status === "complete" || observation.status === "invalid" || !observation.retryable || monitor.attempts >= monitor.maxAttempts) monitor.nextAt = Number.MAX_SAFE_INTEGER;
       else monitor.nextAt = now() + monitor.intervalMs;

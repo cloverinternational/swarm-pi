@@ -324,7 +324,18 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
   const lifecycleGuard = () => { const x = owned() ?? legacyOwned(); if (x) throw Error("Paseo daemon is running; stop it before update/build"); for (const file of [pidFile, join(d.root!, "artifacts", "paseo", "daemon.pid")]) { if (!d.fs.existsSync(file)) continue; const raw = JSON.parse(d.fs.readFileSync(file, "utf8")); const pid = typeof raw === "number" ? raw : raw.pid; try { d.processKill!(pid, 0); throw Error("Paseo daemon record is live but unverifiable"); } catch (e: any) { if (e?.code !== "ESRCH") throw e; } } };
   const update = async () => { if (!acquire()) return { success: false, error: "Another Paseo operation is in progress" }; try { lifecycleGuard(); const fetchResult = await run(paseo, "git", ["fetch", "--depth", "1", "origin", "main"]); if (!fetchResult.ok) return { success: false, steps: [{ name: "fetch", ok: false, output: fetchResult.output }] }; const checkout = await run(paseo, "git", ["checkout", "--detach", "FETCH_HEAD"]); return { success: checkout.ok, steps: [{ name: "fetch", ok: true, output: fetchResult.output }, { name: "checkout", ok: checkout.ok, output: checkout.output }] }; } catch (e) { return { success: false, error: e instanceof Error ? e.message : "Update refused" }; } finally { d.fs.rmSync!(lock, { recursive: true, force: true }); } };
   const build = async () => { if (!acquire()) return { success: false, error: "Another Paseo operation is in progress" }; try { lifecycleGuard(); const i = await run(paseo, "npm", ["install", "--no-audit", "--no-fund"]); if (!i.ok) return { success: false, partial: true, step: "install", output: i.output }; const b = await run(paseo, "npm", ["run", "build:server"]); return { success: b.ok, step: "build:server", output: b.output }; } catch (e) { return { success: false, error: e instanceof Error ? e.message : "Build refused" }; } finally { d.fs.rmSync!(lock, { recursive: true, force: true }); } };
-  const pair = () => simple([process.execPath, "--disable-warning=DEP0040", cli, "daemon", "pair", "--relay", "--json"]);
+  const pair = async (): Promise<CommandResult> => {
+    const result = await simple([process.execPath, "--disable-warning=DEP0040", cli, "daemon", "pair", "--relay", "--json"]);
+    if (!result.ok) return result;
+    try {
+      const value = JSON.parse(result.output);
+      if (typeof value?.url !== "string" || !value.url.includes("#offer=")) throw new Error("Paseo did not return a valid #offer pairing URL");
+      if (typeof value?.qr !== "string" || value.qr.length === 0) throw new Error("Paseo did not return a pairing QR code");
+      return { ...result, output: `Paseo pairing URL:\n${value.url}\n\nScan this QR code in the Paseo mobile app:\n${value.qr}` };
+    } catch (error) {
+      return { ...result, ok: false, output: error instanceof Error ? error.message : "Invalid Paseo pairing output" };
+    }
+  };
   const applySetup = async (listen?: string) => { if (!acquire()) return { success: false, error: "Another Paseo setup is already in progress; if interrupted, inspect start.lock before removing it" }; try { return await setupUnlocked(listen, true); } finally { d.fs.rmSync!(lock, { recursive: true, force: true }); } };
   const setup = (listen?: string, apply = false) => apply ? applySetup(listen) : setupUnlocked(listen, false);
   return { run, inspect, setup, applySetup, start, stop, update, build, pair, health, logs, serve: setup, paths: { paseo, cli, state: d.state!, pidFile, log, paseoHome }, deps: d };

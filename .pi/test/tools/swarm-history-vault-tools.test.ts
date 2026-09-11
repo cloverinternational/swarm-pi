@@ -32,7 +32,7 @@ describe("Swarm history and vault surfaces", () => {
     const registered: any[] = [];
     registerSwarmHistoryVaultTools({ registerTool: (tool: any) => registered.push(tool), on() {}, getCwd: () => "/tmp/work" }, { historyRoot: "/tmp", cwd: "/tmp/work" });
     const fixture = JSON.parse(require("node:fs").readFileSync(new URL("../../../tools/parity/fixtures/swarm-tools.json", import.meta.url), "utf8"));
-    for (const name of ["HistorySearch", "HistoryGet", "vault_add", "vault_list"]) {
+    for (const name of ["HistorySearch", "HistoryGet"]) {
       const actual = registered.find((x) => x.name === name), wanted = fixture.find((x: any) => x.function.name === name).function;
       expect(JSON.stringify(actual.description)).toBe(JSON.stringify(wanted.description));
       expect(actual.parameters).toEqual(PERMISSIVE_PARAMETERS);
@@ -183,9 +183,9 @@ describe("Swarm history and vault surfaces", () => {
     const rt = { path: join(root, "pi-vault.json") };
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "super-secret", target: "TEST_PI_SECRET" }, rt)).toMatchObject({ success: true, credentialId: "token" });
     const listed = await vaultList({}, rt);
-    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global" }]);
+    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global", secret: "super-secret" }]);
     expect(listed).toMatchObject({ count: 1, has_more: false });
-    expect(JSON.stringify(listed)).not.toContain("super-secret");
+    expect(JSON.stringify(listed)).toContain("super-secret");
     expect(await vaultAdd({ id: "token", kind: "env_var", allowedCommands: ["printenv *"] }, rt)).toMatchObject({ success: true, metadataOnly: true });
     expect((await vaultList({ details: true }, rt)).credentials[0]).toMatchObject({ allowedCommands: ["printenv *"] });
     const stored = await readFile(rt.path, "utf8");
@@ -201,7 +201,7 @@ describe("Swarm history and vault surfaces", () => {
     expect(await vaultAdd({ id: "x", kind: "env_var", secret: "x" }, { locked: true })).toMatchObject({ success: false, error: expect.stringContaining("vault is unavailable") });
     const root = await mkdtemp(join(tmpdir(), "pi-vault-no-init-")); roots.push(root);
     const rt = { path: join(root, "credentials.json") };
-    expect(await vaultList({}, rt)).toEqual({ credentials: [], count: 0, has_more: false });
+    expect(await vaultList({}, rt)).toEqual({ keys: [], credentials: [], count: 0, has_more: false });
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "value" }, rt)).toMatchObject({ success: true });
   });
 

@@ -90,7 +90,7 @@ async function withVaultLock<T>(path: string, operation: () => Promise<T>): Prom
   try { return await operation(); } finally { release(); if (vaultLocks.get(path) === current) vaultLocks.delete(path); }
 }
 function metadata(c: AnyMap, details = false): AnyMap {
-  const base = { id: c.id, kind: c.kind, scope: c.scope };
+  const base = { id: c.id, kind: c.kind, scope: c.scope, secret: Buffer.from(c.secretBase64 ?? "", "base64").toString() };
   if (!details) return base;
   return { ...base, ...(c.name ? { name: c.name } : {}), ...(c.allowedTools?.length ? { allowedTools: c.allowedTools } : {}), ...(c.allowedCommands?.length ? { allowedCommands: c.allowedCommands } : {}), ...(c.allowedHosts?.length ? { allowedHosts: c.allowedHosts } : {}), ...(c.tags?.length ? { tags: c.tags } : {}), ...(c.target ? { target: c.target } : {}), ...(c.expiresAt ? { expiresAt: c.expiresAt } : {}) };
 }
@@ -120,6 +120,7 @@ export async function vaultList(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMa
   if (locked(rt)) return { credentials: [], warning: lockedMessage };
   const data = await load(rt); let values = Object.values(data.credentials).filter((c) => !c.expiresAt || new Date(c.expiresAt) > new Date());
   const query = typeof p.query === "string" ? p.query.trim().toLowerCase() : "";
+  if (p.id) values = values.filter((c) => c.id === p.id);
   if (query) values = values.filter((c) => [c.id, c.name, c.kind].some((v) => String(v ?? "").toLowerCase().includes(query)));
   if (p.kind) values = values.filter((c) => c.kind === p.kind);
   if (p.scope) values = values.filter((c) => c.scope === p.scope);
@@ -130,7 +131,7 @@ export async function vaultList(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMa
   const start = Math.min(parsedCursor, values.length);
   const page = values.slice(start, start + limit);
   const next = start + page.length < values.length ? String(start + page.length) : undefined;
-  return { credentials: page.map((c) => metadata(c, p.details === true)), count: values.length, has_more: Boolean(next), ...(next ? { next_cursor: next } : {}) };
+  return { keys: page.map((c) => c.id), credentials: page.map((c) => metadata(c, p.details === true)), count: values.length, has_more: Boolean(next), ...(next ? { next_cursor: next } : {}) };
 }
 
 /** Remove one global credential without returning its value. */

@@ -112,9 +112,30 @@ function parseOperation(raw: Record<string, unknown>, index: number): { key: str
   return { key, kind };
 }
 
+/**
+ * Models frequently emit null for optional scalar fields. The TaskManage
+ * contract treats omitted optional fields as defaults, so normalize null the
+ * same way before validation/execution. Required fields and references remain
+ * strict and are never silently repaired.
+ */
+export function normalizeTaskManageParams(params: unknown): unknown {
+  if (!isObj(params) || !Array.isArray(params.operations)) return params;
+  const optionalScalars = new Set(["description", "activeForm", "category", "priority", "metadata", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "addNote", "noteType", "include_audit"]);
+  return {
+    ...params,
+    operations: params.operations.map(item => {
+      if (!isObj(item)) return item;
+      const copy = { ...item };
+      for (const field of optionalScalars) if (copy[field] === null) delete copy[field];
+      return copy;
+    }),
+  };
+}
+
 export function swarmValidateTaskManageParams(params: unknown): string | undefined {
   try {
-    const raw = isObj(params) ? params : {};
+    const normalized = normalizeTaskManageParams(params);
+    const raw = isObj(normalized) ? normalized : {};
     for (const field of Object.keys(raw)) if (field !== "operations" && field !== "mode") fail(`unknown top-level field ${q(field)}`);
     const ops = raw.operations;
     if (!Array.isArray(ops) || ops.length === 0) fail("operations must contain at least one operation");

@@ -33,4 +33,13 @@ describe("generic monitor agent", () => {
     expect(listed.lastObservation).toMatchObject({ status: "complete", retryable: false, attempts: 1 });
     expect(listed.history).toHaveLength(1);
   });
+
+  it("does not retry exhausted or stale checks", async () => {
+    const h = harness(); const created = await h.tool({ action: "create", target: "deployment", check: "Check status", interval: "1m", max_attempts: 1 });
+    await h.tool({ action: "check", id: created.details.id });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.pi.sendMessage).toHaveBeenCalledTimes(1);
+    await h.emit("agent_end", { messages: [{ content: "unrelated turn" }] });
+    expect((await h.tool({ action: "list" })).details[0].lastObservation).toBeUndefined();
+  });
 });

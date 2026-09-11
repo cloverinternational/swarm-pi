@@ -53,7 +53,17 @@ export function registerTaskManageExtension(
   (pi as any).codemodeTools = [...((pi as any).codemodeTools ?? []), ...bridged];
   // Swarm's builtin hooks (task-enforcement, task-maintenance, skill budget,
   // sleep/stdin, annoyance) in HooksManager order; idempotent per Pi instance.
-  registerSwarmBuiltinHooks(pi, { enforcementMode: options?.enforcementMode });
+  registerSwarmBuiltinHooks(pi, {
+    enforcementMode: options?.enforcementMode,
+    completion: {
+      toolThreshold: options?.maintenanceToolThreshold ?? 8,
+      maxNudges: 3,
+    },
+  });
+  // Enforcement remains off for this adapter. Lifecycle guidance is carried by
+  // the TaskManage tool contract/result rather than a second visible hook
+  // message, which avoids duplicate prompt injection with the canonical prompt
+  // pipeline while still instructing the model to close tasks.
   const hooks = registerTaskHooks(pi, manager, { ...options, enforcementMode: "off", silent: true });
   // ask_user_question is provided by the forked ask-user extension (30-tools/ask-user).
   // Keep interaction registration here out of the root extension: Pi rejects

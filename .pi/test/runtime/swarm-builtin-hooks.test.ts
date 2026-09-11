@@ -94,6 +94,34 @@ const taskManage = (operations: any[]) => ({ toolName: "TaskManage", params: { o
 const ok = (call: any) => ({ ...call, failed: false, output: "<result exit_code=\"0\" duration_ms=\"1\" timed_out=\"false\">\n  <stdout><![CDATA[]]></stdout>\n  <stderr><![CDATA[]]></stderr>\n</result>" });
 
 describe("headless builtin hook pipeline", () => {
+  it("nudges and then blocks continued acting until the focused task is reconciled", () => {
+    const tasks: HookTask[] = [{ id: "focus", subject: "Implement feature", status: "in_progress", active: true }];
+    const pipeline = createSwarmBuiltinPipeline({ session: "completion-enforcement", tasks: () => tasks,
+      trigger: { toolCallBudget: 100, workingBudget: 100, maxNudgeIgnores: 100, nudgeInterval: 5, errorResolutionThreshold: 1 } });
+    pipeline.budget.recordUserTurn("completion-enforcement");
+    const acting = () => pipeline.preTool(bash("go build ./..."));
+    for (let i = 0; i < 8; i++) expect(acting().block).toBeUndefined();
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 5; j++) pipeline.budget.recordUserTurn("completion-enforcement");
+      const result = acting();
+      expect(result.block).toBeUndefined();
+      expect(result.context).toContain("TASK COMPLETION NUDGE");
+    }
+    const blocked = acting();
+    expect(blocked.block ?? blocked.context).toContain("TASK COMPLETION ENFORCEMENT");
+    tasks[0].status = "completed";
+    tasks[0].active = false;
+    expect(acting().block).toBeUndefined();
+  });
+
+  it("does not count read-only exploration toward completion enforcement", () => {
+    const tasks: HookTask[] = [{ id: "focus", subject: "Research", status: "in_progress", active: true }];
+    const pipeline = createSwarmBuiltinPipeline({ session: "completion-readonly", tasks: () => tasks });
+    pipeline.budget.recordUserTurn("completion-readonly");
+    for (let i = 0; i < 20; i++) expect(pipeline.preTool({ toolName: "Read", params: {} }).block).toBeUndefined();
+    expect(pipeline.preTool(bash("go build ./...")).block).toBeUndefined();
+  });
+
   it("attributes maintenance to the focused task rather than the oldest in-progress task", () => {
     const tasks = [{ id: "old", subject: "OLD", status: "in_progress", active: false }, { id: "new", subject: "FOCUSED", status: "in_progress", active: true }];
     const pipeline = createSwarmBuiltinPipeline({ session: "focus-attribution", tasks: () => tasks });

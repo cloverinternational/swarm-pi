@@ -243,6 +243,14 @@ describe("root Pi TaskManage extension", () => {
     expect(panel.render(100).join("\n")).not.toContain("plan");
     expect(() => panel.invalidate()).not.toThrow();
     expect(tool.renderShell).toBe("self");
+
+    // Renderer must support Pi's structured details path even when content is
+    // unavailable or not JSON-shaped.
+    const structured = await tool.execute("call-structured", {
+      operations: [{ key: "verify", op: "create", subject: "Structured result" }],
+    });
+    const detailsOnly = tool.renderResult({ details: structured.details }, { isError: false, expanded: false }, {});
+    expect(detailsOnly.render(100).join("\n")).toContain("Structured result");
   });
 
   it("keeps a compact open-task widget above the editor", async () => {

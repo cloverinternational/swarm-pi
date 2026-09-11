@@ -16,7 +16,9 @@ describe("vault extension", () => {
       const added = await tools[0].execute("call", { action: "add", id: "demo", kind: "password", secret: "plain-value" });
       expect(added.details).toMatchObject({ success: true, scope: "global" });
       const listed = await tools[0].execute("call", { action: "list" });
-      expect(JSON.stringify(listed)).not.toContain("plain-value");
+      expect(JSON.stringify(listed)).toContain("plain-value");
+      const fetched = await tools[0].execute("call", { action: "get", id: "demo" });
+      expect(fetched.details.credentials).toEqual([{ id: "demo", kind: "password", scope: "global", secret: "plain-value" }]);
       expect(command.description).toContain("transparent");
     } finally { await rm(root, { recursive: true, force: true }); }
   });

@@ -11,13 +11,27 @@ export interface BootstrapSettings {
 export interface BootstrapMemory { id?: string; text: string; tags?: string[]; source?: string; }
 export interface BootstrapSkill { name: string; description?: string; source?: string; body: string; }
 export interface BootstrapSelection { memories: BootstrapMemory[]; skills: BootstrapSkill[]; evidence: string[]; }
-export interface BootstrapTask { subject: string; description: string; category?: string; priority?: string; }
+export interface BootstrapTask {
+  /** Stable model-provided identifier used to wire task dependencies. */
+  id: string;
+  /** Reconcile an existing task or propose a new one. */
+  action?: "create" | "update";
+  taskId?: string;
+  subject: string;
+  /** A specification: purpose, inputs, logic, implementation steps, and verification. */
+  description: string;
+  dependsOn?: string[];
+  /** Concise memory/skill-derived direction attached as a learning note. */
+  guidance?: string;
+  category?: string;
+  priority?: string;
+}
 
 export interface BootstrapResult {
   mode: BootstrapMode;
   status: "ready" | "disabled" | "degraded" | "cancelled" | "error";
   selection?: BootstrapSelection;
-  task?: BootstrapTask;
+  tasks?: BootstrapTask[];
   model: string;
   usage: { selectorCalls: number; draftCalls: number; inputChars: number; outputChars: number };
   error?: string;
@@ -28,5 +42,5 @@ export interface BootstrapSelector {
 }
 export interface ParallelSelectors { memory: BootstrapSelector; skills: BootstrapSelector; }
 export interface BootstrapDraft {
-  (task: string, selection: BootstrapSelection, signal: AbortSignal): Promise<BootstrapTask>;
+  (task: string, selection: BootstrapSelection, signal: AbortSignal): Promise<BootstrapTask[]>;
 }

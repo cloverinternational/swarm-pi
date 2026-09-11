@@ -83,6 +83,13 @@ const CONTINUE: HookResult = {};
 // ---------------------------------------------------------------------------
 export type EnforcementMode = "advise" | "block" | "off";
 export const TASK_ENFORCEMENT_HOOK = "task-enforcement-hook";
+export const TASK_COMPLETION_HOOK = "task-completion-enforcement-hook";
+export const TASK_COMPLETION_TOOL_THRESHOLD = 8;
+export const TASK_COMPLETION_MAX_NUDGES = 3;
+export interface TaskCompletionConfig {
+  toolThreshold?: number;
+  maxNudges?: number;
+}
 
 const HAS_PLAN_PHRASES = [
   "continue with the plan", "continue with plan", "follow the plan", "follow your plan", "stick to the plan",
@@ -165,6 +172,66 @@ This is a HARD REQUIREMENT. RECOMMENDED WORKFLOW:
   5. TaskManage update operation with status="completed"
 
 Categories: researching | planning | acting | verifying | debugging | documenting`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task completion enforcement. This is deliberately separate from the
+// maintenance reminder: maintenance suggests bookkeeping, while this hook
+// eventually gates further acting until the focused task is reconciled.
+// ---------------------------------------------------------------------------
+export class TaskCompletionEnforcementHook {
+  readonly name = TASK_COMPLETION_HOOK;
+  private taskID = "";
+  private toolCalls = 0;
+  private nudges = 0;
+  private readonly toolThreshold: number;
+  private readonly maxNudges: number;
+
+  constructor(config: TaskCompletionConfig = {}) {
+    this.toolThreshold = Math.max(1, config.toolThreshold ?? TASK_COMPLETION_TOOL_THRESHOLD);
+    this.maxNudges = Math.max(0, config.maxNudges ?? TASK_COMPLETION_MAX_NUDGES);
+  }
+
+  private reset(id = "") { this.taskID = id; this.toolCalls = 0; this.nudges = 0; }
+  private exempt(event: ToolCallEvent): boolean {
+    if (isTaskManagementTool(event.toolName) || isPlanModeTool(event.toolName) ||
+        isSkillTool(event.toolName) || isUserInteractionTool(event.toolName) ||
+        isCodeModeTool(event.toolName) || isReadOnlyExplorationTool(event.toolName)) return true;
+    if (isBashTool(event.toolName)) {
+      const command = event.params?.command;
+      if (typeof command === "string" && isBashReadOnly(command)) return true;
+    }
+    return false;
+  }
+  onToolBefore(event: ToolCallEvent, tasks: readonly HookTask[], budget: MetaNudgeBudget, session: string): HookResult {
+    const focused = tasks.find(t => t.status === "in_progress" && t.active === true && !t.owner);
+    if (!focused) { this.reset(); return CONTINUE; }
+    if (focused.id !== this.taskID) this.reset(focused.id);
+    if (!event.toolName || this.exempt(event)) return CONTINUE;
+    if (this.toolCalls < this.toolThreshold) { this.toolCalls++; return CONTINUE; }
+    this.nudges++;
+    if (this.nudges > this.maxNudges) {
+      return { block: true, message: this.blockMessage(focused) };
+    }
+    const [seq, ok] = budget.tryClaim(session, META_NUDGE_MAINTENANCE);
+    if (!ok) return CONTINUE;
+    return { message: wrapReminder(this.name, "nudge", seq, this.nudgeMessage(focused)) };
+  }
+  private nudgeMessage(task: HookTask): string {
+    return `[TASK COMPLETION NUDGE — ${task.subject}]\n\n` +
+      `You have continued acting on this focused task for ${this.toolCalls} tool calls. ` +
+      `Pause and reconcile it with TaskManage before more implementation:\n` +
+      `  - If the acceptance criteria are verified, update status="completed" and active=false.\n` +
+      `  - If unfinished, update the description or add a blocker note and keep it active.\n` +
+      `  - Do not claim completion merely because this reminder appeared.`;
+  }
+  private blockMessage(task: HookTask): string {
+    return `[TASK COMPLETION ENFORCEMENT — BLOCKED]\n\n` +
+      `Further acting tools are paused for focused task #${task.id} (${task.subject}). ` +
+      `Use TaskManage to reconcile the work first: mark it completed only after verification, ` +
+      `or record the blocker/scope change and update its state. TaskManage, read-only tools, ` +
+      `skills, and verification planning remain available.`;
   }
 }
 
@@ -633,11 +700,13 @@ export class SwarmHookPipeline {
 export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHooks" | "postHooks"> & {
   enforcementMode?: EnforcementMode;
   trigger?: AutogenTriggerConfig;
+  completion?: TaskCompletionConfig;
   extraPre?: PreToolHook[];   // sleep-blocker (85), stdin-conflict (84) — bash-only, supplied by the extension
   extraPost?: PostToolHook[]; // annoyance-nudge (20)
   planMode?: PlanModeHooks;   // interactive TUI only (PlanBroker present)
 }): SwarmHookPipeline {
   const enforcement = new TaskEnforcementHook(options.enforcementMode ?? "advise");
+  const completion = new TaskCompletionEnforcementHook(options.completion);
   const maintenance = new TaskMaintenanceReminderHook();
   const lifecycle = new AutogenLifecycleHook(options.trigger);
   const postActing = new PostActingHook();
@@ -647,6 +716,7 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
   const pre: PreToolHook[] = [
     ...(plan ? [{ name: PLAN_MODE_FIRST_TOOL_HOOK, run: (e: ToolCallEvent) => { const m = plan.firstTool(e.toolName); return m ? { message: m } : CONTINUE; } }] : []), // 96
     { name: enforcement.name, run: (e, t, b, s) => enforcement.onToolBefore(e, t, b, s, isSub()) },   // 95
+    { name: completion.name, run: (e, t, b, s) => completion.onToolBefore(e, t, b, s) },                 // 94
     { name: budgetHook.name, run: (e, t, b, s) => budgetHook.onToolBefore(e, t, b, s) },             // 90
     ...(options.extraPre ?? []),                                                                       // 85, 84
   ];
@@ -660,6 +730,6 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
     ...(plan ? [{ name: SIMULATION_HOOK, run: (e: ToolResultEvent) => plan.planExitDetected(e.toolName) ? { message: plan.simulationMessage() } : CONTINUE }] : []),
   ];
   const pipeline = new SwarmHookPipeline({ ...options, preHooks: pre, postHooks: post });
-  (pipeline as any).hooks = { enforcement, maintenance, lifecycle, postActing, budgetHook };
+  (pipeline as any).hooks = { enforcement, completion, maintenance, lifecycle, postActing, budgetHook };
   return pipeline;
 }
