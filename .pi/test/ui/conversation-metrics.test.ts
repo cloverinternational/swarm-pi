@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentModelLabel, footerIdentityLine, footerMetricsLine, wrapFooterText } from "../../extensions/50-ui/conversation-metrics.ts";
+import { clampFooterRow, currentModelLabel, footerIdentityLine, footerMetricsLine, footerVisibleWidth, wrapFooterText } from "../../extensions/50-ui/conversation-metrics.ts";
 
 describe("conversation metrics footer", () => {
   it("reports provider and model", () => {
@@ -19,5 +19,28 @@ describe("conversation metrics footer", () => {
 
   it("uses a clear fallback when model context is unavailable", () => {
     expect(footerIdentityLine("idle")).toContain("model unavailable");
+  });
+
+  it("measures visible width ignoring ANSI styling", () => {
+    expect(footerVisibleWidth("\x1b[32m●\x1b[0m  model x")).toBe("●  model x".length);
+    expect(footerVisibleWidth("汉字")).toBe(4);
+  });
+
+  it("clamps styled rows to the terminal width without splitting escapes", () => {
+    const styled = "\x1b[32m● running some long styled footer row\x1b[0m";
+    const clamped = clampFooterRow(styled, 10);
+    expect(footerVisibleWidth(clamped)).toBeLessThanOrEqual(10);
+    expect(clamped.startsWith("\x1b[32m")).toBe(true);
+    expect(clamped.endsWith("\x1b[0m")).toBe(true);
+  });
+
+  it("clamps wide characters as two cells and never throws on tiny widths", () => {
+    expect(footerVisibleWidth(clampFooterRow("汉字汉字汉字", 5))).toBeLessThanOrEqual(5);
+    expect(clampFooterRow("anything", 0)).toBe("");
+    expect(clampFooterRow("anything", -3)).toBe("");
+  });
+
+  it("leaves rows that already fit untouched", () => {
+    expect(clampFooterRow("short", 80)).toBe("short");
   });
 });
