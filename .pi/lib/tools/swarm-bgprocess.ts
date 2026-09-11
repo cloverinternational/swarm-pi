@@ -266,7 +266,10 @@ export class SwarmBackgroundProcessManager {
       startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], completion, spawned, backgrounded: false,
     };
     this.processes.set(id, rec);
-    setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command });
+    // The drawer inspects running commands live: drain any buffered chunks
+    // first so Enter shows output written since the last 50ms poll tick.
+    const readOutput = () => { this.poll(rec); return rec.lines.slice(-160).map(line => line.content).join("\n"); };
+    setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput });
     // Under a PTY the child sees one terminal, so stderr is interleaved into
     // stdout and every newline arrives as CRLF. Strip the CR so stored lines,
     // regex filters and byte counts match the non-PTY tiers.

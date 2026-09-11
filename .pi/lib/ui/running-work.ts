@@ -13,6 +13,8 @@ export interface RunningWorkItem {
   tokens?: number;
   detail: string;
   output?: string;
+  /** Live snapshot of the process output; used while the work is still running. */
+  readOutput?: () => string;
   transcriptPath?: string;
 }
 
@@ -35,14 +37,20 @@ export function onRunningWorkChange(listener: () => void): () => void { state().
 export function runningWorkExpanded(): boolean { return state().expanded; }
 export function setRunningWorkExpanded(expanded: boolean): void { state().expanded = expanded; state().listeners.forEach(listener => listener()); }
 export function toggleRunningWorkExpanded(): boolean { setRunningWorkExpanded(!runningWorkExpanded()); return runningWorkExpanded(); }
-export function runningWorkSelection(): number { return state().selected; }
+/** Selection clamped to the currently visible list so a stale index (after items finished or were removed) still resolves to a real row. */
+export function runningWorkSelection(): number {
+  return Math.max(0, Math.min(state().selected, visibleRunningWork().length - 1));
+}
 export function moveRunningWorkSelection(delta: number): void {
   const items = visibleRunningWork();
   if (!items.length) return;
-  state().selected = Math.max(0, Math.min(items.length - 1, state().selected + delta));
+  state().selected = Math.max(0, Math.min(items.length - 1, runningWorkSelection() + delta));
   state().listeners.forEach(listener => listener());
 }
-export function selectedRunningWork(): RunningWorkItem | undefined { return visibleRunningWork()[state().selected]; }
+export function selectedRunningWork(): RunningWorkItem | undefined {
+  const items = visibleRunningWork();
+  return items.length ? items[runningWorkSelection()] : undefined;
+}
 export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (data === "\x02") {
     const detach = (globalThis as any)[Symbol.for("pi-swarm-background-bash-detach")];
@@ -62,9 +70,22 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (data === "\r" || data === "\n") {
     const item = selectedRunningWork();
     if (item) {
-      if (item.transcriptPath && typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · conversation`, readTranscript(item.transcriptPath));
-      else if (item.transcriptPath) ctx?.ui?.notify?.(readTranscript(item.transcriptPath), "info");
-      else ctx?.ui?.notify?.(`${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntokens: ${item.tokens ?? "not reported"}\n\n${item.output || item.detail}`, "info");
+      // Re-read the transcript on every open so inspecting a running
+      // sub-agent shows its current conversation, not a stale snapshot.
+      if (item.transcriptPath) {
+        const header = `${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntask: ${item.detail}\n\n`;
+        const body = header + readTranscript(item.transcriptPath);
+        if (typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · conversation`, body);
+        else ctx?.ui?.notify?.(body, "info");
+      }
+      else {
+        // A running item has no final `output` yet; prefer the live snapshot
+        // so inspecting an in-flight command shows what it is doing right now.
+        const live = item.readOutput?.() ?? item.output;
+        const body = `${item.label}\nstatus: ${item.status}\ntime: ${formatRunningWorkDuration(item)}\ntokens: ${item.tokens ?? "not reported"}\n${item.kind === "bash" ? "command" : "task"}: ${item.detail}\n\n${live?.trim() ? live : "(no output yet)"}`;
+        if (typeof ctx?.ui?.editor === "function") void ctx.ui.editor(`${item.label} · output`, body);
+        else ctx?.ui?.notify?.(body, "info");
+      }
     }
     return true;
   }

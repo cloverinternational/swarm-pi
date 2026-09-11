@@ -75,6 +75,49 @@ export function wrapFooterText(text: string, width: number): string[] {
   return lines.length ? lines : [""];
 }
 
+const ANSI_PATTERN = /^\x1b\[[0-9;]*m/;
+/** Terminal cells a string occupies, ignoring ANSI SGR sequences and counting common wide (CJK/emoji) code points as two cells. */
+export function footerVisibleWidth(text: string): number {
+  let width = 0;
+  for (let i = 0; i < text.length;) {
+    const ansi = ANSI_PATTERN.exec(text.slice(i));
+    if (ansi) { i += ansi[0].length; continue; }
+    const code = text.codePointAt(i)!;
+    width += isWideCodePoint(code) ? 2 : 1;
+    i += code > 0xffff ? 2 : 1;
+  }
+  return width;
+}
+function isWideCodePoint(code: number): boolean {
+  return (code >= 0x1100 && code <= 0x115f) || (code >= 0x2e80 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7a3)
+    || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe30 && code <= 0xfe4f) || (code >= 0xff00 && code <= 0xff60)
+    || (code >= 0xffe0 && code <= 0xffe6) || (code >= 0x1f300 && code <= 0x1faff) || (code >= 0x20000 && code <= 0x3fffd);
+}
+/**
+ * Truncate a possibly-styled line so its visible width never exceeds the
+ * terminal width. Pi crashes the whole TUI (`Rendered line exceeds terminal
+ * width`) on any oversized footer row, so every rendered line passes through
+ * this clamp. ANSI sequences are preserved and never split mid-escape.
+ */
+export function clampFooterRow(row: string, width: number): string {
+  if (width <= 0) return "";
+  if (footerVisibleWidth(row) <= width) return row;
+  let out = "";
+  let used = 0;
+  let hadAnsi = false;
+  for (let i = 0; i < row.length;) {
+    const ansi = ANSI_PATTERN.exec(row.slice(i));
+    if (ansi) { out += ansi[0]; i += ansi[0].length; hadAnsi = true; continue; }
+    const code = row.codePointAt(i)!;
+    const cell = isWideCodePoint(code) ? 2 : 1;
+    if (used + cell > width) break;
+    out += String.fromCodePoint(code);
+    used += cell;
+    i += code > 0xffff ? 2 : 1;
+  }
+  return hadAnsi ? out + "\x1b[0m" : out;
+}
+
 export function currentModelLabel(ctx: any): string | undefined {
   const model = ctx?.model;
   if (!model?.id && !model?.provider) return undefined;
@@ -122,6 +165,10 @@ function currentWalltime(now = Date.now()): number {
 class MetricsFooter {
   constructor(private readonly theme: any, private readonly onInvalidate: () => void) {}
   render(width: number): string[] {
+    try { return this.renderRows(Math.max(1, Math.floor(Number(width) || 80))); }
+    catch { return []; } // A footer defect must never take down the whole TUI.
+  }
+  private renderRows(width: number): string[] {
     const m = shared.metrics ?? blank();
     const state = m.active ? "running" : "idle";
     const model = currentModelLabel(shared.ctx);
@@ -139,7 +186,7 @@ class MetricsFooter {
       return [
         ...wrapFooterText(identity, width).map((row) => styleIdentityLine(row, state, this.theme)),
         ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme)),
-      ];
+      ].map((row) => clampFooterRow(row, width));
     }
     const header = `Running work (${work.length})  Down select  Enter inspect  Esc close`;
     const rows = wrapFooterText(header, width).map((row) => this.theme.fg("accent", row));
@@ -155,7 +202,7 @@ class MetricsFooter {
       rows.push(...wrapFooterText(row, width));
     }
     const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments);
-    return [...rows, ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme))];
+    return [...rows, ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme))].map((row) => clampFooterRow(row, width));
   }
   dispose() {}
   invalidate() { this.onInvalidate(); }
