@@ -38,7 +38,11 @@ const clean = (value: unknown, label: string, max = 8_000): string => {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new Error(`${label} must be 1-${max} characters`);
   return value.trim();
 };
-const bounded = (value: unknown, max = 2_000) => String(value ?? "").replace(/(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S+/gi, "[REDACTED]").slice(0, max);
+const bounded = (value: unknown, max = 2_000) => {
+  let text: string;
+  try { text = typeof value === "string" ? value : JSON.stringify(value ?? ""); } catch { text = "[unserializable]"; }
+  return text.replace(/(?:api[_-]?key|access[_-]?token|authorization|bearer|token|password|secret|private[_-]?key|cookie)\s*[:=]\s*[^\s,;}]+/gi, "[REDACTED]").replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").slice(0, max);
+};
 function observationFromMessage(message: unknown, attempts: number, now: number): Observation | undefined {
   const text = typeof message === "string" ? message : JSON.stringify(message ?? "");
   const match = /(?:status\s*[:=]\s*|\bstatus\b\s+)(complete|pending|blocked|failed|unavailable|invalid)/i.exec(text);
@@ -55,14 +59,14 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
   const wake = createSessionWakeup(pi);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let live = true;
-  const pendingChecks = new Set<string>();
+  const pendingChecks = new Map<string, number>();
   const notify = options.notify ?? ((message, level = "info") => pi.__swarmMonitorContext?.ui?.notify?.(message, level));
   const append = options.append ?? ((data) => pi.appendEntry?.(ENTRY, data));
   const persist = () => append([...monitors.values()]);
-  const describe = (m: Monitor) => ({ ...m, next_check_at: m.nextAt >= 0 && m.nextAt <= 8_640_000_000_000_000 ? new Date(m.nextAt).toISOString() : null, interval: `${m.intervalMs / 1000}s` });
+  const describe = (m: Monitor) => ({ id: m.id, target: bounded(m.target, 500), check: bounded(m.check, 500), ...(m.action ? { action: bounded(m.action, 500) } : {}), intervalMs: m.intervalMs, nextAt: m.nextAt, lastCheckedAt: m.lastCheckedAt, status: m.status, attempts: m.attempts, maxAttempts: m.maxAttempts, lastObservation: m.lastObservation ? { ...m.lastObservation, summary: bounded(m.lastObservation.summary), evidence: m.lastObservation.evidence.map(x => bounded(x)) } : undefined, history: m.history.map(o => ({ ...o, summary: bounded(o.summary), evidence: o.evidence.map(x => bounded(x)) })), next_check_at: m.nextAt >= 0 && m.nextAt < EXHAUSTED_AT ? new Date(m.nextAt).toISOString() : null, interval: `${m.intervalMs / 1000}s` });
   const arm = () => {
     if (timer) clearTimeout(timer);
-    const active = [...monitors.values()].filter(m => m.status === "active");
+    const active = [...monitors.values()].filter(m => m.status === "active" && m.nextAt < EXHAUSTED_AT);
     if (!live || !active.length) return;
     const delay = Math.max(0, Math.min(...active.map(m => m.nextAt - now())));
     timer = setTimeout(() => void pollDue(), delay);
@@ -70,13 +74,19 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
   };
   const pollDue = async () => {
     if (!live) return;
-    const due = [...monitors.values()].filter(m => m.status === "active" && m.nextAt <= now());
+    const due = [...monitors.values()].filter(m => m.status === "active" && m.nextAt < EXHAUSTED_AT && m.nextAt <= now());
     for (const monitor of due) {
-      monitor.lastCheckedAt = now(); monitor.attempts++; pendingChecks.add(monitor.id);
+      const pendingAt = pendingChecks.get(monitor.id);
+      if (pendingAt !== undefined) {
+        if (now() - pendingAt < monitor.intervalMs) { monitor.nextAt = pendingAt + monitor.intervalMs; continue; }
+        pendingChecks.delete(monitor.id);
+        if (monitor.attempts >= monitor.maxAttempts) { monitor.nextAt = EXHAUSTED_AT; continue; }
+      }
+      monitor.lastCheckedAt = now(); monitor.attempts++; pendingChecks.set(monitor.id, now());
       // Reserve the final attempt without scheduling another timer. A later
       // agent_end may still record its observation, but a missing response
       // must not create an unbounded retry loop.
-      monitor.nextAt = monitor.attempts >= monitor.maxAttempts ? EXHAUSTED_AT : now() + monitor.intervalMs;
+      monitor.nextAt = now() + monitor.intervalMs;
       const action = monitor.action ? `\nIf the condition is met, follow up with this action (only when safe and authorized): ${monitor.action}` : "";
       const prompt = `[MONITOR ${monitor.id}] Check target: ${monitor.target}\nInspection instructions: ${monitor.check}${action}\nReport exactly one status (complete, pending, blocked, failed, unavailable, or invalid), a concise summary, and concrete evidence. Do not claim completion without fresh evidence.`;
       await wake.send({ customType: "swarm-monitor", content: prompt, display: true, details: { monitorId: monitor.id, target: monitor.target } }, wake.capture());
@@ -97,7 +107,7 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
       if (!raw?.id || !raw?.target || !raw?.check || !Number.isFinite(intervalMs) || intervalMs < 5_000 || intervalMs > MAX_INTERVAL || !Number.isFinite(nextAt)) continue;
       const safeMaxAttempts = Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 ? maxAttempts : 3;
       const safeAttempts = Number.isInteger(attempts) && attempts >= 0 ? attempts : 0;
-      monitors.set(raw.id, { ...raw, intervalMs, nextAt: safeAttempts >= safeMaxAttempts ? EXHAUSTED_AT : nextAt, attempts: safeAttempts, maxAttempts: safeMaxAttempts, history: Array.isArray(raw.history) ? raw.history.slice(-10) : [], status: raw.status === "paused" ? "paused" : "active" });
+      monitors.set(raw.id, { id: raw.id, target: clean(raw.target, "target"), check: clean(raw.check, "check"), ...(typeof raw.action === "string" && raw.action.length <= 8_000 ? { action: clean(raw.action, "action") } : {}), intervalMs, nextAt: safeAttempts >= safeMaxAttempts ? EXHAUSTED_AT : nextAt, attempts: safeAttempts, maxAttempts: safeMaxAttempts, history: [], status: raw.status === "paused" ? "paused" : "active" });
     }
   };
   pi.registerTool?.(withDefaultToolRenderer({ name: "monitor_agent", label: "Monitor agent", description: "Monitor any long-running target using periodic agent checks. Targets may be GitHub PRs, deployments, tickets, files, APIs, inboxes, jobs, or anything the session can inspect. Actions never happen unless explicitly included in the monitor action and permitted by normal policy.", parameters: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["create", "list", "pause", "resume", "cancel", "check"] }, id: { type: "string" }, target: { type: "string" }, check: { type: "string" }, interval: { type: "string" }, max_attempts: { type: "integer", minimum: 1, maximum: 5 }, follow_up: { type: "string" } } }, execute: async (_id: string, p: any) => {
@@ -121,19 +131,18 @@ export function registerSwarmMonitor(pi: any, options: MonitorOptions = {}) {
     persist(); arm(); return result(describe(monitor));
   } }));
   pi.on?.("agent_end", (event: any) => {
-    const text = (event?.messages ?? []).map((m: any) => typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? "")).join("\n");
+    const text = bounded((event?.messages ?? []).map((m: any) => typeof m?.content === "string" ? m.content : m?.content ?? "").join("\n"), 16_000);
     const eventMonitorId = typeof event?.monitorId === "string" ? event.monitorId : undefined;
     const candidates = [...monitors.values()].filter(m => m.id === eventMonitorId || text.includes(m.id) || text.includes(`[MONITOR ${m.id}]`));
     // In headless hosts the delivered turn may omit the injected prompt. If
     // exactly one monitor is due, correlate that turn to it rather than lose
     // the observation; multiple monitors remain fail-closed.
-    const dueFallback = [...monitors.values()].filter(m => pendingChecks.has(m.id));
-    const matched = candidates.length === 1 ? candidates : candidates.length === 0 && dueFallback.length === 1 ? dueFallback : [];
+    const matched = candidates.length === 1 ? candidates : [];
     for (const monitor of matched) {
       const observation = observationFromMessage(text, monitor.attempts, now());
       if (!observation) { pendingChecks.delete(monitor.id); continue; }
       pendingChecks.delete(monitor.id); monitor.lastObservation = observation; monitor.history = [...monitor.history, observation].slice(-10);
-      if (observation.status === "complete" || observation.status === "invalid" || !observation.retryable || monitor.attempts >= monitor.maxAttempts) monitor.nextAt = Number.MAX_SAFE_INTEGER;
+      if (observation.status === "complete" || observation.status === "invalid" || !observation.retryable || monitor.attempts >= monitor.maxAttempts) monitor.nextAt = EXHAUSTED_AT;
       else monitor.nextAt = now() + monitor.intervalMs;
       append({ event: "observation", monitorId: monitor.id, observation });
       notify(`${monitor.target}: ${observation.status}`);

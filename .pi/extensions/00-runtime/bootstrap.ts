@@ -129,6 +129,23 @@ export default function bootstrapExtension(pi: any) {
           for (const item of proposal.tasks) if (item.action === "create" && item.dependsOn.some((id: string) => !ids.has(id))) throw new Error("Task dependency references unknown task");
           return proposal.tasks;
         };
+        const orderTaskProposals = (tasks: any[]) => {
+          const byId = new Map(tasks.map(task => [task.id, task]));
+          const visiting = new Set<string>(), visited = new Set<string>(), ordered: any[] = [];
+          const visit = (task: any) => {
+            if (visited.has(task.id)) return;
+            if (visiting.has(task.id)) throw new Error(`Task dependency cycle at ${task.id}`);
+            visiting.add(task.id);
+            for (const dependency of task.dependsOn ?? []) {
+              const dependencyTask = byId.get(dependency);
+              if (!dependencyTask) throw new Error(`Task dependency references unknown task ${dependency}`);
+              visit(dependencyTask);
+            }
+            visiting.delete(task.id); visited.add(task.id); ordered.push(task);
+          };
+          for (const task of tasks) visit(task);
+          return ordered;
+        };
         // Reconcile against the live conversation task graph on every fresh
         // task request. The drafter may propose updates to existing tasks and
         // creates only for genuinely missing work. Exact prior commits remain
@@ -148,7 +165,8 @@ export default function bootstrapExtension(pi: any) {
           if (result.tasks?.length) {
             details.stage = "tasks"; details.tasksDrafted = result.tasks.length; emit();
             if (commitTasks && !prior) {
-              const creates = result.tasks.filter(item => item.action !== "update");
+              const orderedTasks = orderTaskProposals(result.tasks);
+              const creates = orderedTasks.filter(item => item.action !== "update");
               const keyById = new Map(creates.map((item, index) => [item.id, `${baseKey}:${index + 1}`]));
               const categories = new Set(["researching", "planning", "acting", "verifying", "debugging", "documenting"]);
               const priorities = new Set(["low", "medium", "high"]);
@@ -156,7 +174,7 @@ export default function bootstrapExtension(pi: any) {
               // validator correctly treats an explicitly present undefined category
               // as an invalid non-string. Also constrain model-provided enums at the
               // boundary so one bad task cannot invalidate the whole batch.
-              const operations = result.tasks.map((item, index) => ({
+              const operations = orderedTasks.map((item, index) => ({
                 key: `${baseKey}:${index + 1}`,
                 op: item.action === "update" ? "update" : "create",
                 ...(item.action === "update" ? { taskId: item.taskId } : {}),
@@ -165,17 +183,17 @@ export default function bootstrapExtension(pi: any) {
                 ...(typeof item.category === "string" && categories.has(item.category) ? { category: item.category } : {}),
                 ...(typeof item.priority === "string" && priorities.has(item.priority) ? { priority: item.priority } : {}),
                 ...(typeof (item as any).guidance === "string" && (item as any).guidance.trim() ? { addNote: (item as any).guidance.trim().slice(0, 20000), noteType: "learning" } : {}),
-                ...(item.action !== "update" && item.dependsOn?.length ? { addBlockedBy: item.dependsOn.map(id => ({ ref: keyById.get(id) ?? id })) } : {}),
+                ...(item.dependsOn?.length ? { addBlockedBy: item.dependsOn.map(id => ({ ref: keyById.get(id) ?? id })) } : {}),
               }));
               const committed = await dispatchBootstrapHandoff("TaskManage", { operations }, signal, ctx, active);
               const batch = JSON.parse(committed.content[0].text);
               if (batch.status !== "succeeded") throw new Error("Bootstrap task commit did not succeed");
-              taskMapping = result.tasks.map((item, index) => ({
-                proposalKey: item.id,
-                operationKey: `${baseKey}:${index + 1}`,
-                taskId: batch.results?.[index]?.data?.task?.id ?? item.taskId ?? null,
-                status: batch.results?.[index]?.status === "succeeded" ? (item.action === "update" ? "updated" : "created") : "failed",
-              }));
+              const committedByKey = new Map((batch.results ?? []).map((entry: any) => [entry.key, entry]));
+              taskMapping = result.tasks.map(item => {
+                const operationIndex = orderedTasks.indexOf(item);
+                const committed = committedByKey.get(`${baseKey}:${operationIndex + 1}`) as any;
+                return { proposalKey: item.id, operationKey: `${baseKey}:${operationIndex + 1}`, taskId: committed?.data?.task?.id ?? item.taskId ?? null, status: committed?.status === "succeeded" ? (item.action === "update" ? "updated" : "created") : "failed" };
+              });
               pi.appendEntry("pi-swarm-bootstrap-task", { key: baseKey, result: batch, mapping: taskMapping });
               details.tasksCommitted = taskMapping.filter(item => item.status === "created" || item.status === "updated").length;
             }
@@ -195,17 +213,16 @@ export default function bootstrapExtension(pi: any) {
               const mapped = taskMapping.find(candidate => candidate.proposalKey === item.id);
               return { proposalKey: item.id, taskId: mapped?.taskId ?? item.taskId ?? null, status: mapped?.status ?? (item.action === "update" ? "update_proposed" : "proposed") };
             }) };
+        let note: string;
+        if (prior) note = "Reused the previously committed task reconciliation; no duplicate tasks were drafted or committed.";
+        else if (commitTasks) note = "Existing tasks were updated and missing tasks created as proposed. Read taskPlan taskId values and task notes, then continue the focused task.";
+        else if (existingFocused) note = `Focused task #${existingFocused.id} was recognized. Suggested updates and memory/skill guidance are proposals only; continue that task or re-run with commitTasks=true to attach them.`;
+        else note = "Task changes are proposals only. Re-run bootstrap with commitTasks=true to update existing work and create only missing tasks.";
         const next = {
           invokeSkills: result.selection?.skills.map(s => s.name) ?? [],
           taskProposals: proposed,
           taskKey: baseKey,
-          note: prior
-            ? "Reused the previously committed task reconciliation; no duplicate tasks were drafted or committed."
-            : commitTasks
-              ? "Existing tasks were updated and missing tasks created as proposed. Read taskPlan taskId values and task notes, then continue the focused task."
-              : existingFocused
-                ? `Focused task #${existingFocused.id} was recognized. Suggested updates and memory/skill guidance are proposals only; continue that task or re-run with commitTasks=true to attach them.`
-                : "Task changes are proposals only. Re-run bootstrap with commitTasks=true to update existing tasks and create only missing work.",
+          note,
         };
         return { isError: !ready, content: [{ type: "text", text: JSON.stringify({ ...result, loadedSkills, taskPlan, handoff: { skillsLoaded: details.skillsLoaded, tasksCommitted: details.tasksCommitted }, next }) }], details: { ...details } };
       } catch (error) {

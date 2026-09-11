@@ -15,7 +15,7 @@ export type PaseoDeps = {
   processCommand?: (pid: number) => string;
   serveApi?: (method: "GET" | "POST", body?: string, etag?: string) => Promise<{ status: number; body: string; etag?: string }>;
 };
-export type CommandResult = { ok: boolean; code: number | null; output: string; timedOut?: boolean };
+export type CommandResult = { ok: boolean; code: number | null; output: string; stdout: string; stderr: string; timedOut?: boolean };
 export type PaseoResult = { success: boolean; partial?: boolean; error?: string; steps?: Array<{ name: string; ok: boolean; output?: string }>; [key: string]: unknown };
 const CAP = 64 * 1024;
 const JSON_CAP = 8 * 1024 * 1024;
@@ -40,16 +40,16 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
   const paseo = join(d.root!, "vendor", "paseo"), paseoHome = input.paseoHome ?? d.env!.PASEO_HOME ?? join(homedir(), ".paseo");
   const cli = join(paseo, "packages", "cli", "dist", "index.js"), pidFile = join(d.state!, "daemon.json"), lock = join(d.state!, "start.lock"), log = join(d.state!, "daemon.log");
   const run = (cwd: string, command: string, args: string[], timeout = 15 * 60_000, preserve = false): Promise<CommandResult> => new Promise(resolveResult => {
-    let output = "", settled = false, overflow = false; let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = (r: CommandResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolveResult({ ...r, ok: r.ok && !overflow, output: overflow ? "JSON output exceeds 8 MiB safety limit" : output || r.output }); };
+    let stdout = "", stderr = "", settled = false, overflow = false; let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (r: CommandResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolveResult({ ...r, stdout, stderr, ok: r.ok && !overflow, output: overflow ? "JSON output exceeds 8 MiB safety limit" : stdout || r.output || stderr }); };
     try {
       const child = d.spawn!(command, args, { cwd, env: { ...d.env, CI: "1" }, stdio: ["ignore", "pipe", "pipe"] });
-      const collect = (x: unknown) => { if (overflow) return; output += String(x ?? ""); if (preserve && output.length > JSON_CAP) { overflow = true; output = ""; } else if (!preserve && output.length > CAP) output = output.slice(-CAP); };
-      child.stdout?.on("data", collect); child.stderr?.on("data", collect);
-      child.once("error", e => finish({ ok: false, code: null, output: String(e) }));
-      child.once("close", (code, signal) => finish({ ok: code === 0, code: code ?? (signal ? null : 0), output }));
-      timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} finish({ ok: false, code: null, output, timedOut: true }); }, timeout);
-    } catch (e) { finish({ ok: false, code: null, output: String(e) }); }
+      const collect = (stream: "stdout" | "stderr") => (x: unknown) => { if (overflow) return; const text = String(x ?? ""); if (stream === "stdout") stdout += text; else stderr += text; const size = stdout.length + stderr.length; if (preserve && size > JSON_CAP) { overflow = true; stdout = stderr = ""; } else if (!preserve && size > CAP) { if (stream === "stdout") stdout = stdout.slice(-CAP); else stderr = stderr.slice(-CAP); } };
+      child.stdout?.on("data", collect("stdout")); child.stderr?.on("data", collect("stderr"));
+      child.once("error", e => finish({ ok: false, code: null, output: String(e), stdout, stderr }));
+      child.once("close", (code, signal) => finish({ ok: code === 0, code: code ?? (signal ? null : 0), output: stdout, stdout, stderr }));
+      timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} finish({ ok: false, code: null, output: stdout, stdout, stderr, timedOut: true }); }, timeout);
+    } catch (e) { finish({ ok: false, code: null, output: String(e), stdout, stderr }); }
   });
   const record = (file: string) => {
     try {
@@ -328,7 +328,7 @@ export function createPaseoSetup(input: PaseoDeps = {}) {
     const result = await simple([process.execPath, "--disable-warning=DEP0040", cli, "daemon", "pair", "--relay", "--json"]);
     if (!result.ok) return result;
     try {
-      const value = JSON.parse(result.output);
+      const value = JSON.parse(result.stdout);
       if (typeof value?.url !== "string" || !value.url.includes("#offer=")) throw new Error("Paseo did not return a valid #offer pairing URL");
       if (typeof value?.qr !== "string" || value.qr.length === 0) throw new Error("Paseo did not return a pairing QR code");
       return { ...result, output: `Paseo pairing URL:\n${value.url}\n\nScan this QR code in the Paseo mobile app:\n${value.qr}` };

@@ -87,8 +87,20 @@ export const TASK_COMPLETION_HOOK = "task-completion-enforcement-hook";
 export const TASK_COMPLETION_TOOL_THRESHOLD = 8;
 export const TASK_COMPLETION_MAX_NUDGES = 3;
 export interface TaskCompletionConfig {
+  enabled?: boolean;
   toolThreshold?: number;
   maxNudges?: number;
+}
+
+export type CompletionHandler<T = unknown> = (value: T) => HookResult;
+export interface CompletionRegistryEntry { key: string; handler: CompletionHandler<unknown> }
+export class CompletionRegistry {
+  private readonly entries = new Map<string, CompletionRegistryEntry>();
+  register(entry: CompletionRegistryEntry): this {
+    if (!entry || typeof entry.key !== "string" || !entry.key.trim() || typeof entry.handler !== "function") throw new TypeError("completion registry entries require a key and handler");
+    this.entries.set(entry.key, entry); return this;
+  }
+  dispatch(key: string, value: unknown): HookResult { const entry = this.entries.get(key); return entry ? entry.handler(value) : CONTINUE; }
 }
 
 const HAS_PLAN_PHRASES = [
@@ -187,10 +199,12 @@ export class TaskCompletionEnforcementHook {
   private nudges = 0;
   private readonly toolThreshold: number;
   private readonly maxNudges: number;
+  private readonly enabled: boolean;
 
   constructor(config: TaskCompletionConfig = {}) {
     this.toolThreshold = Math.max(1, config.toolThreshold ?? TASK_COMPLETION_TOOL_THRESHOLD);
     this.maxNudges = Math.max(0, config.maxNudges ?? TASK_COMPLETION_MAX_NUDGES);
+    this.enabled = config.enabled !== false;
   }
 
   private reset(id = "") { this.taskID = id; this.toolCalls = 0; this.nudges = 0; }
@@ -205,17 +219,19 @@ export class TaskCompletionEnforcementHook {
     return false;
   }
   onToolBefore(event: ToolCallEvent, tasks: readonly HookTask[], budget: MetaNudgeBudget, session: string): HookResult {
+    if (!this.enabled) return CONTINUE;
     const focused = tasks.find(t => t.status === "in_progress" && t.active === true && !t.owner);
     if (!focused) { this.reset(); return CONTINUE; }
     if (focused.id !== this.taskID) this.reset(focused.id);
     if (!event.toolName || this.exempt(event)) return CONTINUE;
     if (this.toolCalls < this.toolThreshold) { this.toolCalls++; return CONTINUE; }
-    this.nudges++;
-    if (this.nudges > this.maxNudges) {
-      return { block: true, message: this.blockMessage(focused) };
-    }
+    // Exhaustion is a state of this hook, not another budget claim. Once the
+    // configured nudge allowance has been consumed, keep blocking even when
+    // the shared per-turn budget currently refuses a new nudge.
+    if (this.nudges >= this.maxNudges) return { block: true, message: this.blockMessage(focused) };
     const [seq, ok] = budget.tryClaim(session, META_NUDGE_MAINTENANCE);
     if (!ok) return CONTINUE;
+    this.nudges++;
     return { message: wrapReminder(this.name, "nudge", seq, this.nudgeMessage(focused)) };
   }
   private nudgeMessage(task: HookTask): string {
@@ -706,7 +722,7 @@ export function createSwarmBuiltinPipeline(options: Omit<PipelineOptions, "preHo
   planMode?: PlanModeHooks;   // interactive TUI only (PlanBroker present)
 }): SwarmHookPipeline {
   const enforcement = new TaskEnforcementHook(options.enforcementMode ?? "advise");
-  const completion = new TaskCompletionEnforcementHook(options.completion);
+  const completion = new TaskCompletionEnforcementHook({ ...options.completion, enabled: options.enforcementMode !== "off" && options.completion?.enabled !== false });
   const maintenance = new TaskMaintenanceReminderHook();
   const lifecycle = new AutogenLifecycleHook(options.trigger);
   const postActing = new PostActingHook();

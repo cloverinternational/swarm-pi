@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerSwarmHistoryVaultTools } from "../../extensions/30-tools/swarm-history-vault-tools.ts";
 import { historyGet, historySearch, normalizeHistoryGetParams } from "../../lib/tools/swarm-history-tools.ts";
-import { parseVaultDuration, vaultAdd, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
+import { parseVaultDuration, vaultAdd, vaultGet, vaultList } from "../../lib/tools/swarm-vault-tools.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true }))); });
@@ -183,9 +183,10 @@ describe("Swarm history and vault surfaces", () => {
     const rt = { path: join(root, "pi-vault.json") };
     expect(await vaultAdd({ id: "token", kind: "env_var", secret: "super-secret", target: "TEST_PI_SECRET" }, rt)).toMatchObject({ success: true, credentialId: "token" });
     const listed = await vaultList({}, rt);
-    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global", secret: "super-secret" }]);
+    expect(listed.credentials).toEqual([{ id: "token", kind: "env_var", scope: "global" }]);
     expect(listed).toMatchObject({ count: 1, has_more: false });
-    expect(JSON.stringify(listed)).toContain("super-secret");
+    expect(JSON.stringify(listed)).not.toContain("super-secret");
+    expect(await vaultGet({ id: "token" }, rt)).toMatchObject({ success: true, secret: "super-secret" });
     expect(await vaultAdd({ id: "token", kind: "env_var", allowedCommands: ["printenv *"] }, rt)).toMatchObject({ success: true, metadataOnly: true });
     expect((await vaultList({ details: true }, rt)).credentials[0]).toMatchObject({ allowedCommands: ["printenv *"] });
     const stored = await readFile(rt.path, "utf8");

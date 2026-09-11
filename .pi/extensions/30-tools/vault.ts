@@ -1,4 +1,4 @@
-import { vaultAdd, vaultList, vaultRemove, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
+import { vaultAdd, vaultGet, vaultList, vaultRemove, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
 import { withDefaultToolRenderer } from "../../../packages/runtime/core/src/tool-renderer.ts";
 
 type UI = { input?: (title: string, initial?: string) => Promise<string | undefined>; notify?: (message: string, type?: string) => void };
@@ -38,7 +38,8 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
       if (input?.action === "add") return text(await vaultAdd({ ...input, scope: "global" }, vault));
       if (input?.action === "list" || input?.action === "get") {
         if (input.action === "get" && !input.id) return text({ success: false, error: "id is required for get" });
-        return text(await vaultList({ ...input, limit: input.action === "get" ? 1 : input.limit, query: input.action === "get" ? undefined : input.query, id: input.action === "get" ? input.id : undefined }, vault));
+        if (input.action === "get") return text(await vaultGet(input, vault));
+        return text(await vaultList({ ...input }, vault));
       }
       if (input?.action === "remove") return text(await vaultRemove(input, vault));
       return text({ success: false, error: "action must be add, list, get, or remove" });

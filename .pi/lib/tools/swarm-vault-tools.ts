@@ -90,9 +90,17 @@ async function withVaultLock<T>(path: string, operation: () => Promise<T>): Prom
   try { return await operation(); } finally { release(); if (vaultLocks.get(path) === current) vaultLocks.delete(path); }
 }
 function metadata(c: AnyMap, details = false): AnyMap {
-  const base = { id: c.id, kind: c.kind, scope: c.scope, secret: Buffer.from(c.secretBase64 ?? "", "base64").toString() };
+  const base = { id: c.id, kind: c.kind, scope: c.scope };
   if (!details) return base;
   return { ...base, ...(c.name ? { name: c.name } : {}), ...(c.allowedTools?.length ? { allowedTools: c.allowedTools } : {}), ...(c.allowedCommands?.length ? { allowedCommands: c.allowedCommands } : {}), ...(c.allowedHosts?.length ? { allowedHosts: c.allowedHosts } : {}), ...(c.tags?.length ? { tags: c.tags } : {}), ...(c.target ? { target: c.target } : {}), ...(c.expiresAt ? { expiresAt: c.expiresAt } : {}) };
+}
+
+export async function vaultGet(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {
+  if (typeof p.id !== "string" || !p.id) return { success: false, error: "id is required" };
+  if (locked(rt)) return { success: false, error: lockedMessage };
+  const data = await load(rt), c = data.credentials[p.id];
+  if (!c || (c.expiresAt && new Date(c.expiresAt) <= new Date())) return { success: false, error: "credential not found" };
+  return { success: true, credentialId: c.id, kind: c.kind, scope: c.scope, secret: Buffer.from(c.secretBase64 ?? "", "base64").toString() };
 }
 
 export async function vaultAdd(p: AnyMap, rt: VaultRuntime = {}): Promise<AnyMap> {

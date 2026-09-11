@@ -54,8 +54,11 @@ export function registerTaskManageExtension(
   // Swarm's builtin hooks (task-enforcement, task-maintenance, skill budget,
   // sleep/stdin, annoyance) in HooksManager order; idempotent per Pi instance.
   registerSwarmBuiltinHooks(pi, {
-    enforcementMode: options?.enforcementMode,
+    // This adapter's coordinator owns enforcement; omission must not enable
+    // the builtin pipeline's default advise mode by accident.
+    enforcementMode: options?.enforcementMode ?? "off",
     completion: {
+      enabled: options?.enforcementMode !== undefined && options.enforcementMode !== "off",
       toolThreshold: options?.maintenanceToolThreshold ?? 8,
       maxNudges: 3,
     },

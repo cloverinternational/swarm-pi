@@ -120,7 +120,7 @@ function parseOperation(raw: Record<string, unknown>, index: number): { key: str
  */
 export function normalizeTaskManageParams(params: unknown): unknown {
   if (!isObj(params) || !Array.isArray(params.operations)) return params;
-  const optionalScalars = new Set(["description", "activeForm", "category", "priority", "metadata", "owner_id", "status", "active", "addBlocks", "addBlockedBy", "addNote", "noteType", "include_audit"]);
+  const optionalScalars = new Set(["description", "activeForm", "category", "priority", "metadata", "owner_id", "status", "active", "addNote", "noteType", "include_audit"]);
   return {
     ...params,
     operations: params.operations.map(item => {

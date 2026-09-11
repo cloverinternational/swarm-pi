@@ -501,9 +501,12 @@ export class TaskManager {
       if (stopped) { results.push({ key: op.key, op: op.op, status: "skipped" }); continue; }
       if (signal?.aborted) { results.push({ key: op.key, op: op.op, status: "failed", error: fail("cancelled", "operation cancelled") }); stopped = true; continue; }
       const operationBefore = this.snapshot(), localBefore = { ...local };
-      const result = this.run(op, local);
+      // Create keys are idempotency keys for retries. Update keys are ordinary
+      // per-call aliases and may intentionally be reused as work progresses.
+      const existingMutation = op.op === "create" ? this.state.keys[op.key] : undefined;
+      const result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
       results.push(result);
-      if (result.status === "succeeded" &&
+      if (result.status === "succeeded" && !existingMutation &&
         (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
         const produced = result.data as any;
         if (produced?.task?.id) { this.state.keys[op.key] = produced.task.id; local[op.key] = produced.task.id; }
@@ -537,6 +540,11 @@ export class TaskManager {
       mode: params.mode ?? "sequential", status, results: clone(results), at: new Date().toISOString(),
     } });
     return batch;
+  }
+  private replayedMutation(op: Operation, id: string): Result {
+    const task = this.find(id);
+    if (!task) return { key: op.key, op: op.op, status: "failed", error: fail("reference_failed", `operation key ${op.key} points to missing task ${id}`) };
+    return { key: op.key, op: op.op, status: "succeeded", data: { task: op.op === "create" ? this.createAck(task) : this.updateAck(op, task) } };
   }
   private run(op: Operation, local: Record<string,string>): Result {
     const target = (r?: Ref) => this.resolve(r, local);
