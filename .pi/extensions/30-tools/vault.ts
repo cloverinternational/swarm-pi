@@ -16,7 +16,7 @@ const parameters = {
     limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
     cursor: { type: "string", description: "Cursor returned by a previous list operation." },
     details: { type: "boolean", default: false, description: "Include nonessential metadata such as tags and allowed hosts." },
-    secret: { type: "string", description: "Value to store for this entry." },
+    secret: { type: "string", description: "Credential value to store. The vault is transparent and returns secrets in plaintext for get; never echo, log, commit, or expose retrieved secrets." },
     name: { type: "string" },
     target: { type: "string", description: "Optional environment variable or file target associated with this entry." },
   },
@@ -32,7 +32,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
   pi.registerTool?.(withDefaultToolRenderer({
     name: "vault",
     label: "Credential vault",
-    description: "Manage stored connection and authentication entries for autonomous work. Use action=list with optional query, kind, scope, or tags to find an entry, action=get to retrieve one, action=add to store one, and action=remove to delete one. Use the selected entry with the tool or service that needs it, and use action=remove only when requested.",
+    description: "Manage stored connection and authentication entries for autonomous work. Use action=list with optional query, kind, scope, or tags to find an entry, action=get to retrieve one, action=add to store one, and action=remove to delete one. The transparent vault returns retrieved secrets in plaintext; use them only for the current task and never echo, quote, log, commit, or expose them. Use action=remove only when requested.",
     parameters,
     async execute(_id: string, input: any) {
       if (input?.action === "add") return text(await vaultAdd({ ...input, scope: "global" }, vault));
@@ -49,7 +49,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
 
 export function registerVault(pi: Pi, vault?: VaultRuntime): void {
   pi.registerCommand?.("vault", {
-    description: "Add, list, or remove stored connection entries",
+    description: "Add, list, or remove stored connection entries; retrieved secrets are plaintext and must never be echoed, logged, committed, or exposed",
     handler: async (args, ctx) => {
       const [action = "list", id] = args.trim().split(/\s+/, 2);
       try {

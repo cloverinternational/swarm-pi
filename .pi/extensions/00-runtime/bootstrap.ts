@@ -167,7 +167,7 @@ export default function bootstrapExtension(pi: any) {
             if (commitTasks && !prior) {
               const orderedTasks = orderTaskProposals(result.tasks);
               const creates = orderedTasks.filter(item => item.action !== "update");
-              const keyById = new Map(creates.map((item, index) => [item.id, `${baseKey}:${index + 1}`]));
+              const keyById = new Map(orderedTasks.map((item, index) => [item.id, `${baseKey}:${index + 1}`]));
               const categories = new Set(["researching", "planning", "acting", "verifying", "debugging", "documenting"]);
               const priorities = new Set(["low", "medium", "high"]);
               // Do not emit optional properties with undefined values: TaskManage's
@@ -181,7 +181,6 @@ export default function bootstrapExtension(pi: any) {
               // mapping for the proposal and dependency references continue to
               // resolve against the created task.
               const operations: any[] = [];
-              const noteOperations: any[] = [];
               for (const [index, item] of orderedTasks.entries()) {
                 const key = `${baseKey}:${index + 1}`;
                 const guidance = typeof (item as any).guidance === "string" ? (item as any).guidance.trim().slice(0, 20000) : "";
@@ -200,11 +199,7 @@ export default function bootstrapExtension(pi: any) {
                   operation.noteType = "learning";
                 }
                 operations.push(operation);
-                if (item.action !== "update" && guidance) {
-                  noteOperations.push({ key: `${key}:note`, op: "update", taskId: { ref: key }, addNote: guidance, noteType: "learning" });
-                }
               }
-              operations.push(...noteOperations);
               const committed = await dispatchBootstrapHandoff("TaskManage", { operations }, signal, ctx, active);
               const batch = JSON.parse(committed.content[0].text);
               if (batch.status !== "succeeded") throw new Error("Bootstrap task commit did not succeed");
