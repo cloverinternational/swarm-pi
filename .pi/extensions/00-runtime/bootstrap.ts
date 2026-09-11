@@ -174,17 +174,37 @@ export default function bootstrapExtension(pi: any) {
               // validator correctly treats an explicitly present undefined category
               // as an invalid non-string. Also constrain model-provided enums at the
               // boundary so one bad task cannot invalidate the whole batch.
-              const operations = orderedTasks.map((item, index) => ({
-                key: `${baseKey}:${index + 1}`,
-                op: item.action === "update" ? "update" : "create",
-                ...(item.action === "update" ? { taskId: item.taskId } : {}),
-                subject: item.subject,
-                description: item.description,
-                ...(typeof item.category === "string" && categories.has(item.category) ? { category: item.category } : {}),
-                ...(typeof item.priority === "string" && priorities.has(item.priority) ? { priority: item.priority } : {}),
-                ...(typeof (item as any).guidance === "string" && (item as any).guidance.trim() ? { addNote: (item as any).guidance.trim().slice(0, 20000), noteType: "learning" } : {}),
-                ...(item.dependsOn?.length ? { addBlockedBy: item.dependsOn.map(id => ({ ref: keyById.get(id) ?? id })) } : {}),
-              }));
+              // TaskManage deliberately rejects addNote on create. Keep the
+              // wire operations valid by committing a create first, then an
+              // update which attaches the generated guidance note. The update
+              // uses a separate key so the create result remains the canonical
+              // mapping for the proposal and dependency references continue to
+              // resolve against the created task.
+              const operations: any[] = [];
+              const noteOperations: any[] = [];
+              for (const [index, item] of orderedTasks.entries()) {
+                const key = `${baseKey}:${index + 1}`;
+                const guidance = typeof (item as any).guidance === "string" ? (item as any).guidance.trim().slice(0, 20000) : "";
+                const operation: any = {
+                  key,
+                  op: item.action === "update" ? "update" : "create",
+                  ...(item.action === "update" ? { taskId: item.taskId } : {}),
+                  subject: item.subject,
+                  description: item.description,
+                  ...(typeof item.category === "string" && categories.has(item.category) ? { category: item.category } : {}),
+                  ...(typeof item.priority === "string" && priorities.has(item.priority) ? { priority: item.priority } : {}),
+                  ...(item.dependsOn?.length ? { addBlockedBy: item.dependsOn.map(id => ({ ref: keyById.get(id) ?? id })) } : {}),
+                };
+                if (item.action === "update" && guidance) {
+                  operation.addNote = guidance;
+                  operation.noteType = "learning";
+                }
+                operations.push(operation);
+                if (item.action !== "update" && guidance) {
+                  noteOperations.push({ key: `${key}:note`, op: "update", taskId: { ref: key }, addNote: guidance, noteType: "learning" });
+                }
+              }
+              operations.push(...noteOperations);
               const committed = await dispatchBootstrapHandoff("TaskManage", { operations }, signal, ctx, active);
               const batch = JSON.parse(committed.content[0].text);
               if (batch.status !== "succeeded") throw new Error("Bootstrap task commit did not succeed");

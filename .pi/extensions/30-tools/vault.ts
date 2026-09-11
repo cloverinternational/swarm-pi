@@ -16,9 +16,9 @@ const parameters = {
     limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
     cursor: { type: "string", description: "Cursor returned by a previous list operation." },
     details: { type: "boolean", default: false, description: "Include nonessential metadata such as tags and allowed hosts." },
-    secret: { type: "string", description: "Credential value. Stored transparently and returned to the agent. Never repeat it in chat or write it to files/logs." },
+    secret: { type: "string", description: "Value to store for this entry." },
     name: { type: "string" },
-    target: { type: "string", description: "Environment variable or file target associated with the credential." },
+    target: { type: "string", description: "Optional environment variable or file target associated with this entry." },
   },
   required: ["action"],
 };
@@ -32,7 +32,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
   pi.registerTool?.(withDefaultToolRenderer({
     name: "vault",
     label: "Credential vault",
-    description: "Credential vault for autonomous work. Before asking the user for an API key, token, password, or SSH credential, use action=list (optionally with query/kind/tags) to discover an existing matching credential, then action=get with its id to retrieve it. Use the returned secret only for the current task, preferably through an environment variable or an authenticated request; never echo, quote, log, commit, or expose it in your response. Use action=add when the user provides a new credential and action=remove only when explicitly requested. Secrets are returned in plaintext and are not encrypted; the user assumes all risk.",
+    description: "Manage stored connection and authentication entries for autonomous work. Use action=list with optional query, kind, scope, or tags to find an entry, action=get to retrieve one, action=add to store one, and action=remove to delete one. Use the selected entry with the tool or service that needs it, and use action=remove only when requested.",
     parameters,
     async execute(_id: string, input: any) {
       if (input?.action === "add") return text(await vaultAdd({ ...input, scope: "global" }, vault));
@@ -49,7 +49,7 @@ export function registerVaultTool(pi: Pi, vault?: VaultRuntime): void {
 
 export function registerVault(pi: Pi, vault?: VaultRuntime): void {
   pi.registerCommand?.("vault", {
-    description: "Add, list, or remove credentials in the transparent global vault",
+    description: "Add, list, or remove stored connection entries",
     handler: async (args, ctx) => {
       const [action = "list", id] = args.trim().split(/\s+/, 2);
       try {
@@ -66,7 +66,7 @@ export function registerVault(pi: Pi, vault?: VaultRuntime): void {
         if (action !== "add" || !ctx.ui?.input) throw new Error("usage: /vault add [id] | /vault list | /vault remove <id>");
         const credentialId = id || (await ctx.ui.input("Credential id"))?.trim();
         const kind = (await ctx.ui.input("Credential kind", "password"))?.trim();
-        const secret = await ctx.ui.input("Credential value (stored transparently; user assumes all risk)");
+        const secret = await ctx.ui.input("Entry value");
         if (!credentialId || !kind || secret === undefined) throw new Error("credential id, kind, and value are required");
         const result = await vaultAdd({ id: credentialId, kind, secret, scope: "global" }, vault);
         ctx.ui?.notify?.(result.success ? `Stored global credential ${credentialId}.` : result.error, result.success ? "info" : "error");
