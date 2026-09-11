@@ -4,7 +4,7 @@ import promptExtension from "../../../../.pi/extensions/10-context/swarm-prompt.
 import thinkingExtension from "../../../../.pi/extensions/10-context/swarm-thinking.ts";
 import { taskManageSchema, InteractionBroker } from "../src/index.js";
 import { PERMISSIVE_PARAMETERS, loadSwarmToolSurface, overlaySwarmToolSchemas } from "../../../../.pi/lib/runtime/swarm-tool-surface.ts";
-import { bashCallComponent } from "../../../../.pi/lib/tools/swarm-bash.ts";
+import { bashCallComponent, bashResultComponent } from "../../../../.pi/lib/tools/swarm-bash.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -33,6 +33,17 @@ describe("root Pi TaskManage extension", () => {
     const preview = bashCallComponent("$ " + "x".repeat(400));
     expect(preview.render(80)[0].length).toBeLessThanOrEqual(80);
     expect(preview.render(80)[0].endsWith("…")).toBe(true);
+  });
+
+  it("wraps Bash result tabs using terminal-cell width", () => {
+    const result = bashResultComponent({
+      content: [{ type: "text", text: `file.ts:129:\t${"x".repeat(30)}` }],
+    });
+
+    const lines = result.render(12);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((line) => line.length <= 12)).toBe(true);
+    expect(lines.join("")).toContain("   ");
   });
 
   it("is a discoverable default-exported Pi factory", () => {
@@ -232,6 +243,14 @@ describe("root Pi TaskManage extension", () => {
     expect(panel.render(100).join("\n")).not.toContain("plan");
     expect(() => panel.invalidate()).not.toThrow();
     expect(tool.renderShell).toBe("self");
+
+    // Renderer must support Pi's structured details path even when content is
+    // unavailable or not JSON-shaped.
+    const structured = await tool.execute("call-structured", {
+      operations: [{ key: "verify", op: "create", subject: "Structured result" }],
+    });
+    const detailsOnly = tool.renderResult({ details: structured.details }, { isError: false, expanded: false }, {});
+    expect(detailsOnly.render(100).join("\n")).toContain("Structured result");
   });
 
   it("keeps a compact open-task widget above the editor", async () => {

@@ -1,5 +1,5 @@
 import { boundedHistoryJSON, historyGet, historyRootFromContext, historySearch } from "../../lib/tools/swarm-history-tools.ts";
-import { vaultAdd, vaultJSONXML, vaultList, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
+import { vaultJSONXML, type VaultRuntime } from "../../lib/tools/swarm-vault-tools.ts";
 import { newErrorID } from "../../lib/tools/swarm-bash.ts";
 import { applySwarmSurface } from "../../lib/runtime/swarm-tool-surface.ts";
 import { sortKeysDeep } from "../../lib/runtime/swarm-transport-parity.ts";
@@ -7,7 +7,7 @@ import { registerVaultTool } from "./vault.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
-const names = ["HistorySearch", "HistoryGet", "vault_add", "vault_list"] as const;
+const names = ["HistorySearch", "HistoryGet"] as const;
 const labels: Record<string, string> = Object.fromEntries(names.map((name) => [name, name]));
 
 function okay(value: unknown, xml = false) {
@@ -47,8 +47,6 @@ export function registerSwarmHistoryVaultTools(pi: Pi, options: { historyRoot?: 
   const historyRuntime = (ctx: any) => ({ root: options.historyRoot ?? historyRootFromContext(ctx ?? sessionContext), cwd: options.cwd ?? ctx?.cwd ?? sessionContext?.cwd ?? pi.getCwd?.() ?? process.cwd() });
   register("HistorySearch", (p, ctx) => historySearch(p, historyRuntime(ctx)));
   register("HistoryGet", (p, ctx) => historyGet(p, historyRuntime(ctx)));
-  register("vault_add", (p) => vaultAdd(p, options.vault), true);
-  register("vault_list", (p) => vaultList(p, options.vault), true);
 }
 
 export default function swarmHistoryVaultToolsExtension(pi: Pi): void { registerSwarmHistoryVaultTools(pi); }

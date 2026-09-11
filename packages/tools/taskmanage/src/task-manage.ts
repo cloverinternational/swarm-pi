@@ -68,7 +68,7 @@ export interface OperationEvent {
   data: { mode: Mode; status: Batch["status"]; results: Result[]; at: string };
 }
 import { replayLatest, snapshot, type VersionedSnapshot } from "./persistence.js";
-import { goNow, swarmValidateTaskManageParams } from "./swarm-validate.js";
+import { goNow, normalizeTaskManageParams, swarmValidateTaskManageParams } from "./swarm-validate.js";
 import { randomBytes } from "node:crypto";
 
 export type JournalEntry = { type: "pi-swarm-task-state"; data: VersionedSnapshot<State> | State } | OperationEvent;
@@ -208,8 +208,15 @@ export const taskManageRenderers = {
     if (options.isPartial)
       return component([`    ${dim(theme, "⎿")} ${dim(theme, "Managing tasks…")}`]);
     let batch: Batch | undefined;
+    // Pi may pass the structured tool details separately from content (and
+    // some renderer paths preserve only details). Prefer that canonical batch
+    // before parsing the model-facing text fallback.
+    const structured = result?.details?.batch ?? result?.details;
+    if (structured && Array.isArray(structured.results)) batch = structured as Batch;
     const text = result?.content?.find((item: any) => item?.type === "text")?.text;
-    try { batch = typeof text === "string" ? JSON.parse(text) : undefined; } catch { /* use fallback */ }
+    if (!batch && typeof text === "string") {
+      try { batch = JSON.parse(text); } catch { /* use fallback */ }
+    }
     if (!batch || !Array.isArray(batch.results)) {
       const message = options.isError ? "Task update failed" : "Task state unavailable";
       return component([`    ${dim(theme, "⎿")} ${options.isError ? style(theme, "error", message) : dim(theme, message)}`]);
@@ -494,9 +501,12 @@ export class TaskManager {
       if (stopped) { results.push({ key: op.key, op: op.op, status: "skipped" }); continue; }
       if (signal?.aborted) { results.push({ key: op.key, op: op.op, status: "failed", error: fail("cancelled", "operation cancelled") }); stopped = true; continue; }
       const operationBefore = this.snapshot(), localBefore = { ...local };
-      const result = this.run(op, local);
+      // Create keys are idempotency keys for retries. Update keys are ordinary
+      // per-call aliases and may intentionally be reused as work progresses.
+      const existingMutation = op.op === "create" ? this.state.keys[op.key] : undefined;
+      const result = existingMutation ? this.replayedMutation(op, existingMutation) : this.run(op, local);
       results.push(result);
-      if (result.status === "succeeded" &&
+      if (result.status === "succeeded" && !existingMutation &&
         (op.op === "create" || (op.op === "update" && op.status !== "deleted"))) {
         const produced = result.data as any;
         if (produced?.task?.id) { this.state.keys[op.key] = produced.task.id; local[op.key] = produced.task.id; }
@@ -530,6 +540,11 @@ export class TaskManager {
       mode: params.mode ?? "sequential", status, results: clone(results), at: new Date().toISOString(),
     } });
     return batch;
+  }
+  private replayedMutation(op: Operation, id: string): Result {
+    const task = this.find(id);
+    if (!task) return { key: op.key, op: op.op, status: "failed", error: fail("reference_failed", `operation key ${op.key} points to missing task ${id}`) };
+    return { key: op.key, op: op.op, status: "succeeded", data: { task: op.op === "create" ? this.createAck(task) : this.updateAck(op, task) } };
   }
   private run(op: Operation, local: Record<string,string>): Result {
     const target = (r?: Ref) => this.resolve(r, local);
@@ -727,15 +742,16 @@ export function registerTaskManage(pi: { registerTool(tool: unknown): void; appe
   pi.registerTool({ name:"TaskManage", label:"Manage tasks", description:"Manage ordered tasks. sequential commits the successful prefix; atomic commits all or rolls back.", parameters:taskManageSchema,
     renderShell: "self",
     promptSnippet: "TaskManage: track multi-step work with durable ordered tasks.",
-    promptGuidelines: ["Use TaskManage for multi-step work and keep exactly one active task when working sequentially."],
+    promptGuidelines: ["Use TaskManage for multi-step work; keep exactly one active task when working sequentially; before starting work set the selected task status=\"in_progress\" and active=true; after verifying a task's acceptance criteria, explicitly update it with status=\"completed\" and activate the next unblocked task."],
     renderCall: presentation.renderCall,
     renderResult: presentation.renderResult,
     execute: async (_id:string, params:Params, signal?:AbortSignal, _onUpdate?: unknown, ctx?: {ui?: {setWidget(key: string, content: unknown): void}}) => {
       // registry_impl.go runs TaskManageTool.Validate before Execute and
       // reports failures as a tool error, not a failed batch.
-      const invalid = swarmValidateTaskManageParams(params);
+      const normalizedParams = normalizeTaskManageParams(params) as Params;
+      const invalid = swarmValidateTaskManageParams(normalizedParams);
       if (invalid !== undefined) throw new Error(`Error executing TaskManage: validation failed for TaskManage: ${invalid} (error_id=err_${randomBytes(10).toString("hex")})`);
-      const batch = manager.execute(params,signal);
+      const batch = manager.execute(normalizedParams,signal);
       refreshWidget(ctx);
       const ordered = goMapOrdered(batch);
       return {

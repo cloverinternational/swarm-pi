@@ -443,14 +443,21 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     }
     const selected = resolveActiveSystemPrompt(cwd);
     const catalog = catalogFor();
+    const knownKind = assembledPromptKinds.get(hash(event.systemPrompt));
+    if (knownKind === (interactive ? "interactive" : "headless")) return undefined;
+    const forgePrompt = event.systemPrompt.includes("# Delegation (the Task tool)") && event.systemPrompt.includes("<system_information>");
+    // The final prompt is passed back through memory/context assembly, so its
+    // hash is not necessarily the intermediate hash recorded below.  Use the
+    // mode marker as the stable idempotence check; a headless Forge prompt
+    // must still be upgraded when the real session is interactive.
+    const promptModeMatches = forgePrompt && interactive === event.systemPrompt.includes("<swarm_flow_capability>");
+    if (promptModeMatches) return undefined;
     const selectedBase = selected.kind === "pi" ? event.systemPrompt : selected.kind === "custom" ? selected.content : undefined;
     if (selectedBase !== undefined) {
       const enabled = isolation.noContextFiles ? Object.fromEntries(PROJECT_MEMORY_SOURCES.map((id) => [id, false])) : config.context?.enabledSources;
       const base = injectSwarmContext(selectedBase, { workDir: cwd, enabled, files: isolation.noContextFiles ? undefined : config.context?.files });
       return { systemPrompt: withSkillCatalog(base, catalog) };
     }
-    const knownKind = assembledPromptKinds.get(hash(event.systemPrompt));
-    if (knownKind === (interactive ? "interactive" : "headless")) return undefined;
     // Already assembled by another prompt layer: keep its content intact.
     // Re-running catalog assembly here is not idempotent because the skill
     // registry can change between lifecycle passes; more importantly, it can
@@ -458,7 +465,6 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     // first successful assembly. The first assembly is the authoritative
     // system prompt for this turn.
     const alreadyAssembled = assembledKind(event.systemPrompt);
-    const forgePrompt = event.systemPrompt.includes("# Delegation (the Task tool)") && event.systemPrompt.includes("<system_information>");
     if (alreadyAssembled && ((interactive && alreadyAssembled === "interactive") || (!interactive && alreadyAssembled === "headless")) && !forgePrompt) {
       return undefined;
     }
@@ -470,6 +476,7 @@ export function registerSwarmPrompt(pi: PromptExtensionAPI): void {
     const assembled = assemble();
     const base = assembled?.systemPrompt ?? event.systemPrompt;
     const final = memorySystemPrompt(base, cwd);
+    if (assembled) assembledPromptKinds.set(hash(final), (ctx as { hasUI?: boolean }).hasUI === true ? "interactive" : "headless");
     return assembled || final !== base ? { systemPrompt: final } : undefined;
   });
 }

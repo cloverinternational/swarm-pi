@@ -46,7 +46,7 @@ export async function runBootstrap(
     const bounded = boundSelection(selection);
     const result: BootstrapResult = { ...resultBase, status: "ready", selection: bounded };
     if (draft) {
-      result.task = await draft(task, bounded, signal);
+      result.tasks = (await draft(task, bounded, signal)).slice(0, 50).map((item, index) => ({ ...item, id: String(item.id || `T${index + 1}`) }));
       result.usage.draftCalls = 1;
     }
     result.usage.outputChars = JSON.stringify(result).length;

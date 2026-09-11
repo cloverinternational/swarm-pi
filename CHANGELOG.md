@@ -4,6 +4,9 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+- Add a provider-neutral long-running monitor agent with bounded retries,
+  persisted observations, and pause/resume/cancel controls.
+
 - Use Tailscale LocalAPI ETag/If-Match conditional writes to reject concurrent
   Serve changes, preserve JSON responses up to an explicit 8 MiB bound, and
   revalidate process start-time identity immediately before stopping a daemon.

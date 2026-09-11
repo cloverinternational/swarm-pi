@@ -43,6 +43,15 @@ describe("TaskManage", () => {
     expect(m.execute({mode:"atomic",operations:[create("leaked"),{key:"x",op:"get",taskId:"404"}]}).status).toBe("failed");
     expect(m.execute({operations:[{key:"q",op:"list"}]}).results[0].data).toMatchObject({pagination:{total:1}});
   });
+  it("replays an already committed mutation key without duplicating work", () => {
+    const m = new TaskManager();
+    const first = m.execute({ operations: [create("stable", "Stable")] });
+    const second = m.execute({ operations: [create("stable", "Changed")] });
+    expect(first.results[0].data).toEqual(second.results[0].data);
+    expect(m.snapshot().tasks).toHaveLength(1);
+    expect(m.snapshot().nextId).toBe(2);
+  });
+
   it("resolves committed cross-call references and rejects cycles", () => {
     const m=new TaskManager(); m.execute({operations:[create("a"),create("b")]});
     expect(m.execute({operations:[{key:"link",op:"update",taskId:{ref:"b"},addBlockedBy:[{ref:"a"}]}]}).status).toBe("succeeded");

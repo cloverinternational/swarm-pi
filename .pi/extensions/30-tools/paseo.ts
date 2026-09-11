@@ -51,7 +51,7 @@ export default function paseoExtension(pi: Pi) {
     },
   }));
   pi.registerCommand?.("paseo", {
-    description: "Paseo daemon controls: /paseo status|update|build|start|stop|pair|setup|serve|health|logs (setup/serve inspect by default; use apply to mutate)",
+    description: "Paseo daemon controls: /paseo status|update|build|start|stop|pair|setup|serve|health|logs; pair shows a Paseo #offer QR (setup/serve inspect by default; use apply to mutate)",
     handler: async (args: string, ctx: { ui?: UI }) => {
       const action = args.trim().split(/\s+/, 1)[0] || "status";
       try {
@@ -60,7 +60,7 @@ export default function paseoExtension(pi: Pi) {
         else if (action === "build") { ctx.ui?.notify?.("Building paseo (this can take several minutes)…", "info"); const r = await paseoBuild(pi); ctx.ui?.notify?.(r.success ? "Paseo built." : `Build failed: ${r.output?.slice(-500)}`, r.success ? "info" : "error"); }
         else if (action === "start") { const r = await paseoStart(pi); ctx.ui?.notify?.(r.success ? (r.alreadyRunning ? `Already running (pid ${r.pid}).` : `Daemon started (pid ${r.pid}) on ${r.listen}.`) : r.error!, r.success ? "info" : "error"); }
         else if (action === "stop") { const r = await paseoStop(pi); ctx.ui?.notify?.(!r.success ? String(r.error ?? "Stop failed; daemon record retained.") : r.wasRunning ? `Stopped daemon (pid ${r.pid}).` : "Daemon was not running.", r.success ? "info" : "error"); }
-        else if (action === "pair") { const r = await paseoPair(pi); ctx.ui?.notify?.(r.ok ? r.output : `Pairing failed: ${r.output}`, r.ok ? "info" : "error"); }
+        else if (action === "pair") { const r = await paseoPair(pi); ctx.ui?.notify?.(r.ok ? r.output : `Tailscale pairing failed: ${r.output}`, r.ok ? "info" : "error"); }
         else if (action === "setup" || action === "serve") { const words = args.trim().split(/\s+/).filter(Boolean); const mode = words[1] ?? "inspect"; if (words.length > 2 || (mode !== "inspect" && mode !== "apply")) throw new Error(`usage: /paseo ${action} [inspect|apply]`); const apply = mode === "apply"; const r = await paseoSetup(pi, undefined, apply); ctx.ui?.notify?.(r.success ? `Paseo ${action} ${apply ? "applied" : "inspection"} for ${r.dnsName ?? "machine"}.` : (r.error ?? `Paseo ${action} failed`), r.success ? "info" : "error"); }
         else if (action === "health") { if (args.trim() !== "health") throw new Error("usage: /paseo health"); const healthy = await paseo.health(defaultListen()); ctx.ui?.notify?.(healthy ? "Paseo is healthy." : "Paseo is not healthy.", healthy ? "info" : "error"); }
         else if (action === "logs") ctx.ui?.notify?.(paseo.logs(40), "info");

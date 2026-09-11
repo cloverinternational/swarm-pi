@@ -46,17 +46,29 @@ export function formatBashCall(args: { command?: string; timeout_seconds?: numbe
   return title + timeoutSuffix;
 }
 
-/** Dependency-free equivalent of Pi's Text component for extension tests. */
-export function bashResultComponent(result: any, options: any = {}, theme: any = {}): { render: (width: number) => string[]; invalidate: () => void } {
+type WrapToWidth = (text: string, width: number) => string[];
+
+/**
+ * Minimal dependency-free fallback for headless consumers. The live extension
+ * injects pi-tui's wrapTextWithAnsi so terminal-cell width is authoritative for
+ * tabs, wide glyphs, and ANSI sequences.
+ */
+const wrapPlainText: WrapToWidth = (text, width) => {
+  if (width <= 0) return [""];
+  const normalized = text.replace(/\t/g, "   ");
+  if (normalized.length <= width) return [normalized];
+  return Array.from({ length: Math.ceil(normalized.length / width) }, (_, i) => normalized.slice(i * width, (i + 1) * width));
+};
+
+export function bashResultComponent(result: any, options: any = {}, theme: any = {}, wrapToWidth: WrapToWidth = wrapPlainText): { render: (width: number) => string[]; invalidate: () => void } {
   const command = typeof result?.details?.command === "string" ? result.details.command : "";
   const text = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n") : "";
   const prefix = command ? `${options?.isPartial ? "⋯" : result?.isError || options?.isError ? "✗" : "✓"} $ ${command}` : "";
   const value = [prefix, text].filter(Boolean).join("\n");
-  const fit = (line: string, width: number) => width <= 0 ? "" : line.length <= width ? line : `${line.slice(0, Math.max(0, width - 1))}…`;
-  return { render: (width: number) => value.split("\n").flatMap((line: string) => line.length <= width ? [line] : Array.from({ length: Math.ceil(line.length / Math.max(1, width)) }, (_, i) => fit(line.slice(i * width, (i + 1) * width), width))), invalidate: () => {} };
+  return { render: (width: number) => width <= 0 ? [""] : value.split("\n").flatMap((line: string) => wrapToWidth(line, width)), invalidate: () => {} };
 }
 
-export function bashCallComponent(value: string): { render: (width: number) => string[]; invalidate: () => void } {
+export function bashCallComponent(value: string, truncate?: (text: string, width: number) => string): { render: (width: number) => string[]; invalidate: () => void } {
   // Pi validates every rendered line against the terminal width. Commands can
   // be arbitrarily long (especially repository-discovery commands), so the
   // preview must be width-bounded independently of the model-facing command.
@@ -67,7 +79,7 @@ export function bashCallComponent(value: string): { render: (width: number) => s
     if (width <= 1) return text.slice(0, width);
     return `${text.slice(0, width - 1)}…`;
   };
-  return { render: (width: number) => [fit(value, width)], invalidate: () => {} };
+  return { render: (width: number) => [truncate ? truncate(value, width) : fit(value, width)], invalidate: () => {} };
 }
 
 const ANSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;

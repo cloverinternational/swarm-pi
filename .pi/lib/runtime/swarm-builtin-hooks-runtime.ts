@@ -18,7 +18,10 @@ type Pi = any;
 const REGISTRY = Symbol.for("pi-swarm-builtin-hooks-registry");
 const registrations: WeakMap<object, SwarmHookPipeline> = ((globalThis as any)[REGISTRY] ??= new WeakMap<object, SwarmHookPipeline>());
 export const TASK_MANAGER_SYMBOL = Symbol.for("pi-swarm-task-manager");
-export interface SwarmBuiltinHookOptions { enforcementMode?: EnforcementMode }
+export interface SwarmBuiltinHookOptions {
+  enforcementMode?: EnforcementMode;
+  completion?: { enabled?: boolean; toolThreshold?: number; maxNudges?: number };
+}
 
 /** Tasks as the Swarm hooks see them (ii.TodoManager), read live from the TaskManage extension. */
 function hookTasks(): HookTask[] {
@@ -101,6 +104,7 @@ export function registerSwarmBuiltinHooks(pi: Pi, options: SwarmBuiltinHookOptio
     tasks: hookTasks,
     isSubAgent: () => process.env.PI_SWARM_SUBAGENT === "1",
     enforcementMode: options.enforcementMode,
+    completion: options.completion,
     extraPre, extraPost,
     planMode: planModeHooks(),
   });
