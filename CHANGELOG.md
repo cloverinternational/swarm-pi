@@ -2,6 +2,12 @@
 
 Release metadata is kept in `package.json`, `update-manifest.json`, and this file together.
 
+## [0.2.0] - 2026-09-11
+
+- Harden bootstrap task handoff so generated guidance is attached through valid TaskManage operations.
+- Make Forge prompt transparency explicit for debugging and testing.
+- Clarify vault tool and command descriptions for stored connection entries.
+
 ## [Unreleased]
 
 - Add a provider-neutral long-running monitor agent with bounded retries,
