@@ -1,7 +1,7 @@
 /** Focused, read-only work browser. Pi's non-overlay custom UI replaces the prompt editor. */
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { formatRunningWorkDuration, onRunningWorkChange, runningWorkListLabel, runningWorkSelection, safeInspectionText, selectedRunningWork, visibleRunningWork, type RunningWorkItem } from "./running-work.ts";
+import { formatRunningWorkDuration, onRunningWorkChange, runningWorkListLabel, runningWorkSelection, safeInspectionText, selectedRunningWork, browsableRunningWork, type RunningWorkItem } from "./running-work.ts";
 
 export interface ConversationStep { id: string; kind: "user" | "assistant" | "tool"; title: string; body: string }
 const clean = (value: unknown) => safeInspectionText(String(value ?? ""), 100).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
@@ -58,12 +58,12 @@ export class RunningWorkView {
   private closed = false;
   private unsubscribe: () => void;
   constructor(private tui: any, private theme: any, private done: () => void) {
-    this.selectedId = selectedRunningWork()?.id ?? visibleRunningWork()[0]?.id;
+    this.selectedId = selectedRunningWork()?.id ?? browsableRunningWork()[0]?.id;
     this.unsubscribe = onRunningWorkChange(() => { if (!this.closed) this.tui.requestRender(); });
   }
   dispose() { this.closed = true; this.unsubscribe(); }
   private items() {
-    const items = visibleRunningWork();
+    const items = browsableRunningWork();
     if (!items.some(item => item.id === this.selectedId)) this.selectedId = items[Math.min(runningWorkSelection(), items.length - 1)]?.id;
     return items;
   }
@@ -146,7 +146,7 @@ export class RunningWorkView {
 
 let opening = false;
 export function openRunningWorkView(ctx: any): boolean {
-  if (opening || ctx?.mode !== "tui" || typeof ctx?.ui?.custom !== "function" || !visibleRunningWork().length) return false;
+  if (opening || ctx?.mode !== "tui" || typeof ctx?.ui?.custom !== "function" || !browsableRunningWork().length) return false;
   opening = true;
   try {
     Promise.resolve(ctx.ui.custom((_tui: any, theme: any, _keys: any, done: () => void) => new RunningWorkView(_tui, theme, done)))

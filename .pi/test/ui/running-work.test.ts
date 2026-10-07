@@ -14,6 +14,9 @@ import {
   visibleRunningWork,
   runningWorkListLabel,
   runningWorkFooterHints,
+  browsableRunningWork,
+  RECENT_WORK_MS,
+  scopeRunningWorkToSession,
 } from "../../lib/ui/running-work.ts";
 
 describe("running work footer interaction", () => {
@@ -65,6 +68,23 @@ describe("running work footer interaction", () => {
     expect(visibleRunningWork(items).map((item) => item.id)).toEqual([
       "bash-2", "bash-3", "bash-4", "bash-5", "bash-6", "bash-7",
     ]);
+  });
+
+  it("counts only recent completed work but leaves long-running work visible", () => {
+    const now = Date.now();
+    setRunningWork({ id: "old", kind: "bash", label: "old", status: "completed", startedAt: 1, endedAt: now - RECENT_WORK_MS, detail: "old" });
+    setRunningWork({ id: "recent", kind: "bash", label: "recent", status: "completed", startedAt: 2, endedAt: now - 1000, detail: "recent" });
+    setRunningWork({ id: "live", kind: "bash", label: "live", status: "running", startedAt: 3, detail: "live" });
+    expect(browsableRunningWork(now).map(item => item.id)).toEqual(["recent", "live"]);
+  });
+
+  it("retains completed work on same-session reload, clears it on session switch", () => {
+    scopeRunningWorkToSession("work-session-one");
+    setRunningWork({ id: "done", kind: "bash", label: "done", status: "completed", startedAt: Date.now(), endedAt: Date.now(), detail: "echo done" });
+    scopeRunningWorkToSession("work-session-one");
+    expect(browsableRunningWork().map(item => item.id)).toContain("done");
+    scopeRunningWorkToSession("work-session-two");
+    expect(browsableRunningWork()).toEqual([]);
   });
 
   it("shows live output for a running bash entry on Enter", () => {

@@ -87,7 +87,7 @@ describe("focused work browser", () => {
     view.dispose();
   });
   it("opens a completed item using Pi's normalized Down sequence", async () => {
-    setRunningWork({ ...agent, kind: "bash", status: "completed", output: "finished output" });
+    setRunningWork({ ...agent, kind: "bash", status: "completed", startedAt: Date.now() - 1000, endedAt: Date.now(), output: "finished output" });
     let opened = 0;
     const ctx = { mode: "tui", editor: { getText: () => "" }, ui: { custom: (factory: any) => {
       opened++;

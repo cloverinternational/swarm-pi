@@ -22,13 +22,28 @@ export interface RunningWorkItem {
 
 const KEY = Symbol.for("pi-swarm-running-work");
 export const MAX_VISIBLE_RUNNING_WORK = 6;
-type State = { items: Map<string, RunningWorkItem>; listeners: Set<() => void>; expanded: boolean; selected: number };
+export const RECENT_WORK_MS = 15 * 60 * 1000;
+type State = { items: Map<string, RunningWorkItem>; listeners: Set<() => void>; expanded: boolean; selected: number; sessionId?: string };
 const state = (): State => {
   const root = globalThis as typeof globalThis & { [KEY]?: State };
   return root[KEY] ?? (root[KEY] = { items: new Map(), listeners: new Set(), expanded: false, selected: 0 });
 };
 
 export function runningWorkSnapshot(): RunningWorkItem[] { return [...state().items.values()].sort((a, b) => a.startedAt - b.startedAt); }
+export function browsableRunningWork(now = Date.now()): RunningWorkItem[] {
+  return visibleRunningWork(runningWorkSnapshot().filter(item => item.status === "queued" || item.status === "running" ||
+    (item.endedAt ?? item.startedAt) <= now && now - (item.endedAt ?? item.startedAt) < RECENT_WORK_MS));
+}
+/** A reload retains this session's work; switching sessions must not carry its history. */
+export function scopeRunningWorkToSession(sessionId: string | undefined): void {
+  if (!sessionId) return;
+  const current = state();
+  if (current.sessionId && current.sessionId !== sessionId) {
+    current.items.clear(); current.selected = 0; current.expanded = false;
+    current.listeners.forEach(listener => listener());
+  }
+  current.sessionId = sessionId;
+}
 /** Keep the drawer useful when many background commands have accumulated. */
 export function visibleRunningWork(items = runningWorkSnapshot()): RunningWorkItem[] {
   return items.length <= MAX_VISIBLE_RUNNING_WORK ? items : items.slice(-MAX_VISIBLE_RUNNING_WORK);
@@ -41,16 +56,16 @@ export function setRunningWorkExpanded(expanded: boolean): void { state().expand
 export function toggleRunningWorkExpanded(): boolean { setRunningWorkExpanded(!runningWorkExpanded()); return runningWorkExpanded(); }
 /** Selection clamped to the currently visible list so a stale index (after items finished or were removed) still resolves to a real row. */
 export function runningWorkSelection(): number {
-  return Math.max(0, Math.min(state().selected, visibleRunningWork().length - 1));
+  return Math.max(0, Math.min(state().selected, browsableRunningWork().length - 1));
 }
 export function moveRunningWorkSelection(delta: number): void {
-  const items = visibleRunningWork();
+  const items = browsableRunningWork();
   if (!items.length) return;
   state().selected = Math.max(0, Math.min(items.length - 1, runningWorkSelection() + delta));
   state().listeners.forEach(listener => listener());
 }
 export function selectedRunningWork(): RunningWorkItem | undefined {
-  const items = visibleRunningWork();
+  const items = browsableRunningWork();
   return items.length ? items[runningWorkSelection()] : undefined;
 }
 /** Enter can arrive as CR/LF or Kitty keyboard protocol CSI-u when Pi enables enhanced key reporting. */
@@ -110,8 +125,7 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
     const wait = (globalThis as any)[Symbol.for("pi-swarm-wait-for-agent-background")];
     if (typeof wait === "function" && wait()) return true;
   }
-  const items = runningWorkSnapshot();
-  if (!items.length) return false;
+  if (!browsableRunningWork().length) return false;
   // Match Pi's own input decoding (including Kitty/CSI modifier forms), not
   // only the legacy terminal byte sequence used by one terminal.
   const down = matchesKey(data, "down");

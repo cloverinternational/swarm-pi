@@ -1,7 +1,7 @@
 /** Small, session-backed status line for the native Pi editor. */
 import { basename } from "node:path";
 import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
-import { onRunningWorkChange, visibleRunningWork } from "../../.pi/lib/ui/running-work.ts";
+import { onRunningWorkChange, scopeRunningWorkToSession, browsableRunningWork } from "../../.pi/lib/ui/running-work.ts";
 import { openRunningWorkView } from "../../.pi/lib/ui/running-work-view.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { scheduleIdleStatus } from "../../.pi/lib/runtime/schedule-status.ts";
@@ -212,7 +212,7 @@ class MetricsFooter {
       try { text = provider(); } catch { text = undefined; }
       if (text) segments.push(text);
     }
-    const work = visibleRunningWork();
+    const work = browsableRunningWork();
     const fg = (color: string, text: string) => this.theme.fg(color, text);
     const clean = (text: unknown) => String(text ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
     const inner = Math.max(1, width - 2);
@@ -252,7 +252,7 @@ class MetricsFooter {
       else detail = next;
     }
     if (detail) rows.push(fg("dim", fit(detail)));
-    if (work.length) rows.push(fg("dim", fit(`↓ browse work (${work.length})`)));
+    if (work.length) rows.push(fg("dim", fit(`/work browse recent (${work.length})  ·  ↓ on empty input`)));
     return rows.map(row => {
       const fitted = fit(row);
       const padded = " " + fitted + " ".repeat(Math.max(0, width - 1 - visibleWidth(fitted)));
@@ -293,7 +293,8 @@ export default function conversationMetricsExtension(pi: any) {
   const workStop = onRunningWorkChange(refreshWork);
   pi.on?.("session_start", (_event: any, ctx: any) => {
     shared.generation++;
-      const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
+    scopeRunningWorkToSession(ctx?.sessionManager?.getSessionId?.());
+    const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
     shared.metrics = normalize(previous);
     shared.ctx = ctx;
     render(ctx);
@@ -344,7 +345,7 @@ export default function conversationMetricsExtension(pi: any) {
   pi.registerCommand?.("metrics", { description: "Show this conversation's walltime and output tokens", handler: async (_args: string, ctx: any) => { const m = shared.metrics ?? blank(); ctx.ui?.notify?.(`Conversation: ${formatWalltime(currentWalltime())} walltime · ${m.outputTokens.toLocaleString()} output tokens`, "info"); } });
   pi.registerCommand?.("work", { description: "Browse recent Bash commands and subagents", handler: async (_args: string, ctx: any) => {
     if (ctx.mode !== "tui") { ctx.ui?.notify?.("Work browser requires interactive TUI mode", "warning"); return; }
-    if (!visibleRunningWork().length) { ctx.ui?.notify?.("No work items in this Pi session yet", "info"); return; }
+    if (!browsableRunningWork().length) { ctx.ui?.notify?.("No work items in this Pi session yet", "info"); return; }
     if (!openRunningWorkView(ctx)) ctx.ui?.notify?.("Work browser is already open or unavailable", "warning");
   } });
 }
