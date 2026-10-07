@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { openRunningWorkView } from "./running-work-view.ts";
 
 export type RunningWorkKind = "subagent" | "bash";
 export type RunningWorkStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -112,7 +113,7 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   if (!items.length) return false;
   const down = data === "\x1b[B" || data === "\x1b[1;B";
   const up = data === "\x1b[A" || data === "\x1b[1;A";
-  if (!runningWorkExpanded() && down && !ctx?.editor?.getText?.()) { toggleRunningWorkExpanded(); return true; }
+  if (!runningWorkExpanded() && down && !ctx?.editor?.getText?.()) return openRunningWorkView(ctx);
   if (!runningWorkExpanded()) return false;
   if (down) { moveRunningWorkSelection(1); return true; }
   if (up) { moveRunningWorkSelection(-1); return true; }
@@ -172,4 +173,28 @@ export function formatRunningWorkDuration(item: RunningWorkItem, now = Date.now(
   const seconds = Math.max(0, Math.floor(((item.endedAt ?? now) - item.startedAt) / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/** Compact one-line label; full command/task detail stays in inspection. */
+export function runningWorkListLabel(item: RunningWorkItem, maxPreview = 36): string {
+  if (item.kind !== "bash") return `${item.kind} ${item.label}`;
+  const preview = String(item.detail ?? "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/\s+/g, " ").trim();
+  if (!preview) return "bash";
+  const chars = [...preview];
+  const limit = Math.max(1, maxPreview);
+  return `bash · ${chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : preview}`;
+}
+
+export function runningWorkFooterHints(): string {
+  const hints = ["↑/↓ select", "Enter inspect", "Esc close"];
+  const globals = globalThis as any;
+  if (typeof globals[Symbol.for("pi-swarm-background-bash-detach")] === "function"
+    || typeof globals[Symbol.for("pi-swarm-wait-for-agent-background")] === "function") {
+    hints.push("Ctrl+B detach/wait");
+  }
+  return hints.join("  ");
 }

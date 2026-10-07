@@ -12,9 +12,33 @@ import {
   setRunningWorkExpanded,
   setRunningWork,
   visibleRunningWork,
+  runningWorkListLabel,
+  runningWorkFooterHints,
 } from "../../lib/ui/running-work.ts";
 
 describe("running work footer interaction", () => {
+  it("shows compact sanitized bash previews while preserving subagent labels", () => {
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "  echo   hello\nworld  " })).toBe("bash · echo hello world");
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "x".repeat(50) })).toBe(`bash · ${"x".repeat(35)}…`);
+    expect(runningWorkListLabel({ id: "a", kind: "subagent", label: "Research", status: "running", startedAt: 0, detail: "research task" })).toBe("subagent Research");
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "echo\x1b]8;;https://secret.test\x07link\x1b]8;;\x07" })).toBe("bash · echolink");
+  });
+
+  it("documents navigation, inspection, dismissal, and detach keys", () => {
+    expect(runningWorkFooterHints()).toContain("↑/↓ select");
+    expect(runningWorkFooterHints()).not.toContain("Ctrl+B");
+  });
+
+  it("advertises Ctrl+B only when a background detach action is registered", () => {
+    const key = Symbol.for("pi-swarm-background-bash-detach");
+    const globals = globalThis as any;
+    globals[key] = () => true;
+    try {
+      expect(runningWorkFooterHints()).toContain("Ctrl+B detach/wait");
+    } finally {
+      delete globals[key];
+    }
+  });
   afterEach(() => {
     setRunningWorkExpanded(false);
     for (const item of runningWorkSnapshot()) removeRunningWork(item.id);
