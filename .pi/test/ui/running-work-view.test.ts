@@ -78,6 +78,14 @@ describe("focused work browser", () => {
     setRunningWork(agent);
     expect(openRunningWorkView({ mode: "print", ui: { custom: () => { throw Error("should not run"); } } })).toBe(false);
   });
+  it("bounds list height on a short terminal while retaining the selected row", () => {
+    for (let i = 0; i < 6; i++) setRunningWork({ ...agent, id: `agent-${i}`, startedAt: i });
+    const view = new RunningWorkView({ terminal: { rows: 12 }, requestRender: () => {} }, theme, () => {});
+    const rows = view.render(50);
+    expect(rows.length).toBeLessThanOrEqual(8);
+    expect(rows.join("\n")).toContain("❯");
+    view.dispose();
+  });
   it("opens a completed item using Pi's normalized Down sequence", async () => {
     setRunningWork({ ...agent, kind: "bash", status: "completed", output: "finished output" });
     let opened = 0;

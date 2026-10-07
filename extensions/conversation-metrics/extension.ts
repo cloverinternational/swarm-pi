@@ -2,6 +2,7 @@
 import { basename } from "node:path";
 import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
 import { onRunningWorkChange, visibleRunningWork } from "../../.pi/lib/ui/running-work.ts";
+import { openRunningWorkView } from "../../.pi/lib/ui/running-work-view.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { scheduleIdleStatus } from "../../.pi/lib/runtime/schedule-status.ts";
 export interface ConversationMetrics {
@@ -341,4 +342,9 @@ export default function conversationMetricsExtension(pi: any) {
     workStop();
   });
   pi.registerCommand?.("metrics", { description: "Show this conversation's walltime and output tokens", handler: async (_args: string, ctx: any) => { const m = shared.metrics ?? blank(); ctx.ui?.notify?.(`Conversation: ${formatWalltime(currentWalltime())} walltime · ${m.outputTokens.toLocaleString()} output tokens`, "info"); } });
+  pi.registerCommand?.("work", { description: "Browse recent Bash commands and subagents", handler: async (_args: string, ctx: any) => {
+    if (ctx.mode !== "tui") { ctx.ui?.notify?.("Work browser requires interactive TUI mode", "warning"); return; }
+    if (!visibleRunningWork().length) { ctx.ui?.notify?.("No work items in this Pi session yet", "info"); return; }
+    if (!openRunningWorkView(ctx)) ctx.ui?.notify?.("Work browser is already open or unavailable", "warning");
+  } });
 }

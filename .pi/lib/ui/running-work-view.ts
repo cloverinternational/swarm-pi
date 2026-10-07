@@ -130,6 +130,12 @@ export class RunningWorkView {
       if (paragraphs.length > available) body.push(line(` ${this.scroll + 1}–${Math.min(paragraphs.length, this.scroll + available)}/${paragraphs.length} lines`));
     }
     const hint = this.detail ? " ↑/↓ steps · PgUp/PgDn scroll · Esc back" : " ↑/↓ select · Enter inspect · Esc close";
+    if (!this.detail && body.length > height - header.length - 3) {
+      const available = Math.max(1, height - header.length - 3);
+      const index = items.findIndex(row => row.id === this.selectedId);
+      const start = Math.max(0, Math.min(index - available + 1, body.length - available));
+      body.splice(0, body.length, ...body.slice(start, start + available));
+    }
     return [...header, ...body, "", line(this.theme.fg("dim", hint)), line(this.theme.fg("accent", "─".repeat(width)))].map(row => {
       const fitted = line(row);
       return fitted + " ".repeat(Math.max(0, width - visibleWidth(fitted)));
