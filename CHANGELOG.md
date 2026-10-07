@@ -6,13 +6,30 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [0.6.0] - 2026-10-07
 
-- Add the independently selectable `ask-user` extension with structured
-  questionnaires, replay/settings UI, documented interaction contracts, and
-  205 focused tests. Include its dedicated test suite in CI.
-- Separate mandatory-compaction behavior and tests into the current extension
-  organization.
-- Add the prompt-context and autogenskills compatibility corrections included
-  in this release.
+### Highlights
+
+- Replace the previous ask-user implementation with the MIT-licensed
+  `eko24ive/pi-ask` implementation in `extensions/ask-user`. Add structured
+  questionnaires, single/multi-select answers, custom answers, notes, review,
+  replay and settings. Run its 205 focused tests in CI.
+- Port local compaction and context changes to the independent extension layout.
+  Start estimated-context compaction at 325,000 tokens to leave headroom below
+  the 330,000-token organization target; retain native compaction as a fallback
+  for smaller models and unknown usage.
+- Simplify footer reporting: remove the redundant context-model fallback label
+  and duplicate autogenskills context gauge; show the active skill only when set.
+
+### Compatibility
+
+- The public tool name remains `ask_user_question`, but it now accepts the new
+  questionnaire schema rather than the previous single-question schema.
+- The former ask tool's autonomous-answer consultation and legacy timeout
+  argument are not retained. Questions use the new explicit submit/cancel flow.
+- Extensions are selected through `extensions/<name>/index.ts`. Existing custom
+  resource filters using the old layer paths need migration; personal settings
+  are not automatically rewritten.
+
+### Other changes
 
 - Flatten Pi extensions into individually selectable entries, preserve the tool surface, adopt native settlement/continuation, scope compatibility handlers, and repair macOS PTY execution and installation diagnostics.
 
