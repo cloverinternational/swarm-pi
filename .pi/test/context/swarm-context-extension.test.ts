@@ -51,7 +51,7 @@ describe("swarm-context extension", () => {
     expect(cheap.notices).toEqual([]);
 
     harness(seed(), { models: ["some/expensive-model"] });
-    expect(footerSegments().get("swarm-context")!()).toBe("ctx:session-model");
+    expect(footerSegments().get("swarm-context")!()).toBeUndefined();
     // The warning is a startup notice, not a ctx.ui.notify call: it is raised
     // during session_start, before the UI can show a transient notification.
     const warning = startupNotices().at(-1);

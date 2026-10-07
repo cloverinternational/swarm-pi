@@ -236,8 +236,8 @@ belongs in `packages/policy/policy`, and rendering belongs in the extension/rend
 | `Skill`, `SkillManage` | skill/autogen integration via `extensions/swarm-skills/extension.ts`, `extensions/autogenskills/extension.ts` | `packages/context/autogenskills/src/index.ts`; mutate skills only through the vault/revision API. |
 | `web_fetch`, `deepwiki`, `browser_get_page` | `extensions/research-tools/extension.ts` | Extension-local bounded evidence fetcher; provenance and network policy are coupled requirements. |
 | `enter_plan_mode`, `exit_plan_mode` | `extensions/swarm-plan-mode/extension.ts` | `.pi/lib/context/swarm-plan-mode.ts`; plan approval is separate from implementation. |
-| `/auto on|off|status` | `extensions/swarm-auto/extension.ts` | Opt-in session-local autonomous continuation. Contributes `auto:on/off` through the existing `pi-swarm-footer-segments` registry; it never replaces the footer slot. `.pi/lib/context/auto-mode-state.ts` exposes session-ID-scoped state to ask-user: active auto mode uses a bounded tool-less consultation before any dialog, validates the answer, and labels it autonomous (never user consent). Failure returns an error without opening UI. `before_agent_start` supplies bounded branch and tracked-worktree context; settled `agent_end` follows an explicit progress marker only while idle. No global provider limits or policy gates are changed. |
-| `ask_user_question` | `extensions/ask-user/extension.ts` | Fork of `edlsh/pi-ask-user` v0.15.0 (MIT, `LICENSE` beside it); local edits are marked `pi-swarm:`. Upstream `bun:test` suite not carried; `.pi/test/tools/ask-user-layout.test.ts` covers the layout helper. |
+| `/auto on|off|status` | `extensions/swarm-auto/extension.ts` | Opt-in session-local autonomous continuation. Contributes `auto:on/off` through the existing `pi-swarm-footer-segments` registry; it never replaces the footer slot. Ask-user now uses the replacement interactive questionnaire; the former ask tool’s automatic consultation is not supported. `before_agent_start` supplies bounded branch and tracked-worktree context; settled `agent_end` follows an explicit progress marker only while idle. No global provider limits or policy gates are changed. |
+| `ask_user_question` | `extensions/ask-user/extension.ts` | Ask-user uses `eko24ive/pi-ask` at commit `49482b7e5d0d57be8af1db81f490f6e860792cfb` (MIT; LICENSE beside it). Private implementation, docs and tests live within `extensions/ask-user/`. The canonical tool name remains `ask_user_question` with the new questionnaire schema. |
 | `control_plane_status` | `extensions/control-panel/extension.ts` | `packages/runtime/runtime-contracts/src/control-plane.ts`, `control-plane-store.ts`; dashboard is read-only. |
 | `daemon_status`, task/run tools | `extensions/control-task-tools/extension.ts` | `packages/runtime/runtime-contracts/src/daemon-rpc.ts`, `control-task.ts`; unavailable daemon must fail closed. Daemon goal/loop APIs remain available to non-TUI consumers, but are not registered in the TUI. |
 | `scheduler`, `/goal`, `/loop` | `extensions/swarm-goal/extension.ts` | `.pi/lib/tools/swarm-goal.ts`; session-local scheduling and evidence-based goal continuation without a turn cap. Replaces the separate CronCreate/List/Delete and ScheduleWakeup TUI tools. |
@@ -748,9 +748,9 @@ Verify real host: `node tools/experiments/jev-audit/skill-budget-smoke.mjs`.
 
 ### Human handoff on unfinished stop
 
-ask_user_question no longer auto-dismisses. Legacy timeout input is accepted but
-ignored on text, overlay and fallback dialog paths; explicit user cancellation,
-abort and shutdown remain distinct. No default answer is synthesized.
+ask_user_question uses the ask-user questionnaire schema and explicit submit/cancel
+flow. The old timeout argument and dialog fallback are not part of this schema.
+Run `npm run test:ask-user` for the extension-local Node test suite.
 
 After observed work and a normal stop, taskmanage's canonical turn_end hook now
 considers unowned pending/in-progress tasks (including blocked tasks), reconciles

@@ -4,6 +4,16 @@ Release metadata is kept in `package.json`, `update-manifest.json`, and this fil
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-07
+
+- Add the independently selectable `ask-user` extension with structured
+  questionnaires, replay/settings UI, documented interaction contracts, and
+  205 focused tests. Include its dedicated test suite in CI.
+- Separate mandatory-compaction behavior and tests into the current extension
+  organization.
+- Add the prompt-context and autogenskills compatibility corrections included
+  in this release.
+
 - Flatten Pi extensions into individually selectable entries, preserve the tool surface, adopt native settlement/continuation, scope compatibility handlers, and repair macOS PTY execution and installation diagnostics.
 
 - Add an open issue triage script under `tools/experiments` for batching repository issue review.

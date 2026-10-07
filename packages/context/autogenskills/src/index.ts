@@ -1226,13 +1226,9 @@ export function registerAutoSkills(pi: any, config: Config = {}) {
     const segments = g[key] ?? (g[key] = new Map());
     segments.set("autogen", () => {
       if (manager.config.mode === "never") return undefined;
-      const usage = ctx.getContextUsage?.();
-      const contextPercent = usage?.percent == null ? "?" : `${Math.round(usage.percent)}%`;
-      const contextFilled = usage?.percent == null ? 0 : Math.max(0, Math.min(10, Math.round(usage.percent / 10)));
-      const contextBar = "█".repeat(contextFilled) + "░".repeat(10 - contextFilled);
       const budget = manager.budgetStatus();
-      const skill = manager.activeSkillName?.() ?? "none";
-      return `Autogen ${budget.used}/${budget.budget} · Skill: ${skill} · Context ${contextBar} ${contextPercent}`;
+      const skill = manager.activeSkillName?.();
+      return `Autogen ${budget.used}/${budget.budget}${skill ? ` · Skill: ${skill}` : ""}`;
     });
     ctx.sessionManager?.onBranchChange?.(() => ctx.ui?.requestRender?.());
     ctx.ui?.requestRender?.();

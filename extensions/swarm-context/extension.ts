@@ -65,7 +65,9 @@ export default function swarmContextExtension(pi: any): void {
     } catch { return undefined; }
   };
 
-  footerSegments().set("swarm-context", () => modelChoice.fallback ? "ctx:session-model" : undefined);
+  // The active model is already shown in the primary footer row. Repeating a
+  // fallback implementation detail here adds noise without helping the user.
+  footerSegments().set("swarm-context", () => undefined);
 
   pi.on?.("session_start", (_event: unknown, ctx: any) => {
     cwd = ctx?.cwd ?? process.cwd();

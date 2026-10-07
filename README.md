@@ -30,6 +30,17 @@ Trebol extensions add Swarm context, policy, tools, state, and UI
 The migration adapts the Swarm model to Pi's lifecycle and extension APIs;
 obsolete parity probes were retired in v0.4.0.
 
+## Organization context policy
+
+Sessions loading the Trebol Pi package use a custom estimated-context compaction
+guard near 330,000 tokens (it starts at 325,000 to leave estimation/response
+headroom). The guard summarizes through the active model and requests a single
+continuation through Pi's turn boundary. Pi's native compaction remains enabled
+as a safety net and is used when context usage is unknown or the selected model
+has a context window below the organization target. This is an estimate-based
+policy, not a provider-enforced hard token cap; all organization sessions must
+load the managed Trebol package for the guard to apply.
+
 ## Capabilities
 
 ### Autonomous mode

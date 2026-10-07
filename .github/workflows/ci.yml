@@ -75,3 +75,4 @@ jobs:
       - run: npm run build
       - run: node tools/repo/rewrite-imports.mjs --check
       - run: npm test
+      - run: npm run test:ask-user
