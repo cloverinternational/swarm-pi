@@ -38,7 +38,7 @@ function installBootstrapRequirementFooter(ctx: any): void {
   // Install at session start, after extension factories have contributed their
   // segments, so this appears directly after ctx:session-model when present.
   segments.delete("bootstrap-requirement");
-  segments.set("bootstrap-requirement", () => `bootstrap:${bootstrapRequirementEnabled() ? "on" : "off"}`);
+  segments.set("bootstrap-requirement", () => bootstrapRequirementEnabled() ? "bootstrap:on" : undefined);
 }
 
 export default function bootstrapExtension(pi: any) {

@@ -31,8 +31,8 @@ export default function trebolLoader(pi: ExtensionAPI): void {
   const existingMode = trebolMode();
   const updateFooter = (mode = trebolMode()) => {
     const map = segments();
-    if (mode === "on") map.set("trebol-mode", () => `trebol:${trebolMode()} [Ctrl+N]`);
-    else map.delete("trebol-mode");
+    // On is the default: reserve footer space for exceptional state only.
+    map.delete("trebol-mode");
     const ctx = controller.ctx;
     try {
       const metrics = globals[METRICS];
@@ -70,9 +70,7 @@ export default function trebolLoader(pi: ExtensionAPI): void {
         if (state.generation === generation) {
           setTrebolMode(state.previous ?? "on");
           try { ctx.ui.setStatus("trebol", undefined); } catch { /* ctx may already be invalid */ }
-          if (state.previous === "on") {
-            try { segments().set("trebol-mode", () => `trebol:${trebolMode()}`); } catch {}
-          }
+          // The normal on state does not contribute a footer segment.
           state.busy = false;
           try { ctx.ui.notify(`Trebol reload failed: ${error instanceof Error ? error.message : String(error)}`, "error"); } catch { /* ctx may already be invalid */ }
         }

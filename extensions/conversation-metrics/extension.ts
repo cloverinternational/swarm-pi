@@ -136,6 +136,12 @@ export function footerMetricsLine(walltime: string, outputTokens: number, segmen
   return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments].filter(Boolean).join("  ·  ");
 }
 
+/** The work shortcut advertises live tasks; completed work remains available via /work. */
+export function runningWorkHint(work: readonly { status: string }[]): string | undefined {
+  const count = work.filter(item => item.status === "running" || item.status === "queued").length;
+  return count ? `↓ Tasks running (${count})` : undefined;
+}
+
 function styleIdentityLine(line: string, state: "running" | "idle", theme: any): string {
   const marker = state === "running" ? theme.fg("success", "●") : theme.fg("muted", "○");
   const model = line.replace(/^[●○]  /, "");
@@ -252,7 +258,8 @@ class MetricsFooter {
       else detail = next;
     }
     if (detail) rows.push(fg("dim", fit(detail)));
-    if (work.length) rows.push(fg("dim", fit(`/work browse recent (${work.length})  ·  ↓ on empty input`)));
+    const hint = runningWorkHint(work);
+    if (hint) rows.push(fg("dim", fit(hint)));
     return rows.map(row => {
       const fitted = fit(row);
       const padded = " " + fitted + " ".repeat(Math.max(0, width - 1 - visibleWidth(fitted)));

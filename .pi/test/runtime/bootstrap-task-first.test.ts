@@ -38,7 +38,7 @@ it("toggles only the bootstrap requirement with Ctrl+D and reports it in the foo
   expect(registerShortcut).not.toHaveBeenCalled();
   // The requirement now defaults OFF for every session; the persisted enforce
   // flag only decides what Ctrl+D turns on. Toggle it on for this session:
-  expect(footer()).toBe("bootstrap:off");
+  expect(footer()).toBeUndefined();
   expect(gate({toolName:"Bash"},ctx)).toBeUndefined();
   expect(before({systemPrompt:"base"},ctx)).toBeUndefined();
   expect(terminalListeners[0]("\x04")).toEqual({consume:true});
@@ -55,20 +55,20 @@ it("toggles only the bootstrap requirement with Ctrl+D and reports it in the foo
   const activeInput=terminalListeners[1];
 
   // A re-entered session also resets the requirement to its off default.
-  expect(footer()).toBe("bootstrap:off");
+  expect(footer()).toBeUndefined();
   expect(activeInput("x")).toBeUndefined();
   expect(activeInput("\x04")).toEqual({consume:true});
   expect(footer()).toBe("bootstrap:on");
   expect(gate({toolName:"Bash"},ctx)?.block).toBe(true);
   expect(gate({toolName:"TaskManage"},ctx)).toBeUndefined();
   expect(activeInput("\x04")).toEqual({consume:true});
-  expect(footer()).toBe("bootstrap:off");
+  expect(footer()).toBeUndefined();
   expect(gate({toolName:"Bash"},ctx)).toBeUndefined();
   expect(before({systemPrompt:"base"},ctx)).toBeUndefined();
 
   expect(activeInput("ctrl+d:repeat")).toEqual({consume:true});
   expect(activeInput("ctrl+d:release")).toEqual({consume:true});
-  expect(footer()).toBe("bootstrap:off");
+  expect(footer()).toBeUndefined();
   expect(activeInput("\x04")).toEqual({consume:true});
   expect(footer()).toBe("bootstrap:on");
   expect(gate({toolName:"Bash"},ctx)?.block).toBe(true);

@@ -14,8 +14,8 @@ export default function swarmAuto(pi: any): void {
   let lastPrompt = "";
   let unproductiveTurns = 0;
   const handle = { enabled: () => enabled, generation: () => generation };
-  const segment = () => `auto:${handle.enabled() ? "on" : "off"}`;
-  const footerSegments = (): Map<string, () => string> =>
+  const segment = () => handle.enabled() ? "auto:on" : undefined;
+  const footerSegments = (): Map<string, () => string | undefined> =>
     ((globalThis as any)[FOOTER_SEGMENTS_KEY] ??= new Map());
   const syncFooter = (ctx: any) => {
     footerSegments().set("auto-mode", segment);
