@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { openRunningWorkView } from "./running-work-view.ts";
 
 export type RunningWorkKind = "subagent" | "bash";
@@ -111,8 +112,10 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
   }
   const items = runningWorkSnapshot();
   if (!items.length) return false;
-  const down = data === "\x1b[B" || data === "\x1b[1;B";
-  const up = data === "\x1b[A" || data === "\x1b[1;A";
+  // Match Pi's own input decoding (including Kitty/CSI modifier forms), not
+  // only the legacy terminal byte sequence used by one terminal.
+  const down = matchesKey(data, "down");
+  const up = matchesKey(data, "up");
   if (!runningWorkExpanded() && down && !ctx?.editor?.getText?.()) return openRunningWorkView(ctx);
   if (!runningWorkExpanded()) return false;
   if (down) { moveRunningWorkSelection(1); return true; }

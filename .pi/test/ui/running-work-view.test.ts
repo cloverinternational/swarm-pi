@@ -78,4 +78,26 @@ describe("focused work browser", () => {
     setRunningWork(agent);
     expect(openRunningWorkView({ mode: "print", ui: { custom: () => { throw Error("should not run"); } } })).toBe(false);
   });
+  it("opens a completed item using Pi's normalized Down sequence", async () => {
+    setRunningWork({ ...agent, kind: "bash", status: "completed", output: "finished output" });
+    let opened = 0;
+    const ctx = { mode: "tui", editor: { getText: () => "" }, ui: { custom: (factory: any) => {
+      opened++;
+      const view = factory(tui, theme, {}, () => {});
+      expect(view.render(60).join("\n")).toContain("completed");
+      view.dispose();
+      return Promise.resolve();
+    } } };
+    expect(handleRunningWorkInput("\x1b[1;1B", ctx)).toBe(true);
+    expect(opened).toBe(1);
+    await Promise.resolve();
+  });
+  it("leaves Down to the editor when text exists or the work list is empty", () => {
+    const ctx = { mode: "tui", editor: { getText: () => "draft" }, ui: { custom: () => { throw Error("should not open"); } } };
+    setRunningWork({ ...agent, status: "completed" });
+    expect(handleRunningWorkInput("\x1b[1;1B", ctx)).toBe(false);
+    removeRunningWork(agent.id);
+    ctx.editor.getText = () => "";
+    expect(handleRunningWorkInput("\x1b[1;1B", ctx)).toBe(false);
+  });
 });
