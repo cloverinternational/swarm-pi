@@ -212,7 +212,7 @@ export function runningWorkListLabel(item: RunningWorkItem, maxPreview = 36): st
 
 export function runningWorkFooterHints(): string {
   const hints = ["↑/↓ select", "Enter inspect", "Esc close"];
-  const globals = globalThis as any;
+  const globals = globalThis as Record<PropertyKey, unknown>;
   if (typeof globals[Symbol.for("pi-swarm-background-bash-detach")] === "function"
     || typeof globals[Symbol.for("pi-swarm-wait-for-agent-background")] === "function") {
     hints.push("Ctrl+B detach/wait");
