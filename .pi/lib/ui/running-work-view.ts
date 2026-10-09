@@ -12,12 +12,12 @@ const bounded = (text: string) => [...text].length > 3000 ? `${[...text].slice(0
 export function parseSubagentConversation(lines: readonly string[]): ConversationStep[] {
   const steps: ConversationStep[] = [];
   for (const line of lines.slice(-200)) {
-    let record: any;
-    try { record = JSON.parse(line); } catch { continue; }
+    let record: TranscriptRecord;
+    try { record = JSON.parse(line) as TranscriptRecord; } catch { continue; }
     if (record?.type !== "message") continue;
     const message = record.message;
     if (!message || !["user", "assistant", "toolResult"].includes(message.role)) continue;
-    const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? message.content : [];
+    const parts: TranscriptPart[] = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? message.content as TranscriptPart[] : [];
     const texts = parts.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => clean(part.text));
     const calls = parts.filter((part: any) => part?.type === "toolCall").map((part: any) => String(part.name ?? "tool"));
     // A step preview, not an unbounded tool transcript. Inspection stays navigable.
@@ -35,6 +35,22 @@ export function parseSubagentConversation(lines: readonly string[]): Conversatio
 }
 
 /** Read only a bounded tail; children may disappear or append an incomplete final line. */
+type TranscriptPart = { type?: unknown; text?: unknown; name?: unknown };
+type TranscriptMessage = { role?: unknown; content?: unknown; toolName?: unknown };
+type TranscriptRecord = { type?: unknown; id?: unknown; message?: TranscriptMessage };
+const transcriptCache = new Map<string, { size: number; mtimeMs: number; steps: ConversationStep[] | undefined }>();
+
+/** Re-parse only when the transcript's size or mtime changes; renders run per keypress. */
+export function readSubagentConversationCached(path: string): ConversationStep[] | undefined {
+  let size: number, mtimeMs: number;
+  try { ({ size, mtimeMs } = statSync(path)); } catch { return undefined; }
+  const hit = transcriptCache.get(path);
+  if (hit && hit.size === size && hit.mtimeMs === mtimeMs) return hit.steps;
+  const steps = readSubagentConversation(path);
+  transcriptCache.set(path, { size, mtimeMs, steps });
+  return steps;
+}
+
 export function readSubagentConversation(path: string): ConversationStep[] | undefined {
   let fd: number | undefined;
   try {
@@ -88,7 +104,7 @@ export class RunningWorkView {
   private steps(item?: RunningWorkItem): ConversationStep[] {
     if (!item) return [];
     if (item.kind === "subagent") {
-      const steps = item.transcriptPath ? readSubagentConversation(item.transcriptPath) : undefined;
+      const steps = item.transcriptPath ? readSubagentConversationCached(item.transcriptPath) : undefined;
       if (steps?.length) return steps;
       return [{ id: "fallback", kind: "assistant", title: "Conversation unavailable", body: bounded(clean(item.output ?? "No conversation yet. The child may still be starting or its session was removed.")) }];
     }
