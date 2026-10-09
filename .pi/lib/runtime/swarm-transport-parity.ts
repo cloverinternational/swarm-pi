@@ -167,7 +167,8 @@ export function applySwarmModelCompat(model: ModelLike | undefined, mode: Transp
     : { reasoning_effort: SWARM_REASONING_EFFORT };
   let samplingChanged = false;
   // A model-default temperature must not reach the wire: claude-haiku-5-5 rejects it.
-  if (!mode.interactive && "temperature" in sampling) { delete sampling.temperature; ownedKeys.delete("temperature"); samplingChanged = true; }
+  // The transport invariant applies to every Swarm request, so the key is removed in both modes.
+  if ("temperature" in sampling) { delete sampling.temperature; ownedKeys.delete("temperature"); samplingChanged = true; }
   // Drop values this function set for the other mode (a session can flip
   // hasUI between headless and interactive only across processes, but keep
   // the operation idempotent either way); user-supplied values are kept.
