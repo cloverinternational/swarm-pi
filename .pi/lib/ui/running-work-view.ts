@@ -17,7 +17,7 @@ export function parseSubagentConversation(lines: readonly string[]): Conversatio
     if (record?.type !== "message") continue;
     const message = record.message;
     if (!message || !["user", "assistant", "toolResult"].includes(message.role)) continue;
-    const parts = Array.isArray(message.content) ? message.content : [];
+    const parts = typeof message.content === "string" ? [{ type: "text", text: message.content }] : Array.isArray(message.content) ? message.content : [];
     const texts = parts.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => clean(part.text));
     const calls = parts.filter((part: any) => part?.type === "toolCall").map((part: any) => String(part.name ?? "tool"));
     // A step preview, not an unbounded tool transcript. Inspection stays navigable.
@@ -126,7 +126,7 @@ export class RunningWorkView {
       const current = steps[this.stepIndex];
       body.push("", line(this.theme.fg("accent", ` ${current?.title ?? "No conversation yet"}`)));
       const paragraphs = (current?.body ?? "").split("\n").flatMap(text => wrapTextWithAnsi(` ${text}`, width).map(line));
-      const available = Math.max(1, height - header.length - body.length - 3);
+      const available = Math.max(1, height - header.length - body.length - 4);
       this.scroll = Math.min(this.scroll, Math.max(0, paragraphs.length - available));
       body.push(...paragraphs.slice(this.scroll, this.scroll + available));
       if (paragraphs.length > available) body.push(line(` ${this.scroll + 1}–${Math.min(paragraphs.length, this.scroll + available)}/${paragraphs.length} lines`));

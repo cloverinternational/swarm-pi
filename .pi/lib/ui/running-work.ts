@@ -31,8 +31,11 @@ const state = (): State => {
 
 export function runningWorkSnapshot(): RunningWorkItem[] { return [...state().items.values()].sort((a, b) => a.startedAt - b.startedAt); }
 export function browsableRunningWork(now = Date.now()): RunningWorkItem[] {
-  return visibleRunningWork(runningWorkSnapshot().filter(item => item.status === "queued" || item.status === "running" ||
-    (item.endedAt ?? item.startedAt) <= now && now - (item.endedAt ?? item.startedAt) < RECENT_WORK_MS));
+  // Live work is never evicted by recent completions: cap the live set first, then add recent history.
+  const live = runningWorkSnapshot().filter(item => item.status === "queued" || item.status === "running");
+  const recent = runningWorkSnapshot().filter(item => !(item.status === "queued" || item.status === "running") &&
+    (item.endedAt ?? item.startedAt) <= now && now - (item.endedAt ?? item.startedAt) < RECENT_WORK_MS);
+  return [...live, ...recent].sort((a, b) => a.startedAt - b.startedAt).slice(-Math.max(MAX_VISIBLE_RUNNING_WORK, live.length));
 }
 /** A reload retains this session's work; switching sessions must not carry its history. */
 export function scopeRunningWorkToSession(sessionId: string | undefined): void {
