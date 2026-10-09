@@ -149,14 +149,14 @@ export class SwarmAgentTools {
     const entry: Entry = { id, task, startedAt: Date.now(), outputFile: file, handle, delegate, done: undefined! };
     writeFileSync(metadataPath(id), JSON.stringify({ id, task, startedAt: entry.startedAt, delegate, cwd: this.cwd, sessionId: this.activeSessionId }) + "\n");
     setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task });
-    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path }); } };
-    const removeTranscriptSink = this.manager.addTranscriptSink(transcriptSink);
     const ownsSession = this.captureCompletionOwner?.() ?? (() => true);
+    const transcriptSink = (agentId: string, path: string) => { if (agentId === id) { entry.transcriptPath = path; if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: "running", startedAt: entry.startedAt, detail: task, transcriptPath: path }); } };
+    const removeTranscriptSink = this.manager.addTranscriptSink(transcriptSink);
     entry.done = handle.wait().then(async result => {
       removeTranscriptSink();
       entry.result = result;
       entry.transcriptPath = result.transcriptPath;
-      setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: result.status, startedAt: entry.startedAt, endedAt: Date.now(), tokens: 0, detail: task, output: result.output ?? result.error, transcriptPath: result.transcriptPath });
+      if (ownsSession()) setRunningWork({ id, kind: "subagent", label: delegate ? `Delegate ${id}` : `Agent ${id}`, status: result.status, startedAt: entry.startedAt, endedAt: Date.now(), tokens: 0, detail: task, output: result.output ?? result.error, transcriptPath: result.transcriptPath });
       await mkdir(dirname(file), { recursive: true });
       if (result.status === "completed") {
         const content = result.output ?? "";

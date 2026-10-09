@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error -- plain ESM helper, intentionally untyped
 import { parseGoStringConst } from "../scripts/go-const.mjs";
@@ -11,12 +11,14 @@ import {
   swarmPromptPresets,
 } from "../src/index.js";
 
-const goSource = readFileSync(
-  fileURLToPath(new URL(`../../../../${UPSTREAM_SOURCE}`, import.meta.url)),
-  "utf8",
-);
+// The upstream Go source lives in vendor/swarm-sdk, which is no longer tracked.
+// Byte-parity checks against it run only when it is present locally.
+const upstreamPath = fileURLToPath(new URL(`../../../../${UPSTREAM_SOURCE}`, import.meta.url));
+const goSource = existsSync(upstreamPath) ? readFileSync(upstreamPath, "utf8") : undefined;
+const describeUpstream = describe.skipIf(goSource === undefined);
 
 describe("vendored SwarmForge prompt", () => {
+  describeUpstream("upstream parity", () => {
   it("matches the upstream Go constants byte-for-byte", () => {
     expect(forgeSwarmSystemPrompt).toBe(parseGoStringConst(goSource, "forgeSwarmSystemPrompt"));
     expect(swarmForgeDelegationAddendum).toBe(
@@ -27,6 +29,7 @@ describe("vendored SwarmForge prompt", () => {
   it("composes exactly as upstream does", () => {
     expect(swarmForgeSystemPrompt).toBe(forgeSwarmSystemPrompt + swarmForgeDelegationAddendum);
     expect(swarmForgeSystemPrompt).toBe(parseGoStringConst(goSource, "swarmForgeSystemPrompt"));
+  });
   });
 
   it("preserves embedded markdown code spans", () => {
@@ -56,8 +59,10 @@ describe("vendored SwarmForge prompt", () => {
     ]);
     for (const preset of swarmPromptPresets) {
       expect(preset.workspaceContext).toBe(true);
-      expect(goSource).toContain(`Content:          ${preset.constant},`);
-      expect(goSource).toContain(`Name:             "${preset.name}",`);
+      if (goSource !== undefined) {
+        expect(goSource).toContain(`Content:          ${preset.constant},`);
+        expect(goSource).toContain(`Name:             "${preset.name}",`);
+      }
     }
   });
 

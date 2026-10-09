@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { clampFooterRow, currentModelLabel, footerIdentityLine, footerMetricsLine, footerVisibleWidth, wrapFooterText } from "../../../extensions/conversation-metrics/extension.ts";
+import { clampFooterRow, currentModelLabel, footerIdentityLine, footerMetricsLine, footerVisibleWidth, runningWorkHint, wrapFooterText } from "../../../extensions/conversation-metrics/extension.ts";
 
 describe("conversation metrics footer", () => {
+  it("advertises only active work with a compact Down hint", () => {
+    expect(runningWorkHint([])).toBeUndefined();
+    expect(runningWorkHint([{ status: "completed" }, { status: "failed" }])).toBeUndefined();
+    expect(runningWorkHint([{ status: "running" }, { status: "queued" }, { status: "completed" }])).toBe("↓ Tasks running (2)");
+  });
   it("reports provider and model", () => {
     expect(currentModelLabel({ model: { provider: "openai", id: "gpt-test" } })).toBe("openai/gpt-test");
   });

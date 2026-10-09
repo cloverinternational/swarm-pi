@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { matchesKey } from "@earendil-works/pi-tui";
+import { openRunningWorkView } from "./running-work-view.ts";
 
 export type RunningWorkKind = "subagent" | "bash";
 export type RunningWorkStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -20,13 +22,32 @@ export interface RunningWorkItem {
 
 const KEY = Symbol.for("pi-swarm-running-work");
 export const MAX_VISIBLE_RUNNING_WORK = 6;
-type State = { items: Map<string, RunningWorkItem>; listeners: Set<() => void>; expanded: boolean; selected: number };
+export const RECENT_WORK_MS = 15 * 60 * 1000;
+type State = { items: Map<string, RunningWorkItem>; listeners: Set<() => void>; expanded: boolean; selected: number; sessionId?: string };
 const state = (): State => {
   const root = globalThis as typeof globalThis & { [KEY]?: State };
   return root[KEY] ?? (root[KEY] = { items: new Map(), listeners: new Set(), expanded: false, selected: 0 });
 };
 
 export function runningWorkSnapshot(): RunningWorkItem[] { return [...state().items.values()].sort((a, b) => a.startedAt - b.startedAt); }
+export function browsableRunningWork(now = Date.now()): RunningWorkItem[] {
+  // Live work is never evicted by recent completions: cap the live set first, then add recent history.
+  const live = runningWorkSnapshot().filter(item => item.status === "queued" || item.status === "running");
+  const recent = runningWorkSnapshot().filter(item => !(item.status === "queued" || item.status === "running") &&
+    (item.endedAt ?? item.startedAt) <= now && now - (item.endedAt ?? item.startedAt) < RECENT_WORK_MS);
+  return [...live, ...recent].sort((a, b) => a.startedAt - b.startedAt).slice(-Math.max(MAX_VISIBLE_RUNNING_WORK, live.length));
+}
+/** A reload retains this session's work; switching sessions must not carry its history. */
+export function scopeRunningWorkToSession(sessionId: string | undefined): void {
+  // An unknown session is still a distinct scope: switching to or from it must clear history.
+  const scope = sessionId || "";
+  const current = state();
+  if (current.sessionId !== undefined && current.sessionId !== scope) {
+    current.items.clear(); current.selected = 0; current.expanded = false;
+    current.listeners.forEach(listener => listener());
+  }
+  current.sessionId = scope;
+}
 /** Keep the drawer useful when many background commands have accumulated. */
 export function visibleRunningWork(items = runningWorkSnapshot()): RunningWorkItem[] {
   return items.length <= MAX_VISIBLE_RUNNING_WORK ? items : items.slice(-MAX_VISIBLE_RUNNING_WORK);
@@ -39,16 +60,16 @@ export function setRunningWorkExpanded(expanded: boolean): void { state().expand
 export function toggleRunningWorkExpanded(): boolean { setRunningWorkExpanded(!runningWorkExpanded()); return runningWorkExpanded(); }
 /** Selection clamped to the currently visible list so a stale index (after items finished or were removed) still resolves to a real row. */
 export function runningWorkSelection(): number {
-  return Math.max(0, Math.min(state().selected, visibleRunningWork().length - 1));
+  return Math.max(0, Math.min(state().selected, browsableRunningWork().length - 1));
 }
 export function moveRunningWorkSelection(delta: number): void {
-  const items = visibleRunningWork();
+  const items = browsableRunningWork();
   if (!items.length) return;
   state().selected = Math.max(0, Math.min(items.length - 1, runningWorkSelection() + delta));
   state().listeners.forEach(listener => listener());
 }
 export function selectedRunningWork(): RunningWorkItem | undefined {
-  const items = visibleRunningWork();
+  const items = browsableRunningWork();
   return items.length ? items[runningWorkSelection()] : undefined;
 }
 /** Enter can arrive as CR/LF or Kitty keyboard protocol CSI-u when Pi enables enhanced key reporting. */
@@ -108,11 +129,12 @@ export function handleRunningWorkInput(data: string, ctx?: any): boolean {
     const wait = (globalThis as any)[Symbol.for("pi-swarm-wait-for-agent-background")];
     if (typeof wait === "function" && wait()) return true;
   }
-  const items = runningWorkSnapshot();
-  if (!items.length) return false;
-  const down = data === "\x1b[B" || data === "\x1b[1;B";
-  const up = data === "\x1b[A" || data === "\x1b[1;A";
-  if (!runningWorkExpanded() && down && !ctx?.editor?.getText?.()) { toggleRunningWorkExpanded(); return true; }
+  if (!browsableRunningWork().length) return false;
+  // Match Pi's own input decoding (including Kitty/CSI modifier forms), not
+  // only the legacy terminal byte sequence used by one terminal.
+  const down = matchesKey(data, "down");
+  const up = matchesKey(data, "up");
+  if (!runningWorkExpanded() && down && !ctx?.editor?.getText?.()) return openRunningWorkView(ctx);
   if (!runningWorkExpanded()) return false;
   if (down) { moveRunningWorkSelection(1); return true; }
   if (up) { moveRunningWorkSelection(-1); return true; }
@@ -172,4 +194,28 @@ export function formatRunningWorkDuration(item: RunningWorkItem, now = Date.now(
   const seconds = Math.max(0, Math.floor(((item.endedAt ?? now) - item.startedAt) / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/** Compact one-line label; full command/task detail stays in inspection. */
+export function runningWorkListLabel(item: RunningWorkItem, maxPreview = 36): string {
+  if (item.kind !== "bash") return `${item.kind} ${item.label}`;
+  const preview = String(item.detail ?? "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/\s+/g, " ").trim();
+  if (!preview) return "bash";
+  const chars = [...preview];
+  const limit = Math.max(1, maxPreview);
+  return `bash · ${chars.length > limit ? `${chars.slice(0, limit - 1).join("")}…` : preview}`;
+}
+
+export function runningWorkFooterHints(): string {
+  const hints = ["↑/↓ select", "Enter inspect", "Esc close"];
+  const globals = globalThis as Record<PropertyKey, unknown>;
+  if (typeof globals[Symbol.for("pi-swarm-background-bash-detach")] === "function"
+    || typeof globals[Symbol.for("pi-swarm-wait-for-agent-background")] === "function") {
+    hints.push("Ctrl+B detach/wait");
+  }
+  return hints.join("  ");
 }

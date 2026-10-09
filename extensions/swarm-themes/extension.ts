@@ -115,7 +115,7 @@ export default function swarmThemes(pi: any) {
       ctx.ui.setTheme?.("swarm-swarmcode");
     }
     ctx.ui?.setEditorComponent?.((tui: any, theme: any, keybindings: any) =>
-      new SwarmPromptEditor(tui, theme, keybindings, { ui: ctx.ui }),
+      new SwarmPromptEditor(tui, theme, keybindings, { ui: ctx.ui, mode: ctx.mode }),
     );
   });
 }

@@ -35,7 +35,7 @@ const mapFile = opt("--map");
 const moves = mapFile ? JSON.parse(readFileSync(resolve(ROOT, mapFile), "utf8")) : {};
 const CHECK = has("--check");
 const DRY = has("--dry-run");
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "vendor", "artifacts", ".swarm", "agent-sessions"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "artifacts", ".swarm", "agent-sessions"]);
 const EXT = /\.(ts|mts|cts|js|mjs|cjs)$/;
 
 // Sort longest-old-path first so nested entries win over their parents.
@@ -86,6 +86,7 @@ function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const p = join(dir, entry.name);
+    if (entry.isDirectory() && p === join(ROOT, "vendor")) continue;
     if (entry.isDirectory()) yield* walk(p);
     else if (entry.isFile() && EXT.test(entry.name)) yield p;
   }
@@ -101,6 +102,9 @@ function resolvesToSomething(abs) {
 }
 
 const SPEC_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bnew URL\s*\(\s*)(["'`])(\.\.?\/[^"'`\n]*)\2/g;
+
+// Root vendor/ is untracked; specifiers into it are not checkable.
+const VENDOR_ROOT = resolve(ROOT, "vendor");
 
 let rewritten = 0, unresolved = 0, templates = 0;
 for (const file of walk(ROOT)) {
@@ -129,7 +133,7 @@ for (const file of walk(ROOT)) {
       const spec = m[3];
       if (spec.includes("${")) continue;
       const abs = resolve(dirname(file), spec);
-      if (!resolvesToSomething(abs)) { unresolved++; console.error(`UNRESOLVED ${relative(ROOT, file)}: ${spec}`); }
+      if (!resolvesToSomething(abs) && !abs.startsWith(VENDOR_ROOT + sep)) { unresolved++; console.error(`UNRESOLVED ${relative(ROOT, file)}: ${spec}`); }
     }
   }
 }

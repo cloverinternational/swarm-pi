@@ -1,7 +1,8 @@
 /** Small, session-backed status line for the native Pi editor. */
 import { basename } from "node:path";
 import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatRunningWorkDuration, onRunningWorkChange, runningWorkExpanded, runningWorkSelection, visibleRunningWork } from "../../.pi/lib/ui/running-work.ts";
+import { onRunningWorkChange, scopeRunningWorkToSession, browsableRunningWork } from "../../.pi/lib/ui/running-work.ts";
+import { openRunningWorkView } from "../../.pi/lib/ui/running-work-view.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
 import { scheduleIdleStatus } from "../../.pi/lib/runtime/schedule-status.ts";
 export interface ConversationMetrics {
@@ -135,6 +136,12 @@ export function footerMetricsLine(walltime: string, outputTokens: number, segmen
   return [walltime, `↓ ${outputTokens.toLocaleString()} tok`, ...segments].filter(Boolean).join("  ·  ");
 }
 
+/** The work shortcut advertises live tasks; completed work remains available via /work. */
+export function runningWorkHint(work: readonly { status: string }[]): string | undefined {
+  const count = work.filter(item => item.status === "running" || item.status === "queued").length;
+  return count ? `↓ Tasks running (${count})` : undefined;
+}
+
 function styleIdentityLine(line: string, state: "running" | "idle", theme: any): string {
   const marker = state === "running" ? theme.fg("success", "●") : theme.fg("muted", "○");
   const model = line.replace(/^[●○]  /, "");
@@ -211,76 +218,61 @@ class MetricsFooter {
       try { text = provider(); } catch { text = undefined; }
       if (text) segments.push(text);
     }
-    const work = visibleRunningWork();
-    if (!runningWorkExpanded() || !work.length) {
-      const fg = (color: string, text: string) => this.theme.fg(color, text);
-      const clean = (text: unknown) => String(text ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
-      const inner = Math.max(1, width - 2);
-      const fit = (text: string, cells = inner) => truncateToWidth(text, Math.max(1, cells));
-      const pair = (left: string, right: string): string[] => {
-        const room = inner - visibleWidth(right) - 3;
-        if (room >= Math.min(visibleWidth(left), 12)) {
-          const l = fit(left, room);
-          return [l + " ".repeat(Math.max(1, inner - visibleWidth(l) - visibleWidth(right))) + right];
-        }
-        return [fit(left), fit(right)];
-      };
-      const branch = clean(this.footerData?.getGitBranch?.());
-      const workspace = clean(basename(shared.ctx?.cwd ?? "")) || "workspace";
-      const location = this.theme.bold(fg("success", workspace)) + (branch ? fg("dim", " / " + branch) : "");
-      const current = shared.ctx?.model;
-      const identity = this.theme.bold(fg("accent", clean(current?.id) || "model unavailable"))
-        + (width >= 90 && current?.provider ? fg("dim", " · " + clean(current.provider)) : "");
-      const waiting = m.active ? undefined : scheduleIdleStatus(shared.ctx?.sessionManager?.getSessionId?.());
-      const status = fg(m.active ? "success" : waiting ? "accent" : "dim", m.active ? "WORKING" : waiting ?? "IDLE");
-      const rows = pair(location, identity + "   " + status);
-      const usage = shared.ctx?.getContextUsage?.();
-      const percent = typeof usage?.percent === "number" && Number.isFinite(usage.percent) ? usage.percent : undefined;
-      const pressure = percent !== undefined && percent >= 90 ? "error" : percent !== undefined && percent >= 70 ? "warning" : "accent";
-      const filled = percent === undefined ? 0 : Math.max(0, Math.min(8, Math.round(percent / 100 * 8)));
-      const gauge = width >= 70 && percent !== undefined
-        ? fg(pressure, "▰".repeat(filled)) + fg("dim", "▱".repeat(8 - filled)) + " " : "";
-      const context = fg("dim", "Context ") + gauge + fg(pressure, percent === undefined ? "—" : `${Math.round(percent)}%`);
-      const output = m.outputTokens >= 1000 ? `${(m.outputTokens / 1000).toFixed(1)}k` : String(m.outputTokens);
-      const metrics = fg("accent", `↓ ${output}`) + fg("dim", ` out  ·  ${formatWalltime(currentWalltime())} active`);
-      rows.push(...pair(context, metrics));
-      // Keep complete extension groups together instead of splitting labels by word.
-      let detail = "";
-      for (const segment of segments) {
-        const next = detail ? detail + "  ·  " + clean(segment) : clean(segment);
-        if (detail && visibleWidth(next) > inner) { rows.push(fg("dim", fit(detail))); detail = clean(segment); }
-        else detail = next;
+    const work = browsableRunningWork();
+    const fg = (color: string, text: string) => this.theme.fg(color, text);
+    const clean = (text: unknown) => String(text ?? "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    const inner = Math.max(1, width - 2);
+    const fit = (text: string, cells = inner) => truncateToWidth(text, Math.max(1, cells));
+    const pair = (left: string, right: string): string[] => {
+      const room = inner - visibleWidth(right) - 3;
+      if (room >= Math.min(visibleWidth(left), 12)) {
+        const l = fit(left, room);
+        return [l + " ".repeat(Math.max(1, inner - visibleWidth(l) - visibleWidth(right))) + right];
       }
-      if (detail) rows.push(fg("dim", fit(detail)));
-      return rows.map(row => {
-        const fitted = fit(row);
-        const padded = " " + fitted + " ".repeat(Math.max(0, width - 1 - visibleWidth(fitted)));
-        return truncateToWidth(padded, width);
-      });
+      return [fit(left), fit(right)];
+    };
+    const branch = clean(this.footerData?.getGitBranch?.());
+    const workspace = clean(basename(shared.ctx?.cwd ?? "")) || "workspace";
+    const location = this.theme.bold(fg("success", workspace)) + (branch ? fg("dim", " / " + branch) : "");
+    const current = shared.ctx?.model;
+    const identity = this.theme.bold(fg("accent", clean(current?.id) || "model unavailable"))
+      + (width >= 90 && current?.provider ? fg("dim", " · " + clean(current.provider)) : "");
+    const waiting = m.active ? undefined : scheduleIdleStatus(shared.ctx?.sessionManager?.getSessionId?.());
+    const status = fg(m.active ? "success" : waiting ? "accent" : "dim", m.active ? "WORKING" : waiting ?? "IDLE");
+    const rows = pair(location, identity + "   " + status);
+    const usage = shared.ctx?.getContextUsage?.();
+    const percent = typeof usage?.percent === "number" && Number.isFinite(usage.percent) ? usage.percent : undefined;
+    const pressure = percent !== undefined && percent >= 90 ? "error" : percent !== undefined && percent >= 70 ? "warning" : "accent";
+    const filled = percent === undefined ? 0 : Math.max(0, Math.min(8, Math.round(percent / 100 * 8)));
+    const gauge = width >= 70 && percent !== undefined
+      ? fg(pressure, "▰".repeat(filled)) + fg("dim", "▱".repeat(8 - filled)) + " " : "";
+    const context = fg("dim", "Context ") + gauge + fg(pressure, percent === undefined ? "—" : `${Math.round(percent)}%`);
+    const output = m.outputTokens >= 1000 ? `${(m.outputTokens / 1000).toFixed(1)}k` : String(m.outputTokens);
+    const metrics = fg("accent", `↓ ${output}`) + fg("dim", ` out  ·  ${formatWalltime(currentWalltime())} active`);
+    rows.push(...pair(context, metrics));
+    // Keep complete extension groups together instead of splitting labels by word.
+    let detail = "";
+    for (const segment of segments) {
+      const next = detail ? detail + "  ·  " + clean(segment) : clean(segment);
+      if (detail && visibleWidth(next) > inner) { rows.push(fg("dim", fit(detail))); detail = clean(segment); }
+      else detail = next;
     }
-    const header = `Running work (${work.length})  Down select  Enter inspect  Esc close`;
-    const rows = wrapFooterText(header, width).map((row) => this.theme.fg("accent", row));
-    for (const [index, item] of work.entries()) {
-      const marker = index === runningWorkSelection() ? this.theme.fg("accent", "❯") : " ";
-      const glyph = item.status === "running" ? this.theme.fg("success", "●") : item.status === "completed" ? this.theme.fg("success", "✓") : item.status === "failed" ? this.theme.fg("error", "✗") : this.theme.fg("warning", "■");
-      const tokens = item.tokens === undefined ? "tokens —" : `tokens ${item.tokens.toLocaleString()}`;
-      // Bash commands can be long, sensitive, and numerous. The footer is a
-      // status surface, not a command transcript; keep the command itself in
-      // the inspection view instead of rendering it for every process.
-      const label = item.kind === "bash" ? "bash" : `${item.kind} ${item.label}`;
-      const row = `${marker} ${glyph} ${label}  ${item.status}  ${formatRunningWorkDuration(item)}  ${tokens}`;
-      rows.push(...wrapFooterText(row, width));
-    }
-    const metrics = footerMetricsLine(formatWalltime(currentWalltime()), m.outputTokens, segments);
-    return [...rows, ...wrapFooterText(metrics, width).map((row) => styleMetricsLine(row, this.theme))].map((row) => clampFooterRow(row, width));
+    if (detail) rows.push(fg("dim", fit(detail)));
+    const hint = runningWorkHint(work);
+    if (hint) rows.push(fg("dim", fit(hint)));
+    return rows.map(row => {
+      const fitted = fit(row);
+      const padded = " " + fitted + " ".repeat(Math.max(0, width - 1 - visibleWidth(fitted)));
+      return truncateToWidth(padded, width);
+    });
   }
   dispose() { this.unsubscribeBranch?.(); }
   invalidate() { this.onInvalidate(); }
 }
 
 function render(ctx?: any) {
-  // Keep this a single native footer line; unlike a widget it cannot push or
-  // scroll the user's input box and never becomes transcript content.
+  // This owns compact metrics; the focused work browser uses Pi custom UI
+  // to replace the prompt editor rather than growing this footer.
   if (!shared.footer) ctx?.ui?.setFooter?.((tui: any, theme: any, footerData: any) => (shared.footer = new MetricsFooter(theme, () => tui?.requestRender?.(), footerData)));
   ctx?.ui?.requestRender?.();
 }
@@ -308,7 +300,8 @@ export default function conversationMetricsExtension(pi: any) {
   const workStop = onRunningWorkChange(refreshWork);
   pi.on?.("session_start", (_event: any, ctx: any) => {
     shared.generation++;
-      const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
+    scopeRunningWorkToSession(ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId);
+    const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
     shared.metrics = normalize(previous);
     shared.ctx = ctx;
     render(ctx);
@@ -357,4 +350,9 @@ export default function conversationMetricsExtension(pi: any) {
     workStop();
   });
   pi.registerCommand?.("metrics", { description: "Show this conversation's walltime and output tokens", handler: async (_args: string, ctx: any) => { const m = shared.metrics ?? blank(); ctx.ui?.notify?.(`Conversation: ${formatWalltime(currentWalltime())} walltime · ${m.outputTokens.toLocaleString()} output tokens`, "info"); } });
+  pi.registerCommand?.("work", { description: "Browse recent Bash commands and subagents", handler: async (_args: string, ctx: any) => {
+    if (ctx.mode !== "tui") { ctx.ui?.notify?.("Work browser requires interactive TUI mode", "warning"); return; }
+    if (!browsableRunningWork().length) { ctx.ui?.notify?.("No work items in this Pi session yet", "info"); return; }
+    if (!openRunningWorkView(ctx)) ctx.ui?.notify?.("Work browser is already open or unavailable", "warning");
+  } });
 }

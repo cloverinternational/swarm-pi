@@ -12,9 +12,36 @@ import {
   setRunningWorkExpanded,
   setRunningWork,
   visibleRunningWork,
+  runningWorkListLabel,
+  runningWorkFooterHints,
+  browsableRunningWork,
+  RECENT_WORK_MS,
+  scopeRunningWorkToSession,
 } from "../../lib/ui/running-work.ts";
 
 describe("running work footer interaction", () => {
+  it("shows compact sanitized bash previews while preserving subagent labels", () => {
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "  echo   hello\nworld  " })).toBe("bash · echo hello world");
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "x".repeat(50) })).toBe(`bash · ${"x".repeat(35)}…`);
+    expect(runningWorkListLabel({ id: "a", kind: "subagent", label: "Research", status: "running", startedAt: 0, detail: "research task" })).toBe("subagent Research");
+    expect(runningWorkListLabel({ id: "b", kind: "bash", label: "ignored", status: "running", startedAt: 0, detail: "echo\x1b]8;;https://secret.test\x07link\x1b]8;;\x07" })).toBe("bash · echolink");
+  });
+
+  it("documents navigation, inspection, dismissal, and detach keys", () => {
+    expect(runningWorkFooterHints()).toContain("↑/↓ select");
+    expect(runningWorkFooterHints()).not.toContain("Ctrl+B");
+  });
+
+  it("advertises Ctrl+B only when a background detach action is registered", () => {
+    const key = Symbol.for("pi-swarm-background-bash-detach");
+    const globals = globalThis as any;
+    globals[key] = () => true;
+    try {
+      expect(runningWorkFooterHints()).toContain("Ctrl+B detach/wait");
+    } finally {
+      delete globals[key];
+    }
+  });
   afterEach(() => {
     setRunningWorkExpanded(false);
     for (const item of runningWorkSnapshot()) removeRunningWork(item.id);
@@ -41,6 +68,23 @@ describe("running work footer interaction", () => {
     expect(visibleRunningWork(items).map((item) => item.id)).toEqual([
       "bash-2", "bash-3", "bash-4", "bash-5", "bash-6", "bash-7",
     ]);
+  });
+
+  it("counts only recent completed work but leaves long-running work visible", () => {
+    const now = Date.now();
+    setRunningWork({ id: "old", kind: "bash", label: "old", status: "completed", startedAt: 1, endedAt: now - RECENT_WORK_MS, detail: "old" });
+    setRunningWork({ id: "recent", kind: "bash", label: "recent", status: "completed", startedAt: 2, endedAt: now - 1000, detail: "recent" });
+    setRunningWork({ id: "live", kind: "bash", label: "live", status: "running", startedAt: 3, detail: "live" });
+    expect(browsableRunningWork(now).map(item => item.id)).toEqual(["recent", "live"]);
+  });
+
+  it("retains completed work on same-session reload, clears it on session switch", () => {
+    scopeRunningWorkToSession("work-session-one");
+    setRunningWork({ id: "done", kind: "bash", label: "done", status: "completed", startedAt: Date.now(), endedAt: Date.now(), detail: "echo done" });
+    scopeRunningWorkToSession("work-session-one");
+    expect(browsableRunningWork().map(item => item.id)).toContain("done");
+    scopeRunningWorkToSession("work-session-two");
+    expect(browsableRunningWork()).toEqual([]);
   });
 
   it("shows live output for a running bash entry on Enter", () => {

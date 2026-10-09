@@ -26,3 +26,12 @@ it("does not continue aborted runs, pending continuations, or after off", async 
     await h.command("off"); expect(await h.emit("agent_before_settle", h.boundary)).toBeUndefined();
   } finally { await h.emit("session_shutdown"); }
 });
+it("contributes auto status only while enabled", async () => {
+  const h = harness();
+  const segment = () => (globalThis as any)[Symbol.for("pi-swarm-footer-segments")].get("auto-mode")?.();
+  try {
+    await h.emit("session_start"); expect(segment()).toBeUndefined();
+    await h.command("on"); expect(segment()).toBe("auto:on");
+    await h.command("off"); expect(segment()).toBeUndefined();
+  } finally { await h.emit("session_shutdown"); }
+});
