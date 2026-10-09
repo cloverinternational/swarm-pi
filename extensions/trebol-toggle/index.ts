@@ -68,9 +68,10 @@ export default function trebolLoader(pi: ExtensionAPI): void {
         if (state.generation === generation) state.busy = false;
       } catch (error) {
         if (state.generation === generation) {
-          setTrebolMode(state.previous ?? "on");
-          try { ctx.ui.setStatus("trebol", undefined); } catch { /* ctx may already be invalid */ }
-          // The normal on state does not contribute a footer segment.
+          const restored = state.previous ?? "on";
+          setTrebolMode(restored);
+          // Re-render the footer for the restored mode; the on state contributes no segment.
+          updateFooter(restored);
           state.busy = false;
           try { ctx.ui.notify(`Trebol reload failed: ${error instanceof Error ? error.message : String(error)}`, "error"); } catch { /* ctx may already be invalid */ }
         }
