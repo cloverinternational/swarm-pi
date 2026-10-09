@@ -25,7 +25,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if git diff --name-only "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
+          if git diff --name-only "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA" | grep -x 'CHANGELOG.md' >/dev/null; then
             echo "CHANGELOG.md updated."
           else
             echo '::error file=CHANGELOG.md::Every pull request must update CHANGELOG.md (add your change under [Unreleased]).'
