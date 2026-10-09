@@ -300,7 +300,7 @@ export default function conversationMetricsExtension(pi: any) {
   const workStop = onRunningWorkChange(refreshWork);
   pi.on?.("session_start", (_event: any, ctx: any) => {
     shared.generation++;
-    scopeRunningWorkToSession(ctx?.sessionManager?.getSessionId?.());
+    scopeRunningWorkToSession(ctx?.sessionManager?.getSessionId?.() ?? ctx?.sessionId);
     const previous = [...sessionEntries(ctx)].reverse().find((entry: any) => (entry?.type === "custom" && entry?.customType === ENTRY) || entry?.type === ENTRY)?.data;
     shared.metrics = normalize(previous);
     shared.ctx = ctx;

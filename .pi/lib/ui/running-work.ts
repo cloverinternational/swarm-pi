@@ -39,13 +39,14 @@ export function browsableRunningWork(now = Date.now()): RunningWorkItem[] {
 }
 /** A reload retains this session's work; switching sessions must not carry its history. */
 export function scopeRunningWorkToSession(sessionId: string | undefined): void {
-  if (!sessionId) return;
+  // An unknown session is still a distinct scope: switching to or from it must clear history.
+  const scope = sessionId || "";
   const current = state();
-  if (current.sessionId && current.sessionId !== sessionId) {
+  if (current.sessionId !== undefined && current.sessionId !== scope) {
     current.items.clear(); current.selected = 0; current.expanded = false;
     current.listeners.forEach(listener => listener());
   }
-  current.sessionId = sessionId;
+  current.sessionId = scope;
 }
 /** Keep the drawer useful when many background commands have accumulated. */
 export function visibleRunningWork(items = runningWorkSnapshot()): RunningWorkItem[] {
