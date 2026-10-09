@@ -102,6 +102,9 @@ function resolvesToSomething(abs) {
 
 const SPEC_RE = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bnew URL\s*\(\s*)(["'`])(\.\.?\/[^"'`\n]*)\2/g;
 
+// vendor/ is untracked (SKIP_DIRS); specifiers into it are not checkable.
+const VENDOR_ROOT = resolve(ROOT, "vendor");
+
 let rewritten = 0, unresolved = 0, templates = 0;
 for (const file of walk(ROOT)) {
   const src = readFileSync(file, "utf8");
@@ -129,7 +132,7 @@ for (const file of walk(ROOT)) {
       const spec = m[3];
       if (spec.includes("${")) continue;
       const abs = resolve(dirname(file), spec);
-      if (!resolvesToSomething(abs)) { unresolved++; console.error(`UNRESOLVED ${relative(ROOT, file)}: ${spec}`); }
+      if (!resolvesToSomething(abs) && !abs.startsWith(VENDOR_ROOT + sep)) { unresolved++; console.error(`UNRESOLVED ${relative(ROOT, file)}: ${spec}`); }
     }
   }
 }
