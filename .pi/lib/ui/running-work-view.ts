@@ -25,8 +25,10 @@ export function parseSubagentConversation(lines: readonly string[]): Conversatio
     const body = bounded(rawBody);
     if (message.role === "assistant" && !body && !calls.length) continue;
     const kind = message.role === "toolResult" ? "tool" : message.role;
-    const title = kind === "tool" ? `Tool result · ${String(message.toolName ?? "tool")}`
-      : kind === "user" ? "User request" : calls.length ? `Assistant · ${calls.join(", ")}` : "Assistant";
+    let title = "Assistant";
+    if (kind === "tool") title = `Tool result · ${String(message.toolName ?? "tool")}`;
+    else if (kind === "user") title = "User request";
+    else if (calls.length) title = `Assistant · ${calls.join(", ")}`;
     steps.push({ id: String(record.id ?? steps.length), kind, title: `${title}${body && kind !== "tool" ? ` · ${short(body)}` : ""}`, body: body || (calls.length ? `Called ${calls.join(", ")}` : "(no text)") });
   }
   return steps.slice(-80);
@@ -79,8 +81,8 @@ export class RunningWorkView {
       if (this.detail) { this.stepIndex = Math.max(0, Math.min(this.steps(items.find(item => item.id === this.selectedId)).length - 1, this.stepIndex + delta)); this.scroll = 0; }
       else { const index = items.findIndex(item => item.id === this.selectedId); this.selectedId = items[Math.max(0, Math.min(items.length - 1, index + delta))]?.id; }
     } else if (matchesKey(data, "enter") && !this.detail && items.length) { this.detail = true; this.stepIndex = 0; this.scroll = 0; }
-    else if (matchesKey(data, "pageDown")) this.scroll += 10;
-    else if (matchesKey(data, "pageUp")) this.scroll = Math.max(0, this.scroll - 10);
+    else if (this.detail && matchesKey(data, "pageDown")) this.scroll += 10;
+    else if (this.detail && matchesKey(data, "pageUp")) this.scroll = Math.max(0, this.scroll - 10);
     this.tui.requestRender();
   }
   private steps(item?: RunningWorkItem): ConversationStep[] {
