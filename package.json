@@ -27,7 +27,6 @@
       "extensions/system-inspector/index.ts",
       "extensions/system-prompts/index.ts",
       "extensions/swarm-context/index.ts",
-      "extensions/mandatory-compaction/index.ts",
       "extensions/swarm-disk-hooks/index.ts",
       "extensions/project-init/index.ts",
       "extensions/annoyed/index.ts",

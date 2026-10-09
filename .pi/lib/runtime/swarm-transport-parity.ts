@@ -17,7 +17,9 @@
  *                   `max_completion_tokens` unless `compat.maxTokensField`.
  *  - store          Swarm never sends `store`; Pi sends `store: false` when
  *                   `compat.supportsStore` is truthy.
- *  - temperature    Swarm always sends `temperature: 0`.
+ *  - temperature    Swarm omits temperature. Claude models such as
+ *                   claude-haiku-5-5 reject it with a 400 ("`temperature` is
+ *                   deprecated for this model"), and the TUI path already omits it.
  *  - reasoning_effort Swarm always sends `reasoning_effort: "high"`.
  *                   Both ride on `model.samplingParams`, which the provider
  *                   `Object.assign`s onto the request.
@@ -31,7 +33,6 @@
  *                   payload right before it is serialised.
  */
 
-export const SWARM_TEMPERATURE = 0;
 export const SWARM_REASONING_EFFORT = "high";
 /**
  * Interactive TUI sampling differs from `swarm -p`: the agent request carries
@@ -163,7 +164,7 @@ export function applySwarmModelCompat(model: ModelLike | undefined, mode: Transp
   const ownedKeys = new Set(OWNED_SAMPLING.get(model) ?? []);
   const samplingDefaults: Record<string, unknown> = mode.interactive
     ? { reasoning_effort: SWARM_TUI_REASONING_EFFORT }
-    : { temperature: SWARM_TEMPERATURE, reasoning_effort: SWARM_REASONING_EFFORT };
+    : { reasoning_effort: SWARM_REASONING_EFFORT };
   let samplingChanged = false;
   // Drop values this function set for the other mode (a session can flip
   // hasUI between headless and interactive only across processes, but keep

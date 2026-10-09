@@ -117,10 +117,6 @@ export default function swarmBtw(pi: ExtensionAPI) {
 			};
 			view = new BtwView(tui, theme, () => entries, () => active, (question) => void ask(ctx, question), () => { void side?.abort(); }, () => closeView?.());
 			return view;
-		}, {
-			overlay: true,
-			overlayOptions: { width: "78%", minWidth: 48, maxHeight: "78%", anchor: "top-center", margin: { top: 1, left: 2, right: 2 } },
-			onHandle: () => undefined,
 		}).catch((error) => {
 			if (overlayGeneration === generation) {
 				opening = false;

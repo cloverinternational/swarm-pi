@@ -1,3 +1,0 @@
-go test fuzz v1
-string("\x1b[0A0000000000000m")
-int(13)

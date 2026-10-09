@@ -85,7 +85,6 @@ registration behavior is not fully represented by factory-time inventory.
 | `system-inspector` | — | /system | before_agent_start, session_start |
 | `system-prompts` | — | /sp | — |
 | `swarm-context` | context_delete, context_index, context_inspect, context_outline, context_read, context_reindex, context_remember, context_search | /swarm-context | session_shutdown, session_start |
-| `mandatory-compaction` | — | — | turn_end |
 | `swarm-disk-hooks` | — | /swarm-disk-hooks | agent_settled, before_agent_start, input, message_end, message_update, session_before_compact, session_shutdown, session_start, tool_call, tool_result |
 | `project-init` | project_init | /init | agent_settled, input, message_end, message_update, session_before_compact, session_shutdown, session_start, tool_call |
 | `annoyed` | annoyed | /annoyed | session_shutdown |

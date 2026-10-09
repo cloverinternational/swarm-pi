@@ -1,5 +1,0 @@
-{
-  "apiVersion": "swarm.ai/v1alpha1",
-  "kind": "Harness",
-  "metadata": { "name": "already-current-fixture" }
-}
