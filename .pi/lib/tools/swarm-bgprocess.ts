@@ -20,6 +20,7 @@ export interface BackgroundLine {
 }
 interface ProcessRecord {
   id: string;
+  owner?: () => boolean;
   command: string;
   cwd: string;
   env: Record<string, string>;
@@ -197,6 +198,10 @@ export class SwarmBackgroundProcessManager {
 
   /** manager.go SetCompletionCallback/SetErrorCallback, already shaped like bgProcessDoneMsg. */
   onDone(listener: (done: BackgroundDone) => void): void { this.doneListeners.push(listener); }
+  /** Running-work writes from a process launched in a previous session are dropped. */
+  private captureOwner?: () => () => boolean;
+  setOwnerCapture(capture: () => () => boolean): void { this.captureOwner = capture; }
+  private ownsSession(rec?: ProcessRecord): boolean { return rec?.owner ? rec.owner() : true; }
   requestBackground(): boolean {
     if (!this.foreground || this.foreground.rec.state !== "running") return false;
     this.foreground.rec.backgrounded = true;
@@ -277,6 +282,7 @@ export class SwarmBackgroundProcessManager {
     let settleSpawn!: (error: Error | undefined) => void;
     const spawned = new Promise<Error | undefined>(r => { settleSpawn = r; });
     const rec: ProcessRecord = {
+      owner: this.captureOwner?.(),
       id, command, cwd: params.cwd ?? "", env, state: "running", child, pid: child.pid ?? 0,
       startedMs, lines: [], bytesWritten: 0, stdout: "", stderr: "", pendingStdout: [], pendingStderr: [], completion, spawned, backgrounded: false,
     };
@@ -284,7 +290,7 @@ export class SwarmBackgroundProcessManager {
     // The drawer inspects running commands live: drain any buffered chunks
     // first so Enter shows output written since the last 50ms poll tick.
     const readOutput = () => { this.poll(rec); return rec.lines.slice(-160).map(line => line.content).join("\n"); };
-    setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput });
+    if (this.ownsSession(rec)) setRunningWork({ id, kind: "bash", label: params.description || "Background Bash", status: "running", startedAt: startedMs, detail: command, readOutput });
     // Under a PTY the child sees one terminal, so stderr is interleaved into
     // stdout and every newline arrives as CRLF. Strip the CR so stored lines,
     // regex filters and byte counts match the non-PTY tiers.
@@ -326,7 +332,7 @@ export class SwarmBackgroundProcessManager {
       rec.signal = outcome.signal;
       rec.exitCode = outcome.exitCode;
       if (rec.state !== "cancelled") rec.state = rec.exitCode === 0 ? "completed" : "failed";
-      setRunningWork({ id: rec.id, kind: "bash", label: rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
+      if (this.ownsSession(rec)) setRunningWork({ id: rec.id, kind: "bash", label: rec.command, status: rec.state, startedAt: rec.startedMs, endedAt: rec.endedMs, detail: rec.command, output: rec.lines.slice(-12).map(line => line.content).join("\n") });
       finish();
       this.notifyTerminal(rec);
     };

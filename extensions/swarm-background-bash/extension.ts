@@ -12,6 +12,7 @@ import {
 import { bashCallComponent, bashResultComponent, formatBashCall } from "../../.pi/lib/tools/swarm-bash.ts";
 import { withDefaultToolRenderer } from "../../packages/runtime/core/src/tool-renderer.ts";
 import { onAgentSettled } from "../../.pi/lib/runtime/agent-settled.ts";
+import { createSessionWakeup } from "../../.pi/lib/runtime/session-wakeup.ts";
 
 type Pi = any;
 const registrations = new WeakSet<object>();
@@ -30,6 +31,8 @@ export function registerSwarmBackgroundBash(inputPi: Pi): void {
   registrations.add(identity);
   const pi = withSwarmToolSurface(inputPi);
   const manager = new SwarmBackgroundProcessManager();
+  // Session ownership only: this wakeup never sends, it just tracks the current session generation.
+  manager.setOwnerCapture(createSessionWakeup(pi).capture);
   (globalThis as any)[BACKGROUND_BASH_DETACH] = () => manager.requestBackground();
   managers.set(identity, manager);
   const text = (value: string, details: Record<string, unknown> = {}) => ({ content: [{ type: "text", text: value }], details });
